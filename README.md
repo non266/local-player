@@ -7,6 +7,8 @@ MP3 / FLAC / APE / WAV / AAC / M4A / OGG / Opus / WMA…… 以及外挂字幕�
 
 > 第一次接触这个程序？先读 **[docs/介绍.md](docs/介绍.md)**——那一篇是给人看的入口
 > （它是什么、在意的几件事、五分钟上手、功能总览、已知限制）。本文是完整参考手册。
+> **维护 / 发布**的规矩（每次改动的固定动作、已知问题分诊表、发版纪律）在
+> **[docs/维护手册.md](docs/维护手册.md)**。
 
 ---
 
@@ -612,6 +614,18 @@ dotnet SmokeTest.dll 歌词偏移      # 第 9 步（样本）+ 第 18 步：歌
 dotnet SmokeTest.dll 日志          # 第 19 步：诊断日志与错误处理
 dotnet SmokeTest.dll 设置方案      # 第 20 步：设置方案（多套设置 + 按组载入）
 ```
+
+**懒得记这几条命令就用一条命令版**（构建 Debug + Release、再跑全量，最后给摘要；
+本机默认策略禁止直接跑 `.ps1`，所以走 `-ExecutionPolicy Bypass`）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-check.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-check.ps1 -Filter 歌单   # 只跑某一块
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-check.ps1 -SkipSmoke     # 只构建
+```
+
+> 变异验证（把被测行为临时改错，确认测试以一句具体的话失败）不在脚本里——
+> 那要改源码，属于人做的一步。规矩见 [docs/维护手册.md](docs/维护手册.md) 第 2 节。
 
 > 筛选会把它依赖的前置检查一起带上（每项检查用 `Needs` 声明依赖），
 > 所以每一步都必须自己准备前置条件，不能偷偷依赖前面某一步留下的状态。

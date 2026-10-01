@@ -285,6 +285,21 @@ namespace SmokeTest
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
 
+        /// <summary>
+        /// 抢占一个全局热键（系统级）。
+        /// <para>
+        /// 用来验"媒体键被别人占了的时候，程序有没有说清是哪几个"：同一个虚拟键系统只允许
+        /// 一个窗口注册，所以测试先占住它，再开主窗体，那边必然少注册一个。
+        /// </para>
+        /// </summary>
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint virtualKey);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
         private static bool TryRender(Control control, int width, int height, out string error)
         {
             error = string.Empty;

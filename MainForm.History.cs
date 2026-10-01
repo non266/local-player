@@ -117,6 +117,9 @@ namespace 播放器
             if (!string.IsNullOrEmpty(_history.LoadWarning)) warnings.Add(_history.LoadWarning!);
             if (!string.IsNullOrEmpty(PlaylistLibraryWarning)) warnings.Add(PlaylistLibraryWarning!);
 
+            // 媒体键只注册上一部分时也要说一句：哪个键按了没反应，用户看不出来是被人占了
+            if (!string.IsNullOrEmpty(_mediaKeyWarning)) warnings.Add(_mediaKeyWarning!);
+
             if (warnings.Count == 0) return;
 
             SetStatus(string.Join(" ", warnings));

@@ -310,10 +310,10 @@ namespace 播放器
             _scanner.DurationFound -= OnDurationFound;
             _scanner.Dispose();
 
-            if (_registeredMediaKeys > 0)
+            if (_registeredMediaKeys.Count > 0)
             {
                 MediaKeys.Unregister(Handle);
-                _registeredMediaKeys = 0;
+                _registeredMediaKeys = Array.Empty<int>();
             }
 
             if (_desktopLyricsHotKeyRegistered)

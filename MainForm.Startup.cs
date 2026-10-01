@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using 播放器.Core;
 using 播放器.Ui;
@@ -292,6 +294,10 @@ namespace 播放器
 
             // 桌面歌词是独立的置顶窗口，和主窗口的布局无关，放这里恢复即可。
             RestoreDesktopLyrics();
+
+            // 界面上来了再核对"上次那些文件还在不在"：网络盘离线时它会卡在 SMB 超时上，
+            // 但那不该挡着窗口出来（见 RestoreSession 的说明）。
+            CheckRestoredFilesInBackground(_restoredSessionFiles);
         }
 
         /// <summary>
@@ -351,13 +357,25 @@ namespace 播放器
             return false;
         }
 
+        /// <summary>
+        /// 恢复上次退出时的播放列表。
+        /// <para>
+        /// <b>这里一次磁盘都不查</b>：以前对每个路径调 <c>MediaFormats.IsOpenable</c>（同步
+        /// <c>File.Exists</c>），而上次若是从已经离线的网络共享 / NAS 播的，每个路径都要等一次
+        /// SMB 超时（几十秒一个），表现就是"双击之后半天不出窗口"，而且那些条目还会被静默丢掉。
+        /// 现在先把列表<b>原样</b>恢复出来（窗口立刻出来），再由
+        /// <see cref="CheckRestoredFilesInBackground"/> 在后台核对，把打不开的标出来。
+        /// </para>
+        /// </summary>
         private void RestoreSession()
         {
             var files = _settings.LastPlaylist
-                .Where(p => !string.IsNullOrWhiteSpace(p) && MediaFormats.IsOpenable(p))
+                .Where(p => !string.IsNullOrWhiteSpace(p))
                 .ToList();
 
             if (files.Count == 0) return;
+
+            _restoredSessionFiles = files;
 
             _playlist.AddRange(files);
 
@@ -369,6 +387,83 @@ namespace 播放器
 
             if (_settings.LastPlaylistIndex >= 0 && _settings.LastPlaylistIndex < _playlist.Count)
                 _playlist.SetCurrent(_settings.LastPlaylistIndex);
+        }
+
+        /// <summary>
+        /// 后台核对"上次的播放列表"里那些文件现在还在不在。
+        /// <para>
+        /// 只做两件事：把打不开的条目<b>标出来</b>（和点了播放才发现时的标记完全一样），
+        /// 并在状态栏说一句总数。<b>不会移除条目</b>——网络盘只是暂时离线时，
+        /// 用户下次把盘挂上还能直接播；悄悄删掉才是真的丢东西。
+        /// </para>
+        /// <para>
+        /// 网络串流不查（它本来就没有"文件在不在"这回事）。
+        /// </para>
+        /// </summary>
+        private void CheckRestoredFilesInBackground(IReadOnlyList<string> files)
+        {
+            var candidates = files.Where(path => !MediaFormats.IsStreamUri(path)).ToList();
+
+            if (candidates.Count == 0) return;
+
+            Task.Run(() =>
+            {
+                var missing = new List<string>();
+
+                foreach (var path in candidates)
+                {
+                    try
+                    {
+                        if (!File.Exists(path)) missing.Add(path);
+                    }
+                    catch (Exception ex)
+                    {
+                        // 路径畸形之类：按"打不开"处理，但把原因记进日志
+                        missing.Add(path);
+                        AppLog.Swallowed("核对这条路径时出错，按打不开处理：" + path, ex);
+                    }
+                }
+
+                if (missing.Count == 0) return;
+
+                // 回到 UI 线程改列表与状态栏（这一步可能在窗口已经关掉之后才跑完）
+                try
+                {
+                    if (IsDisposed || !IsHandleCreated) return;
+
+                    BeginInvoke(new Action(() => MarkMissingRestoredFiles(missing)));
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Swallowed("窗口已经关了，这次核对结果就不标了。", ex);
+                }
+            });
+        }
+
+        /// <summary>把"现在打不开"的那几条在列表里标出来，并说一句总数。</summary>
+        private void MarkMissingRestoredFiles(IReadOnlyList<string> missing)
+        {
+            if (IsDisposed) return;
+
+            var set = new HashSet<string>(missing, StringComparer.OrdinalIgnoreCase);
+            var marked = 0;
+
+            foreach (var item in _playlist.Items)
+            {
+                if (!set.Contains(item.FilePath)) continue;
+                if (item.HasError && item.ErrorMessage == MissingFileMessage) continue;
+
+                item.HasError = true;
+                item.ErrorMessage = MissingFileMessage;
+                marked++;
+            }
+
+            if (marked == 0) return;
+
+            RefreshPlaylistView();
+
+            SetStatus($"上次的列表里有 {marked} 项现在打不开（网络盘离线或文件被移走），已经在列表里标出来了");
+            AppLog.Info($"启动核对：上次的播放列表里 {marked} 项打不开，已标记（共核对 {set.Count} 条路径）");
         }
 
         private void HandleStartupFiles()

@@ -69,6 +69,12 @@ namespace SmokeTest
                 // 关窗时"界面 → 设置"的那一段镜像，单独再摆一次状态验（它自己会还原设置）
                 if (!CheckSessionMirror()) return false;
 
+                // A1：启动恢复上次列表时不做同步磁盘查询，打不开的交给后台核对标出来
+                if (!CheckRestoreSessionOptimistic()) return false;
+
+                // A2：全局媒体键"哪几个没注册上"要说清是哪一个
+                if (!CheckMediaKeyReporting()) return false;
+
                 Log(6, "MainForm 显示 / 关闭正常（设置位置：" + AppSettings.SettingsFilePath + "）");
                 return true;
             }
@@ -718,6 +724,201 @@ namespace SmokeTest
                     + "表头也能点（一下升序 / 再点反向 / 第三下回原始顺序，方向箭头与菜单同步），"
                     + "点「#」表头直接回原始顺序");
             return true;
+        }
+
+        /// <summary>
+        /// A1：启动恢复上次的播放列表时<b>不做同步磁盘查询</b>。
+        /// <para>
+        /// 判据里不含计时（那会在慢机器上抖）：构造函数返回时，那条"已经不存在"的路径
+        /// <b>仍然在列表里</b>——旧实现在这一步同步 <c>File.Exists</c>，把它过滤掉了，
+        /// 而网络盘离线时每个路径还要等一次 SMB 超时（"双击之后半天不出窗口"）。
+        /// 打不开的条目改由后台核对标出来（同一个检查的后半段）。
+        /// </para>
+        /// </summary>
+        private static bool CheckRestoreSessionOptimistic()
+        {
+            var root = Path.Combine(AppContext.BaseDirectory, "smoke-session");
+            TryDeleteDirectory(root);
+            Directory.CreateDirectory(root);
+
+            var existing = Path.Combine(root, "在的.mp3");
+            File.WriteAllBytes(existing, new byte[] { 0x49, 0x44, 0x33, 3 });
+
+            var missing = Path.Combine(root, "不在的.mp3");
+            var stream = "http://127.0.0.1:9/连不上也不要紧.mp3";
+
+            var settings = AppSettings.Load();
+            var previousPlaylist = settings.LastPlaylist;
+            var previousIndex = settings.LastPlaylistIndex;
+
+            try
+            {
+                settings.LastPlaylist = new List<string> { existing, missing, stream };
+                settings.LastPlaylistIndex = -1;
+                settings.Save();
+
+                using (var form = new 播放器.MainForm(Array.Empty<string>()))
+                {
+                    var playlist = PlaylistOf(form);
+
+                    // 构造函数返回时三条都要在（含不存在的那条）
+                    if (playlist.Count != 3)
+                    {
+                        Log(6, $"启动恢复检查：构造函数返回时列表里有 {playlist.Count} 项，期望 3"
+                                + "（打不开的那条不该在启动时被过滤掉，也不该在启动时去查磁盘）");
+                        return false;
+                    }
+
+                    form.Show();
+                    PumpMessages(900);      // 等后台核对
+
+                    var missingItem = playlist.Items.FirstOrDefault(item => item.FilePath == missing);
+                    var existingItem = playlist.Items.FirstOrDefault(item => item.FilePath == existing);
+                    var streamItem = playlist.Items.FirstOrDefault(item => item.FilePath == stream);
+
+                    if (missingItem == null)
+                    {
+                        Log(6, "启动恢复检查：不存在的那条从列表里消失了");
+                        return false;
+                    }
+
+                    if (!missingItem.HasError || missingItem.ErrorMessage != "文件不存在或无法访问")
+                    {
+                        Log(6, "启动恢复检查：后台核对没有把打不开的那条标出来"
+                                + $"（HasError={missingItem.HasError}、原因「{missingItem.ErrorMessage ?? "（空）"}」）");
+                        return false;
+                    }
+
+                    if (existingItem == null || existingItem.HasError)
+                    {
+                        Log(6, "启动恢复检查：明明在的那条被标成了打不开");
+                        return false;
+                    }
+
+                    if (streamItem == null || streamItem.HasError)
+                    {
+                        Log(6, "启动恢复检查：网络串流被当成「文件不存在」标了（串流本来就不查磁盘）");
+                        return false;
+                    }
+
+                    if (!ReadStatus(form).Contains("打不开", StringComparison.Ordinal))
+                    {
+                        Log(6, $"启动恢复检查：标出来了但状态栏没说（「{ReadStatus(form)}」）");
+                        return false;
+                    }
+
+                    form.Close();
+                    PumpMessages(200);
+                }
+
+                Log(6, "启动恢复检查正常：上次的列表原样恢复（含已经打不开的那条、不做同步磁盘查询），"
+                        + "打不开的由后台核对标出来并在状态栏说明，在的与网络串流都不误标");
+                return true;
+            }
+            finally
+            {
+                // 这一步改过设置文件里的"上次列表"，必须还原：
+                // 后面的步骤会从设置里恢复会话，留着这几条（其中一条不存在）会污染别人
+                var restore = AppSettings.Load();
+                restore.LastPlaylist = previousPlaylist;
+                restore.LastPlaylistIndex = previousIndex;
+                restore.Save();
+
+                TryDeleteDirectory(root);
+            }
+        }
+
+        /// <summary>
+        /// A2：全局媒体键"哪几个没注册上"要写清名字。
+        /// <para>
+        /// 两段：纯函数（缺哪几个就点哪几个的名字）+ <b>真实那条路</b>——测试自己先用
+        /// <c>RegisterHotKey</c> 占住其中一个键（同一个虚拟键系统只允许一个窗口注册），
+        /// 再开主窗体，它必然少注册一个，必须报出那一个的名字。
+        /// </para>
+        /// </summary>
+        private static bool CheckMediaKeyReporting()
+        {
+            var all = MediaKeys.Requested.Select(key => key.Id).ToList();
+
+            if (MediaKeys.DescribeMissing(all) != null)
+            {
+                Log(6, "媒体键检查：四个都注册上了，却说有没注册上的");
+                return false;
+            }
+
+            var target = MediaKeys.Requested[2];        // 下一首
+            var withoutTarget = all.Where(id => id != target.Id).ToList();
+
+            if (MediaKeys.DescribeMissing(withoutTarget) is not { } partial ||
+                !partial.Contains(target.Name, StringComparison.Ordinal))
+            {
+                Log(6, $"媒体键检查：缺了「{target.Name}」但提示里没写出名字"
+                        + $"（「{MediaKeys.DescribeMissing(withoutTarget) ?? "（什么都没有）"}」）");
+                return false;
+            }
+
+            if (MediaKeys.DescribeMissing(Array.Empty<int>()) is not { } none ||
+                !none.Contains("一个都没注册上", StringComparison.Ordinal))
+            {
+                Log(6, "媒体键检查：一个都没注册上时，提示没写清是全部失败");
+                return false;
+            }
+
+            // 注册发生在建句柄的时候（InitializeSystemIntegration），所以先把开关写进设置
+            var settings = AppSettings.Load();
+            settings.GlobalMediaKeys = true;
+            settings.Save();
+
+            using var probe = new Form { ShowInTaskbar = false, Opacity = 0 };
+            probe.Show();
+            PumpMessages(150);
+
+            const int probeHotKeyId = 0x7F01;   // 测试自己的 id，和媒体键的 0x9E0x 段不冲突
+
+            if (!RegisterHotKey(probe.Handle, probeHotKeyId, 0, (uint)target.VirtualKey))
+            {
+                Log(6, $"媒体键检查：「{target.Name}」在这台机器上已经被别的程序占着，"
+                        + "抢占那条路这次跳过（纯函数那几条照旧生效）");
+                return true;
+            }
+
+            try
+            {
+                using var victim = new 播放器.MainForm(Array.Empty<string>());
+
+                victim.Show();
+                PumpMessages(450);
+
+                var warning = victim.MediaKeyWarning;
+
+                if (victim.RegisteredMediaKeys.Contains(target.Id))
+                {
+                    Log(6, $"媒体键检查：明明被测试占着，「{target.Name}」却被算成注册成功了");
+                    return false;
+                }
+
+                if (warning == null || !warning.Contains(target.Name, StringComparison.Ordinal))
+                {
+                    Log(6, "媒体键检查：自己占住一个媒体键之后，主窗体没有说清是哪一个没注册上"
+                            + $"（提示「{warning ?? "（什么都没有）"}」、成功 {victim.RegisteredMediaKeys.Count}/4）");
+                    return false;
+                }
+
+                // 关窗会注销掉那些键，所以这个数要在关之前取
+                var registeredCount = victim.RegisteredMediaKeys.Count;
+
+                victim.Close();
+                PumpMessages(200);
+
+                Log(6, $"媒体键检查正常：占住「{target.Name}」之后主窗体报出了它的名字"
+                        + $"（当时成功注册 {registeredCount}/4，提示："
+                        + (warning.Length > 60 ? warning.Substring(0, 60) + "…" : warning) + "）");
+                return true;
+            }
+            finally
+            {
+                UnregisterHotKey(probe.Handle, probeHotKeyId);
+            }
         }
 
         private static List<string> ReadTitles(ListView listView)

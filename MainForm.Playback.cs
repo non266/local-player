@@ -59,6 +59,12 @@ namespace 播放器
                 var candidate = (index + offset) % _playlist.Count;
                 var item = _playlist.Items[candidate];
 
+                // 启动时后台核对已经标成"打不开"的条目直接跳过：网络盘离线时，
+                // 每个 File.Exists 都可能卡到 SMB 超时，列表里几百条的时候
+                // 按一次播放能把界面冻住好几分钟。串流不适用（它本来就不查磁盘）。
+                if (!item.IsStream && item.HasError && item.ErrorMessage == MissingFileMessage)
+                    continue;
+
                 if (!MediaFormats.IsOpenable(item.FilePath))
                 {
                     if (!item.HasError || item.ErrorMessage != MissingFileMessage)

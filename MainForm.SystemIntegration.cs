@@ -82,18 +82,27 @@ namespace 播放器
 
             if (enabled)
             {
-                if (_registeredMediaKeys > 0) return;
+                if (_registeredMediaKeys.Count > 0) return;
 
                 _registeredMediaKeys = MediaKeys.Register(Handle);
-                if (_registeredMediaKeys == 0)
-                    SetStatus("全局媒体键注册失败：可能已被其它播放器占用");
+
+                // 缺一个也要说清是哪个：以前只报"成功几个"，4 个里成了 3 个时界面什么都不说，
+                // 那一个键按下去没反应，用户只会以为程序坏了。
+                _mediaKeyWarning = MediaKeys.DescribeMissing(_registeredMediaKeys);
+
+                if (_mediaKeyWarning != null)
+                {
+                    AppLog.Info(_mediaKeyWarning);
+                    SetStatus(_mediaKeyWarning);
+                }
             }
             else
             {
-                if (_registeredMediaKeys == 0) return;
+                if (_registeredMediaKeys.Count == 0) return;
 
                 MediaKeys.Unregister(Handle);
-                _registeredMediaKeys = 0;
+                _registeredMediaKeys = Array.Empty<int>();
+                _mediaKeyWarning = null;
             }
         }
 
@@ -149,7 +158,7 @@ namespace 播放器
             _settings.GlobalMediaKeys = menuGlobalMediaKeys.Checked;
             ApplyGlobalMediaKeys(menuGlobalMediaKeys.Checked);
 
-            if (menuGlobalMediaKeys.Checked && _registeredMediaKeys == 0)
+            if (menuGlobalMediaKeys.Checked && _registeredMediaKeys.Count == 0)
                 return;   // 上面已经提示过失败原因
 
             SetStatus(menuGlobalMediaKeys.Checked ? "已启用全局媒体键" : "已停用全局媒体键");

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using 播放器.Core;
@@ -33,6 +34,9 @@ namespace 播放器
         private const string MissingFileMessage = "文件不存在或无法访问";
 
         private readonly string[] _startupArgs;
+
+        /// <summary>上次退出时的播放列表（原样恢复出来的那份，交给后台核对可用性）。</summary>
+        private IReadOnlyList<string> _restoredSessionFiles = Array.Empty<string>();
 
         /// <summary>
         /// 当前这套设置。
@@ -76,7 +80,22 @@ namespace 播放器
 
         private TaskbarThumbnailButtons? _taskbarButtons;
 
-        private int _registeredMediaKeys;
+        /// <summary>
+        /// 真正注册成功的全局媒体键 id。
+        /// <para>
+        /// 记的是<b>具体哪几个</b>而不是个数：媒体键是独占资源，缺的那几个要说得出名字
+        /// （见 <see cref="Ui.MediaKeys.DescribeMissing"/>）。
+        /// </para>
+        /// </summary>
+        private IReadOnlyList<int> _registeredMediaKeys = Array.Empty<int>();
+
+        /// <summary>媒体键没注册全时的说明（启动时并进 <c>ReportLoadWarnings</c> 一起显示）。</summary>
+        private string? _mediaKeyWarning;
+
+        /// <summary>只读入口：媒体键的提示与结果（给冒烟测试用）。</summary>
+        internal string? MediaKeyWarning => _mediaKeyWarning;
+
+        internal IReadOnlyList<int> RegisteredMediaKeys => _registeredMediaKeys;
 
         // ---- 帮助菜单里与诊断有关的三项 --------------------------------------
         private ToolStripMenuItem? _menuViewLog;

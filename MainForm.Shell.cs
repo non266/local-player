@@ -153,7 +153,9 @@ namespace 播放器
                 libVlcVersion = "未知";
             }
 
-            var version = typeof(MainForm).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+            // 版本号只有 csproj 里那一个来源；取不到就照实说"未知版本"，
+            // 不要在这里再写一个数字——那种兜底值迟早和 csproj 对不上（还很难发现）。
+            var version = typeof(MainForm).Assembly.GetName().Version?.ToString() ?? "未知版本";
 
             var text =
                 $"全能本地播放器  {version}\n\n" +

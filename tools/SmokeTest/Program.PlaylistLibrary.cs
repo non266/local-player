@@ -1061,9 +1061,138 @@ namespace SmokeTest
             return true;
         }
 
+        /// <summary>
+        /// B1：多选之后按钮该变的要变——载入 / 追加 / 重命名 是"针对一份歌单"的动作，
+        /// 选了两份以上就点不动；删除支持多选，按钮上写着会删几个。
+        /// </summary>
+        private static bool CheckPlaylistMultiSelect(ListView list, List<Button> buttons)
+        {
+            if (!list.MultiSelect)
+            {
+                Log(17, "歌单窗口检查：列表不能多选（批量删除要靠它）");
+                return false;
+            }
+
+            var loadButton = buttons.FirstOrDefault(button => button.Text.Contains("载入", StringComparison.Ordinal));
+            var deleteButton = buttons.FirstOrDefault(button => button.Text.Contains("删除", StringComparison.Ordinal));
+
+            if (loadButton == null || deleteButton == null)
+            {
+                Log(17, "歌单窗口检查：找不到载入 / 删除按钮");
+                return false;
+            }
+
+            foreach (ListViewItem row in list.Items) row.Selected = true;
+            PumpMessages(150);
+
+            var count = list.SelectedItems.Count;
+
+            if (count < 2 || loadButton.Enabled || !deleteButton.Enabled ||
+                !deleteButton.Text.Contains($"{count} 个", StringComparison.Ordinal))
+            {
+                Log(17, "歌单窗口检查：多选之后按钮状态不对"
+                        + $"（选了 {count} 项、载入 {(loadButton.Enabled ? "能点" : "是灰的")}、"
+                        + $"删除按钮「{deleteButton.Text}」）");
+                return false;
+            }
+
+            // 恢复成"只选一行"，后面的检查按单选走
+            list.SelectedItems.Clear();
+            list.Items[0].Selected = true;
+            PumpMessages(120);
+
+            if (!loadButton.Enabled || !deleteButton.Enabled)
+            {
+                Log(17, "歌单窗口检查：恢复单选之后按钮没有回到可点状态");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// B1：多选之后一次删掉几个。<b>放在歌单窗口检查的最后</b>——它真的会删库里的歌单。
+        /// 要验两件事：一次删掉选中的那几个（当前歌单不受影响），
+        /// 以及删掉的正好是当前歌单时、交回主窗体的关联要断开。
+        /// </summary>
+        private static bool CheckPlaylistBatchDelete(PlaylistLibraryDialog dialog, ListView list)
+        {
+            var others = list.Items.Cast<ListViewItem>()
+                .Where(row => !row.SubItems[0].Text.StartsWith("●", StringComparison.Ordinal))
+                .ToList();
+
+            if (others.Count < 2)
+            {
+                Log(17, "歌单窗口检查：批量删除至少要两份非当前歌单"
+                        + $"（列表里一共 {list.Items.Count} 行、其中非当前 {others.Count} 行）");
+                return false;
+            }
+
+            var targets = others.Take(2)
+                .Select(row => row.SubItems[0].Text.Replace("● ", string.Empty))
+                .ToList();
+
+            list.SelectedItems.Clear();
+            others[0].Selected = true;
+            others[1].Selected = true;
+            PumpMessages(150);
+
+            var deleted = dialog.DeleteSelected(confirm: false);
+            PumpMessages(150);
+
+            if (deleted != 2)
+            {
+                Log(17, $"歌单窗口检查：选了两份歌单，批量删除只删掉 {deleted} 个");
+                return false;
+            }
+
+            foreach (var name in targets)
+            {
+                if (!PlaylistLibrary.Exists(name)) continue;
+
+                Log(17, $"歌单窗口检查：批量删除之后「{name}」还在库里");
+                return false;
+            }
+
+            if (dialog.Result.CurrentName == null)
+            {
+                Log(17, "歌单窗口检查：删的不是当前歌单，关联却被断开了");
+                return false;
+            }
+
+            // 再把当前那一份删掉：这次关联必须断开
+            var current = list.Items.Cast<ListViewItem>()
+                .FirstOrDefault(row => row.SubItems[0].Text.StartsWith("●", StringComparison.Ordinal));
+
+            if (current == null)
+            {
+                Log(17, "歌单窗口检查：批量删除之后「当前歌单」那一行不见了");
+                return false;
+            }
+
+            list.SelectedItems.Clear();
+            current.Selected = true;
+            PumpMessages(120);
+
+            if (dialog.DeleteSelected(confirm: false) != 1 || dialog.Result.CurrentName != null)
+            {
+                Log(17, "歌单窗口检查：删掉当前歌单之后关联没有断开");
+                return false;
+            }
+
+            Log(17, "歌单窗口多选正常：能多选、多选时载入 / 追加 / 重命名点不动、删除按钮写着会删几个，"
+                    + "一次确认删掉两个（当前歌单不受影响），删掉当前那份之后关联断开");
+            return true;
+        }
+
         /// <summary>歌单窗口：一次列出全部歌单、标出当前那份、选一个载入。</summary>
         private static bool CheckPlaylistLibraryDialog()
         {
+            // 批量删除那一段要"至少两份非当前歌单"才验得动，而歌单库在这一步里已经被前面几段
+            // 改过（数量不能假定），所以这里先补两个空的进去
+            PlaylistLibrary.Save("批量删除 A", new List<PlaylistItem>());
+            PlaylistLibrary.Save("批量删除 B", new List<PlaylistItem>());
+
             var dialog = new PlaylistLibraryDialog("给主窗体看的歌单");
 
             using (dialog)
@@ -1137,6 +1266,9 @@ namespace SmokeTest
                     return false;
                 }
 
+                // ---- B1：多选与批量删除 ----
+                if (!CheckPlaylistMultiSelect(list, buttons)) return false;
+
                 var scale = dialog.DeviceDpi / 96f;
 
                 foreach (Control control in dialog.Controls)
@@ -1148,6 +1280,10 @@ namespace SmokeTest
                             + $"{control.GetType().Name} {control.Bounds} 超出客户区 {dialog.ClientSize}");
                     return false;
                 }
+
+                // ---- B1：一次删掉几个 ----
+                // 必须放在"选一份载入"之前：那一步会把窗口关掉（列表就空了）
+                if (!CheckPlaylistBatchDelete(dialog, list)) return false;
 
                 // 选另一份歌单 → 载入：结果里应当是它的名字，而且是"替换"
                 var other = list.Items.Cast<ListViewItem>()
@@ -1176,7 +1312,7 @@ namespace SmokeTest
 
             Log(17, "歌单窗口正常：一次列出全部歌单（顺序与库里一致）、当前那份带「●」标记、"
                     + "曲目数与最后修改时间都在，载入 / 追加 / 新建 / 重命名 / 删除 / 打开文件夹都能点，"
-                    + "选一份载入会把它交回主窗体，控件没有越界");
+                    + "多选能一次删掉几个，选一份载入会把它交回主窗体，控件没有越界");
             return true;
         }
     }

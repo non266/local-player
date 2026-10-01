@@ -124,10 +124,14 @@ namespace 播放器.Ui
         {
             _hint.AutoSize = true;
             _hint.Text = "歌单存在数据目录的「播放列表」文件夹里，一个歌单一个 m3u8 文件。"
-                         + "双击一行就能载入；外面的 m3u / m3u8 也可以直接拖进来收进歌单库。";
+                         + "双击一行就能载入；按住 Ctrl / Shift 可以多选，多选之后「删除」会一次删掉这几个。"
+                         + "外面的 m3u / m3u8 也可以直接拖进来收进歌单库。";
             _list.View = View.Details;
             _list.FullRowSelect = true;
-            _list.MultiSelect = false;
+
+            // 多选只为"批量删除"：载入 / 追加 / 重命名 都是针对一份歌单的动作，
+            // 多选时它们会点不动（见 OnSelectionChanged）
+            _list.MultiSelect = true;
             _list.HideSelection = false;
             _list.HeaderStyle = ColumnHeaderStyle.Nonclickable;
             _list.ShowItemToolTips = true;
@@ -158,7 +162,7 @@ namespace 播放器.Ui
             _renameButton.Click += (s, e) => RenameSelected();
 
             _deleteButton.Text = "删除";
-            _deleteButton.Click += (s, e) => DeleteSelected();
+            _deleteButton.Click += (s, e) => DeleteSelected(confirm: true);
 
             _folderButton.Text = "打开歌单文件夹";
             _folderButton.Click += (s, e) => OpenFolder();
@@ -310,6 +314,19 @@ namespace 播放器.Ui
         private SavedPlaylist? SelectedPlaylist() =>
             _list.SelectedItems.Count > 0 ? _list.SelectedItems[0].Tag as SavedPlaylist : null;
 
+        /// <summary>选中的那几份（按列表顺序）；多选时只有"删除"用得上。</summary>
+        private List<SavedPlaylist> SelectedPlaylists()
+        {
+            var selected = new List<SavedPlaylist>();
+
+            foreach (ListViewItem row in _list.SelectedItems)
+            {
+                if (row.Tag is SavedPlaylist playlist) selected.Add(playlist);
+            }
+
+            return selected;
+        }
+
         private bool IsCurrent(string name) =>
             _result.CurrentName != null &&
             string.Equals(name, _result.CurrentName, StringComparison.CurrentCultureIgnoreCase);
@@ -318,12 +335,16 @@ namespace 播放器.Ui
         {
             _note = null;
 
-            var selected = SelectedPlaylist();
+            var count = _list.SelectedItems.Count;
 
-            _loadButton.Enabled = selected != null;
-            _appendButton.Enabled = selected != null;
-            _renameButton.Enabled = selected != null;
-            _deleteButton.Enabled = selected != null;
+            // 载入 / 追加 / 重命名 针对"一份歌单"：选了两份以上就点不动（点哪一个都不明确）
+            _loadButton.Enabled = count == 1;
+            _appendButton.Enabled = count == 1;
+            _renameButton.Enabled = count == 1;
+
+            // 删除支持多选：选中几个就删几个，按钮上直接写出个数
+            _deleteButton.Enabled = count > 0;
+            _deleteButton.Text = count > 1 ? $"删除选中的 {count} 个" : "删除";
 
             UpdateDetail();
         }
@@ -463,34 +484,69 @@ namespace 播放器.Ui
             UpdateDetail();
         }
 
-        private void DeleteSelected()
+        /// <summary>
+        /// 删除选中的歌单（支持多选）：<b>一次确认，逐个删</b>，删不掉的说清是哪一个、为什么。
+        /// <para>返回真的删掉了几个。<paramref name="confirm"/> 为 false 时不弹确认框（给冒烟测试用）。</para>
+        /// </summary>
+        internal int DeleteSelected(bool confirm)
         {
-            var selected = SelectedPlaylist();
-            if (selected == null) return;
+            var selected = SelectedPlaylists();
+            if (selected.Count == 0) return 0;
 
-            var answer = MessageBox.Show(
-                this,
-                $"要删除歌单「{selected.Name}」吗？\n\n"
-                + "（只删这个歌单文件，里面的歌曲、视频一个都不会动。）",
-                "删除歌单",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
-
-            if (answer != DialogResult.Yes) return;
-
-            if (!PlaylistLibrary.Delete(selected.Name, out var error))
+            if (confirm)
             {
-                MessageBox.Show(this, error, "删除歌单失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                var what = selected.Count == 1
+                    ? $"要删除歌单「{selected[0].Name}」吗？"
+                    : $"要删除这 {selected.Count} 个歌单吗？\n\n"
+                      + string.Join("\n", selected.Select(playlist => "· " + playlist.Name));
+
+                var answer = MessageBox.Show(
+                    this,
+                    what + "\n\n（只删这些歌单文件，里面的歌曲、视频一个都不会动。）",
+                    "删除歌单",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (answer != DialogResult.Yes) return 0;
             }
 
-            if (IsCurrent(selected.Name)) _result.CurrentName = null;
+            var deleted = new List<string>();
+            var failures = new List<string>();
+
+            foreach (var playlist in selected)
+            {
+                if (PlaylistLibrary.Delete(playlist.Name, out var error)) deleted.Add(playlist.Name);
+                else failures.Add($"「{playlist.Name}」：{error}");
+            }
+
+            if (deleted.Count == 0)
+            {
+                MessageBox.Show(this, string.Join("\n", failures), "删除歌单失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                return 0;
+            }
+
+            // 删掉的正好是"当前歌单"时，主窗体的关联要跟着断开
+            if (deleted.Any(IsCurrent)) _result.CurrentName = null;
 
             _result.Changed = true;
             Reload();
 
-            _note = $"已删除歌单「{selected.Name}」。";
+            _note = deleted.Count == 1
+                ? $"已删除歌单「{deleted[0]}」。"
+                : $"已删除 {deleted.Count} 个歌单：{string.Join("、", deleted)}。";
+
+            if (failures.Count > 0)
+            {
+                _note += $" 另有 {failures.Count} 个没删掉：{string.Join("；", failures)}";
+
+                MessageBox.Show(this, string.Join("\n", failures), "部分歌单没删掉",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
             UpdateDetail();
+            return deleted.Count;
         }
 
         private void OpenFolder()

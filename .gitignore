@@ -1,0 +1,32 @@
+# 生成目录
+bin/
+obj/
+
+# 冒烟测试工程的生成目录
+tools/SmokeTest/bin/
+tools/SmokeTest/obj/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+
+# 生成物
+*.pdb
+*.dll
+*.exe
+
+# 保留：源码与工程文件不受上面的 *.dll/*.exe 影响（它们本就不在源码树里）
+!tools/**/*.csproj
+
+# 播放器截图
+截图/
+
+# 打包产物与临时日志（发布用的 zip、调试留下的 log 都不该进仓库）
+*.zip
+*.7z
+*.log

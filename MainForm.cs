@@ -1,0 +1,175 @@
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+using 播放器.Core;
+using 播放器.Ui;
+
+namespace 播放器
+{
+    /// <summary>
+    /// 主窗口：经典 WinForms 布局（菜单 + 工具栏 + 视频区 + 播放列表 + 状态栏）。
+    /// <para>播放控制集中在 <see cref="PlayerEngine"/>，播放列表模型在 <see cref="Playlist"/>，
+    /// 本类负责把两者接到界面上。</para>
+    /// <para>
+    /// 这个类按职责拆在多个文件里（<c>MainForm.*.cs</c>）：启动与设置、播放控制、字幕与轨道、
+    /// 文件与截图、窗口形态、界面计时、引擎事件、系统集成、快捷键、外壳（状态栏 / 帮助 / 退出）。
+    /// 这份只管字段与构造。
+    /// </para>
+    /// </summary>
+    public partial class MainForm : Form
+    {
+        private const int SeekBarResolution = 1000;
+
+        private const long SeekStepMilliseconds = 5000;
+
+        private const int MaxConsecutiveErrors = 5;
+
+        private const int DefaultPlaylistPanelWidth = 320;
+
+        /// <summary>任务栏缩略图按钮的图标尺寸。取大一点，高 DPI 下缩放更清晰。</summary>
+        private const int TaskbarIconSize = 32;
+
+        /// <summary>找不到文件时的固定提示。用常量比较，避免每次顺延都重复标记、重复刷列表。</summary>
+        private const string MissingFileMessage = "文件不存在或无法访问";
+
+        private readonly string[] _startupArgs;
+
+        /// <summary>
+        /// 当前这套设置。
+        /// <para>
+        /// <b>不是 readonly</b>：载入设置方案时要整份换成"当前设置 + 方案里选中的那几组"
+        /// 合并出来的新对象（见 <c>MainForm.SettingsProfiles.cs</c>）。
+        /// 全工程只有这一个地方持有设置对象——别的类都只读它的字段值，所以换掉它不会留下旧引用。
+        /// </para>
+        /// </summary>
+        private AppSettings _settings;
+
+        /// <summary>
+        /// 只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。
+        /// <para>
+        /// 测试要摆各种设置场景（开 / 关在线获取、换服务地址、损坏的 JSON……），
+        /// 以前靠反射挖 <c>_settings</c>。现在是同一个对象，只是不用再挖。
+        /// </para>
+        /// </summary>
+        internal AppSettings Settings => _settings;
+
+        private readonly PlayerEngine _engine;
+
+        private readonly Playlist _playlist = new Playlist();
+
+        /// <summary>
+        /// 只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。
+        /// <para>测试要摆"列表里有哪些项"的场景，以前靠反射挖 <c>_playlist</c>；
+        /// 模型本身（<see cref="Playlist"/>）没打算搬家，那就别再让测试挖字段。</para>
+        /// </summary>
+        internal Playlist Playlist => _playlist;
+
+        private readonly DurationScanner _scanner;
+
+        private readonly System.Windows.Forms.Timer _uiTimer;
+
+        private readonly System.Windows.Forms.Timer _skipTimer;
+
+        private readonly Random _random = new Random();
+
+        private readonly Font _playingItemFont;
+
+        private TaskbarThumbnailButtons? _taskbarButtons;
+
+        private int _registeredMediaKeys;
+
+        // ---- 帮助菜单里与诊断有关的三项 --------------------------------------
+        private ToolStripMenuItem? _menuViewLog;
+
+        private ToolStripMenuItem? _menuOpenLogFile;
+
+        private ToolStripMenuItem? _menuLogEnabled;
+
+        // ---- 给冒烟测试的只读入口（主工程里有 InternalsVisibleTo("SmokeTest")）----
+        // 测试以前靠反射按名字挖这些成员，一改名断言就静默空转（真踩过）。
+        // 换成有名字的入口之后，改名由编译器管。
+        internal ToolStripMenuItem? MenuViewLog => _menuViewLog;
+
+        internal ToolStripMenuItem? MenuOpenLogFile => _menuOpenLogFile;
+
+        internal ToolStripMenuItem? MenuLogEnabled => _menuLogEnabled;
+
+        /// <summary>状态栏那一行字（测试报失败时连同它一起说出来）。</summary>
+        internal string StatusText => lblStatus.Text ?? string.Empty;
+
+        /// <summary>桌面歌词解锁热键（Ctrl+Alt+D）是否注册上了。</summary>
+        private bool _desktopLyricsHotKeyRegistered;
+
+        private FullscreenState? _fullscreenState;
+
+        private bool _isFullscreen;
+
+        private bool _userSeeking;
+
+        private bool _suppressSeekEvent;
+
+        private bool _suspendUiEvents;
+
+        private bool _disposed;
+
+        private int _consecutiveErrors;
+
+        public MainForm(string[]? startupArgs, SingleInstance? singleInstance = null)
+        {
+            InitializeComponent();
+
+            _startupArgs = startupArgs ?? Array.Empty<string>();
+            _settings = AppSettings.Load();
+
+            AttachSingleInstance(singleInstance);
+
+            _engine = new PlayerEngine(this);
+            videoView.MediaPlayer = _engine.Player;
+
+            _scanner = new DurationScanner(_engine.LibVlc);
+            _scanner.DurationFound += OnDurationFound;
+
+            _uiTimer = new System.Windows.Forms.Timer { Interval = 200 };
+            _uiTimer.Tick += OnUiTimerTick;
+
+            // 播放失败时延后一点再跳到下一个，避免在 VLC 回调里立刻切媒体。
+            _skipTimer = new System.Windows.Forms.Timer { Interval = 600 };
+            _skipTimer.Tick += OnSkipTimerTick;
+
+            _playingItemFont = new Font(listViewPlaylist.Font, FontStyle.Bold);
+
+            ConfigureToolStrips();
+            ConfigureMetadataMenus();
+            ConfigureSettingsProfileMenu();
+
+            // 主题要在接线之前应用：它同时决定配色与工具栏图标（深色主题需要浅色图标）。
+            ApplyTheme(_settings.Theme);
+            _themeReady = true;
+
+            WireEvents();
+            ApplySettings();
+            InitializeTray();
+
+            // 恢复会话时列表会被填上/重排，那不是"用户刚改了歌单"，
+            // 所以这一段不标记「未保存」（见 MarkPlaylistModified）。
+            // 命令行/拖进来的文件发生在这一段之外，正常标记。
+            _playlists.SuppressModified = true;
+            try
+            {
+                RestoreSession();
+            }
+            finally
+            {
+                _playlists.SuppressModified = false;
+            }
+
+            HandleStartupFiles();
+
+            UpdateTransportState();
+            UpdateWindowTitle();
+            SetStatus("就绪");
+            ReportLoadWarnings();
+            _uiTimer.Start();
+        }
+    }
+}

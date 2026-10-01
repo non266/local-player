@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>播放器</RootNamespace>
+    <AssemblyName>播放器</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AssemblyTitle>全能本地播放器</AssemblyTitle>
+    <Product>播放器</Product>
+    <Version>1.0.0</Version>
+    <Company></Company>
+    <NeutralLanguage>zh-CN</NeutralLanguage>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+
+    <!--
+      只复制 x64 那一套 libvlc。
+      VideoLAN.LibVLC.Windows 自带这三个开关，默认值是"按 $(Platform) 判断"：
+        VlcWindowsX64Enabled   ← Platform == x64 或 AnyCPU
+        VlcWindowsX86Enabled   ← Platform == x86 或 AnyCPU
+        VlcWindowsArm64Enabled ← Platform == ARM64 或 AnyCPU
+      本项目写了 PlatformTarget=x64，但 $(Platform) 仍然是 SDK 默认的 AnyCPU，
+      于是三个条件同时成立，win-x64 / win-x86 / win-arm64 三套原生库全被复制进输出目录，
+      合计约 280 MB，其中 178 MB 永远用不上：x64 进程根本无法加载 I386 / ARM64 的 DLL
+      （实测三个 libvlc.dll 的 PE Machine 分别是 0x8664 / 0x14C / 0xAA64），
+      LibVLCSharp 也是按进程架构只挑 libvlc\win-<arch> 一个目录。
+
+      显式关掉另外两套之后，输出目录从 280 MB 降到约 101 MB。
+      这里用属性而不是"生成后再删目录"：后者每次增量生成都会把删掉的文件重新复制一遍。
+    -->
+    <VlcWindowsX64Enabled>true</VlcWindowsX64Enabled>
+    <VlcWindowsX86Enabled>false</VlcWindowsX86Enabled>
+    <VlcWindowsArm64Enabled>false</VlcWindowsArm64Enabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibVLCSharp" Version="3.10.1" />
+    <PackageReference Include="LibVLCSharp.WinForms" Version="3.10.1" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
+  </ItemGroup>
+
+  <!--
+    冒烟测试要读几个"内部状态"（当前曲目的标签 / 歌词 / 歌词偏移）。
+    以前它靠反射去挖私有字段，内部字段一改名测试就红——安全网反过来挡住了重构。
+    改成给测试开一个只读入口（MainForm.Track 等），并把测试程序集放进这里：
+    只多出"这一个程序集能看见 internal"，对运行时行为没有任何影响。
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="SmokeTest" />
+  </ItemGroup>
+
+  <!--
+    tools\SmokeTest 是独立的验证工程，不属于主程序。
+    默认通配符会把它（连同它自己的 obj/bin）当成主程序的源码，必须显式排除，
+    否则会出现"定义了多个入口点"的编译错误。
+  -->
+  <ItemGroup>
+    <Compile Remove="tools\**" />
+    <None Remove="tools\**" />
+    <EmbeddedResource Remove="tools\**" />
+    <Content Remove="tools\**" />
+  </ItemGroup>
+
+</Project>

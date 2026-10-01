@@ -1,0 +1,12 @@
+# 行尾统一成 LF：这个仓库里的文件本来就是 LF，不要让 git 在 Windows 上自动换成 CRLF，
+# 否则每次 checkout 都会把整棵树的行尾改一遍、diff 全是噪音。
+* text=auto eol=lf
+
+# 二进制：别做行尾转换
+*.ico binary
+*.png binary
+*.jpg binary
+*.ttf binary
+*.otf binary
+*.ttc binary
+*.zip binary

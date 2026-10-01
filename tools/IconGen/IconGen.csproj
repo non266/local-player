@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    一次性工具：生成仓库根目录的 app.ico（程序图标）。
+    app.ico 已经提交，平时不需要跑这个工程；改了图标画法之后重新执行一次即可：
+
+        dotnet run  -p  tools\IconGen\IconGen.csproj
+
+    UseWindowsForms=true 只是为了拿到 System.Drawing（Windows Desktop 框架自带），
+    不涉及任何界面。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>IconGen</AssemblyName>
+    <RootNamespace>IconGen</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+</Project>

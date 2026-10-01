@@ -177,6 +177,9 @@ namespace 播放器.Ui
         private int _opacityPercent = DesktopLyricsDefaults.Opacity;
         private bool _locked;
         private bool _showNextLine = true;
+
+        /// <summary>第二行优先显示译文（双语歌词），而不是下一句。</summary>
+        private bool _secondLineIsTranslation = true;
         private DesktopLyricsColor _colorChoice = DesktopLyricsColor.Theme;
         private Color _themeAccent = Color.FromArgb(0x4C, 0xC2, 0xFF);
 
@@ -353,6 +356,21 @@ namespace 播放器.Ui
                 if (_showNextLine == value) return;
 
                 _showNextLine = value;
+                ApplyContent();
+            }
+        }
+
+        /// <summary>
+        /// 第二行在有翻译时显示翻译（双语歌词：同一时间戳的原文 + 译文），而不是下一句。
+        /// </summary>
+        public bool SecondLineIsTranslation
+        {
+            get => _secondLineIsTranslation;
+            set
+            {
+                if (_secondLineIsTranslation == value) return;
+
+                _secondLineIsTranslation = value;
                 ApplyContent();
             }
         }
@@ -714,19 +732,42 @@ namespace 播放器.Ui
             return format;
         }
 
-        /// <summary>算出"当前句 / 下一句"两段文字，返回它们的拼装（用于判断有没有变化）。</summary>
+        /// <summary>算出"当前句 / 第二行"两段文字，返回它们的拼装（用于判断有没有变化）。</summary>
         private string BuildTexts()
         {
             if (_document.IsSynchronized)
             {
+                // LineIndexAt 给的是"同一时间戳那一组"的第一行（双语歌词里是原文）
                 var index = _document.LineIndexAt(_position);
 
                 _currentText = index < 0 ? IntroMark : Normalize(_document.Lines[index].Text);
 
                 _nextText = string.Empty;
-                _hasNext = _showNextLine && index + 1 < _document.Lines.Count;
+                _hasNext = false;
 
-                if (_hasNext) _nextText = Normalize(_document.Lines[index + 1].Text);
+                if (_showNextLine && index >= 0)
+                {
+                    // 双语歌词（同一时间戳的原文 + 译文）：第二行优先放译文——
+                    // 那才是"这一句"的另一半。想要"下一句"就把「有翻译时显示翻译」关掉。
+                    var companion = _secondLineIsTranslation ? _document.CompanionOf(index) : null;
+
+                    if (companion != null)
+                    {
+                        _nextText = Normalize(companion.Text);
+                        _hasNext = true;
+                    }
+                    else
+                    {
+                        // 注意要跳过整组：不能把译文当成"下一句"
+                        var next = _document.NextGroupStart(index);
+
+                        if (next >= 0)
+                        {
+                            _nextText = Normalize(_document.Lines[next].Text);
+                            _hasNext = true;
+                        }
+                    }
+                }
             }
             else if (_title != null)
             {

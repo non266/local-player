@@ -106,12 +106,13 @@ namespace SmokeTest
                     return false;
                 }
 
-                // 2) 从另一个线程挪一下光标：必须说"有人在动"
-                var moved = new ManualResetEventSlim(false);
-
+                // 2) 从另一个线程挪一下光标：必须说"有人在动"。
+                //    ⚠ 挪的时机要晚于 IsCursorIdle 的第一次采样：抢在它采样之前挪的话，
+                //    它会把"新位置"当成基准，于是 600ms 里什么变化都看不到——
+                //    这条自检会随机以"光标被挪动了，IsCursorIdle 却说没动"失败（踩到过一次）。
                 var thread = new Thread(() =>
                 {
-                    moved.Wait(TimeSpan.FromSeconds(2));
+                    Thread.Sleep(150);
                     Cursor.Position = new Point(saved.X + 37, saved.Y + 23);
                 })
                 {
@@ -119,9 +120,10 @@ namespace SmokeTest
                 };
 
                 thread.Start();
-                moved.Set();
 
                 var detected = !IsCursorIdle(600);
+
+                thread.Join(TimeSpan.FromSeconds(2));
 
                 if (!detected)
                 {

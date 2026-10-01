@@ -170,6 +170,15 @@ namespace 播放器.Core
         /// <summary>桌面歌词是否显示下一句。</summary>
         public bool DesktopLyricsShowNext { get; set; } = true;
 
+        /// <summary>
+        /// 桌面歌词第二行在有翻译时显示翻译（双语歌词：同一时间戳的原文 + 译文）。
+        /// <para>
+        /// 默认开：双语歌词里"原文 + 译文"才是完整的一句。关掉它，第二行就总是"下一句"
+        /// （<see cref="DesktopLyricsShowNext"/> 是第二行的总开关）。
+        /// </para>
+        /// </summary>
+        public bool DesktopLyricsShowTranslation { get; set; } = true;
+
         /// <summary>桌面歌词的文字配色。</summary>
         public DesktopLyricsColor DesktopLyricsColor { get; set; } = DesktopLyricsColor.Theme;
 

@@ -248,6 +248,40 @@ namespace SmokeTest
                 return false;
             }
 
+            // ---- B3：双语歌词（同一时间戳的原文 + 译文）第二行放译文 ----
+            var bilingual = LyricsDocument.Parse(
+                "[00:00.50]原文一\n" +
+                "[00:00.50]译文一\n" +
+                "[00:05.00]原文二\n" +
+                "[00:10.00]原文三\n");
+
+            window.SetTrack("双语", bilingual);
+            PumpMessages(120);
+
+            window.UpdatePosition(TimeSpan.FromSeconds(1));
+            PumpMessages(120);
+
+            if (window.CurrentText != "原文一" || window.NextText != "译文一")
+            {
+                Log(15, "桌面歌词检查：双语歌词没有显示成「原文 + 译文」"
+                        + $"（现在「{window.CurrentText}」/「{window.NextText}」）");
+                return false;
+            }
+
+            // 关掉"有翻译时显示翻译"：第二行要换成真正的下一句（跳过译文那一行）
+            window.SecondLineIsTranslation = false;
+            PumpMessages(120);
+
+            if (window.CurrentText != "原文一" || window.NextText != "原文二")
+            {
+                Log(15, "桌面歌词检查：关掉翻译之后第二行没有换回下一句"
+                        + $"（现在「{window.CurrentText}」/「{window.NextText}」）");
+                return false;
+            }
+
+            window.SecondLineIsTranslation = true;
+            PumpMessages(120);
+
             // 没有时间轴的歌词在"一次只看一句"的窗口里没法定位，应该退回"记号 + 曲名"
             window.SetTrack("测试曲名", LyricsDocument.Parse("第一句\n第二句", "txt"));
             PumpMessages(120);

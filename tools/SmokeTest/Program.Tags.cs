@@ -359,9 +359,58 @@ namespace SmokeTest
                 return false;
             }
 
+            // ---- B3：双语歌词（同一时间戳的原文 + 译文）算"同一句" ----
+            var bilingual = LyricsDocument.Parse(
+                "[00:10.00]Hello\n" +
+                "[00:10.00]你好\n" +
+                "[00:15.00]World\n");
+
+            if (bilingual.Lines.Count != 3)
+            {
+                Log(9, $"双语歌词检查：解析出来的行数不对（{bilingual.Lines.Count}，期望 3）");
+                return false;
+            }
+
+            // 当前句要落在同一时间戳那一组的**第一行**（原文）上
+            if (bilingual.LineIndexAt(TimeSpan.FromMilliseconds(12000)) != 0)
+            {
+                Log(9, "双语歌词检查：同一时间戳的两行没有算成一句"
+                        + $"（当前行下标 {bilingual.LineIndexAt(TimeSpan.FromMilliseconds(12000))}，期望 0）");
+                return false;
+            }
+
+            if (bilingual.CompanionOf(0) is not { Text: "你好" })
+            {
+                Log(9, $"双语歌词检查：拿不到同一时间戳上的译文（「{bilingual.CompanionOf(0)?.Text ?? "（没有）"}」）");
+                return false;
+            }
+
+            if (bilingual.CompanionOf(1) != null)
+            {
+                Log(9, "双语歌词检查：下一行不是同一时间戳，却也被当成了译文");
+                return false;
+            }
+
+            // "下一句"要跳过整组：不能把译文当成下一句
+            if (bilingual.NextGroupStart(0) != 2 || bilingual.NextGroupStart(1) != 2)
+            {
+                Log(9, "双语歌词检查：「下一句」没有跳过同一时间戳的整组"
+                        + $"（{bilingual.NextGroupStart(0)} / {bilingual.NextGroupStart(1)}，期望都是 2）");
+                return false;
+            }
+
+            // 平移整条时间轴之后分组不能散
+            var shiftedBilingual = bilingual.Shifted(TimeSpan.FromMilliseconds(2000));
+
+            if (shiftedBilingual.CompanionOf(0) == null ||
+                shiftedBilingual.LineIndexAt(TimeSpan.FromMilliseconds(9000)) != 0)
+            {
+                Log(9, "双语歌词检查：整条时间轴平移之后，同一时间戳的分组散了");
+                return false;
+            }
+
             // 纯文本歌词
-            var plain = LyricsDocument.Parse("第一行\n\n第二行");
-            if (plain.IsSynchronized || plain.PlainText != "第一行\n\n第二行")
+            var plain = LyricsDocument.Parse("第一行\n\n第二行");            if (plain.IsSynchronized || plain.PlainText != "第一行\n\n第二行")
             {
                 Log(9, $"纯文本歌词处理不正确：同步={plain.IsSynchronized}，内容=\"{plain.PlainText}\"");
                 return false;

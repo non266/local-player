@@ -81,6 +81,9 @@ namespace SmokeTest
                 // 自绘控件在极端尺寸下的退化分支：太窄、太矮、几乎为零
                 if (!CheckViewDegenerateSizes()) return false;
 
+                // B3：双语歌词（同一时间戳的原文 + 译文）在侧栏里要一起高亮
+                if (!CheckBilingualHighlight()) return false;
+
                 // 鼠标停在歌词上要显示这一句的时间
                 if (!CheckLyricTimeTip(lyricsView, document)) return false;
 
@@ -164,6 +167,60 @@ namespace SmokeTest
             }
 
             Log(11, $"歌词时间气泡正确：{document.Lines.Count} 行都能显示对应时间，纯文本歌词不显示");
+            return true;
+        }
+
+        /// <summary>
+        /// B3：双语歌词（同一时间戳的原文 + 译文）在侧栏里要<b>一起高亮</b>。
+        /// <para>
+        /// 以前"当前句"取的是同时间戳里最后一行，于是译文是当前句、原文永远是暗的；
+        /// 而且另一行也永远轮不到高亮。这里验的是分组之后两行同时高亮、换到下一句只剩它自己。
+        /// </para>
+        /// </summary>
+        private static bool CheckBilingualHighlight()
+        {
+            var view = new LyricsView();
+            view.Size = new Size(360, 400);
+
+            using (view)
+            {
+                view.SetDocument(LyricsDocument.Parse(
+                    "[00:00.50]原文一\n" +
+                    "[00:00.50]译文一\n" +
+                    "[00:05.00]原文二\n"));
+
+                view.UpdatePosition(TimeSpan.FromSeconds(1));
+                PumpMessages(120);
+
+                if (!TryRender(view, view.Width, view.Height, out var error))
+                {
+                    Log(11, $"双语歌词检查：绘制失败：{error}");
+                    return false;
+                }
+
+                var highlighted = view.HighlightedIndexes;
+
+                if (highlighted.Count != 2 || highlighted[0] != 0 || highlighted[1] != 1)
+                {
+                    Log(11, "双语歌词检查：同一时间戳的两行没有一起高亮"
+                            + $"（高亮的是 [{string.Join("、", highlighted)}]，期望 [0、1]）");
+                    return false;
+                }
+
+                view.UpdatePosition(TimeSpan.FromSeconds(6));
+                PumpMessages(120);
+
+                var next = view.HighlightedIndexes;
+
+                if (next.Count != 1 || next[0] != 2)
+                {
+                    Log(11, "双语歌词检查：换到下一句之后高亮不对"
+                            + $"（高亮的是 [{string.Join("、", next)}]，期望 [2]）");
+                    return false;
+                }
+            }
+
+            Log(11, "双语歌词检查正常：同一时间戳的原文与译文一起高亮（换到下一句只剩它自己）");
             return true;
         }
 

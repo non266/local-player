@@ -208,6 +208,40 @@ namespace 播放器.Ui
             DrawOffsetHint(g);
         }
 
+        /// <summary>
+        /// 这一行算不算"当前句"。
+        /// <para>
+        /// 双语歌词里同一个时间戳有两行（原文 + 译文），它们<b>是同一句话</b>，要高亮一起高亮：
+        /// 只认一行的话，另一行永远是暗的（以前认的是同时间戳的最后一行，原文那行就永远暗着）。
+        /// </para>
+        /// </summary>
+        private bool IsActiveLine(int index)
+        {
+            if (index < 0 || _activeIndex < 0) return index == _activeIndex;
+            if (index == _activeIndex) return true;
+
+            var lines = _document.Lines;
+
+            return index < lines.Count && _activeIndex < lines.Count &&
+                   lines[index].Time == lines[_activeIndex].Time;
+        }
+
+        /// <summary>当前被高亮的那几行（双语歌词会是同一时间戳的两行）。给冒烟测试用。</summary>
+        internal IReadOnlyList<int> HighlightedIndexes
+        {
+            get
+            {
+                var highlighted = new List<int>();
+
+                for (var i = 0; i < _document.Lines.Count; i++)
+                {
+                    if (IsActiveLine(i)) highlighted.Add(i);
+                }
+
+                return highlighted;
+            }
+        }
+
         private void DrawSynchronized(Graphics g)
         {
             var lines = _document.Lines;
@@ -225,7 +259,7 @@ namespace 播放器.Ui
                 var text = lines[box.Index].Text;
                 if (string.IsNullOrEmpty(text)) text = "♪";
 
-                var isActive = i == _activeIndex;
+                var isActive = IsActiveLine(i);
                 var isHover = i == _hoverIndex;
 
                 var rect = new Rectangle(Padding.Left, (int)Math.Round(y), width, box.Height);

@@ -33,6 +33,8 @@ namespace 播放器
         /// </summary>
         private const string DesktopLyricsNextTag = "desktop-lyrics-next";
 
+        private const string DesktopLyricsTranslationTag = "desktop-lyrics-translation";
+
         private const string DesktopLyricsLockTag = "desktop-lyrics-lock";
 
         /// <summary>「外观…」那一项：文字里带着当前字号与浓度，每次展开菜单时刷新。</summary>
@@ -120,6 +122,11 @@ namespace 播放器
             target.Add(CreateDesktopLyricsOption(
                 "显示下一句", DesktopLyricsNextTag,
                 () => SetDesktopLyricsShowNext(!_settings.DesktopLyricsShowNext)));
+
+            // 双语歌词（同一时间戳的原文 + 译文）：第二行优先放译文，那才是"这一句"的另一半
+            target.Add(CreateDesktopLyricsOption(
+                "有翻译时第二行显示翻译", DesktopLyricsTranslationTag,
+                () => SetDesktopLyricsShowTranslation(!_settings.DesktopLyricsShowTranslation)));
 
             var lockItem = CreateDesktopLyricsOption(
                 "锁定（鼠标穿透）", DesktopLyricsLockTag, ToggleDesktopLyricsLock);
@@ -407,6 +414,7 @@ namespace 播放器
                 menuItem.Checked = tag switch
                 {
                     DesktopLyricsNextTag => _settings.DesktopLyricsShowNext,
+                    DesktopLyricsTranslationTag => _settings.DesktopLyricsShowTranslation,
                     DesktopLyricsLockTag => _settings.DesktopLyricsLocked,
                     _ => menuItem.Checked
                 };
@@ -547,6 +555,7 @@ namespace 播放器
             window.OpacityPercent = _settings.DesktopLyricsOpacity;
             window.Locked = _settings.DesktopLyricsLocked;
             window.ShowNextLine = _settings.DesktopLyricsShowNext;
+            window.SecondLineIsTranslation = _settings.DesktopLyricsShowTranslation;
             window.ColorChoice = _settings.DesktopLyricsColor;
             window.FontFamilyName = _settings.LyricsFontFamily;
         }
@@ -645,6 +654,20 @@ namespace 播放器
             SyncDesktopLyricsChecks();
 
             SetStatus(value ? "桌面歌词显示下一句" : "桌面歌词只显示当前句");
+        }
+
+        /// <summary>
+        /// 第二行在有翻译时显示翻译（双语歌词）。关掉它，第二行就总是"下一句"。
+        /// </summary>
+        internal void SetDesktopLyricsShowTranslation(bool value)
+        {
+            _settings.DesktopLyricsShowTranslation = value;
+            ApplyDesktopLyricsOptions();
+            SyncDesktopLyricsChecks();
+
+            SetStatus(value
+                ? "桌面歌词的第二行：有翻译时显示翻译"
+                : "桌面歌词的第二行：总是显示下一句");
         }
 
         internal void SetDesktopLyricsLocked(bool value)

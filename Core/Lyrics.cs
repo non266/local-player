@@ -233,6 +233,12 @@ namespace 播放器.Core
 
         /// <summary>
         /// 返回给定播放位置应该高亮的那一行下标；位置在第一行之前时返回 <c>-1</c>。
+        /// <para>
+        /// <b>同一个时间戳上的多行算"同一句"</b>（双语 LRC 就是两行：原文 + 译文），
+        /// 返回的是这一组里的<b>第一行</b>。以前返回的是最后一行，于是译文成了"当前句"、
+        /// 原文永远是暗的，而译文那一行也永远显示不出"当前"的样子——
+        /// 两行里总有一行轮不到（见 <see cref="CompanionOf"/>）。
+        /// </para>
         /// </summary>
         public int LineIndexAt(TimeSpan position)
         {
@@ -257,7 +263,39 @@ namespace 播放器.Core
                 }
             }
 
+            // 退回这一组的第一行（同一时间戳的多行是同一句）
+            while (result > 0 && _lines[result - 1].Time == _lines[result].Time) result--;
+
             return result;
+        }
+
+        /// <summary>
+        /// 第 <paramref name="index"/> 行的"同时间戳下一行"——双语歌词里通常是**译文**；
+        /// 没有（下一行是别的时间戳，或已经是最后一行）时返回 <c>null</c>。
+        /// </summary>
+        public LyricLine? CompanionOf(int index)
+        {
+            if (index < 0 || index + 1 >= _lines.Length) return null;
+
+            return _lines[index + 1].Time == _lines[index].Time ? _lines[index + 1] : null;
+        }
+
+        /// <summary>
+        /// 跳过同一时间戳上的所有行之后，"下一句"的下标；没有下一句时返回 <c>-1</c>。
+        /// <para>桌面歌词的"第三行"要用它：不能把译文当成"下一句"。</para>
+        /// </summary>
+        public int NextGroupStart(int index)
+        {
+            if (index < 0) return -1;
+
+            var time = _lines[index].Time;
+
+            for (var i = index + 1; i < _lines.Length; i++)
+            {
+                if (_lines[i].Time > time) return i;
+            }
+
+            return -1;
         }
 
         /// <summary>

@@ -30,3 +30,6 @@ tools/SmokeTest/obj/
 *.zip
 *.7z
 *.log
+
+# 打包产物（安装程序 / 便携 zip：体积大、可随时重建）
+dist/

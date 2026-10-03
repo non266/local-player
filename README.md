@@ -385,8 +385,11 @@ dotnet build 播放器.csproj -c Release
   这一支自己的键（`SupportedTypes` 里是 52 种音视频 / 播放列表格式，**不含 `.txt`、`.lrc`**——
   把字幕格式也塞进"打开方式"只会添乱），每项都带 `uninsdeletekey`，卸载即还原。
   Win10/11 本来也不允许安装程序静默抢默认程序；
-- **没有数字签名**：第一次运行会弹 SmartScreen「未知发布者」。这是没买代码签名证书的必然结果，
-  不是包坏了（有证书的话在 `.iss` 里加一行 `SignTool` 即可）；
+- 安装包**没有数字签名**，第一次运行会弹 SmartScreen「未知发布者」——这是没买代码签名证书的必然结果，
+  不是包坏了；
+- 从 [Releases](https://github.com/non266/local-player/releases) 下载时，资产名是
+  `local-player-<版本>-setup.exe` / `local-player-<版本>-portable.zip`（ASCII 名，免得各家下载工具
+  对中文名处理不一致；下到本地想改成什么名字都行）；
 - **发布包是被验过的**：装出来那一份和便携 zip 解出来的那一份，各自在**自己的目录里**
   跑过全量 20 步冒烟（全绿），不是只验了开发目录里那份。
 

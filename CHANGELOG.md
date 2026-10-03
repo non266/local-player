@@ -30,6 +30,11 @@
   - **Inno 的安装器 / 卸载器会把自己复制到 `%TEMP%\is-*.tmp` 再运行**，
     原进程立刻退出——所以 `-Wait` 等不到真正的结束，验证卸载要**轮询目录消失**
     （我第一次就抢跑，误以为"卸载没删文件"）。
+  - **PowerShell 5.1 给原生程序传含中文的参数会把中文吞掉**：`gh release create … dist\全能…exe`
+    传上去资产名变成 `-1.0.1-.exe`。改成先复制成 ASCII 名再传
+    （`local-player-1.0.1-setup.exe` / `-portable.zip`），并用服务端 digest 核对回本地哈希。
+- **已发到 GitHub Release**：[v1.0.1](https://github.com/non266/local-player/releases/tag/v1.0.1)，
+  两个资产的服务端 `digest` 与本地 `Get-FileHash` 完全一致，匿名取字节也验过（HEAD 200 / Range 206）。
 
 ### 修复（本机环境，非代码问题）
 

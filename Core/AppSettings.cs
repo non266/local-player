@@ -179,6 +179,12 @@ namespace 播放器.Core
         /// </summary>
         public bool DesktopLyricsShowTranslation { get; set; } = true;
 
+        /// <summary>
+        /// 桌面歌词下面是否显示控制条（播放 / 暂停、上一首、下一首、停止）。
+        /// <para>默认开。锁定（鼠标穿透）时控制条一律不显示——那时候它点不到，画出来只会误导。</para>
+        /// </summary>
+        public bool DesktopLyricsShowControls { get; set; } = true;
+
         /// <summary>桌面歌词的文字配色。</summary>
         public DesktopLyricsColor DesktopLyricsColor { get; set; } = DesktopLyricsColor.Theme;
 

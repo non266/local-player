@@ -29,6 +29,7 @@ namespace SmokeTest
             try
             {
                 Rectangle placed;
+                Size placedSize = Size.Empty;
 
                 using (var form = new 播放器.MainForm(Array.Empty<string>()))
                 {
@@ -56,8 +57,16 @@ namespace SmokeTest
                         return false;
                     }
 
-                    // 只记位置：宽高是按文字算出来的，不参与持久化
+                    // 只记位置：宽高是按文字算出来的，不参与持久化。
+                    // ⚠ 先把它摆到工作区左侧再记：重启后窗口可能宽得多（歌词换句就会变宽），
+                    // 摆在右边的话"保存的 X + 新宽度"根本放不下，会被 ClampToWorkingArea
+                    // 挪回屏幕内——那是钳制在正常工作，却会让这条断言随机变红。
+                    var workArea = Screen.FromControl(window).WorkingArea;
+                    window.MoveTo(new Point(workArea.Left + 40, workArea.Top + 120));
+                    PumpMessages(150);
+
                     placed = new Rectangle(window.Left, window.Top, 0, 0);
+                    placedSize = window.ClientSize;
 
                     form.Close();
                     PumpMessages(300);
@@ -79,6 +88,17 @@ namespace SmokeTest
                 }
 
                 // ---- 重新启动一次：它应该自己回来，而且回到上次那个位置 ----
+                // ⚠ 先把设置里的"上次会话"清空：这一段要验的是"没有媒体时的占位文字"，
+                // 而重开的窗口会按设计恢复上次的播放列表 + 选中项——恢复出一个带歌词的曲目时，
+                // 占位文字本来就不该出现，拿它断言会随机变红（实测 1/4 次）。
+                // 用完再还原：后面的步骤不该被这里改过的会话影响。
+                var previousPlaylist = saved.LastPlaylist;
+                var previousIndex = saved.LastPlaylistIndex;
+
+                saved.LastPlaylist = new System.Collections.Generic.List<string>();
+                saved.LastPlaylistIndex = -1;
+                saved.Save();
+
                 using (var reopened = new 播放器.MainForm(Array.Empty<string>()))
                 {
                     reopened.Show();
@@ -99,7 +119,8 @@ namespace SmokeTest
                     if (window.Left != placed.Left || window.Top != placed.Top)
                     {
                         Log(15, $"重新启动之后没有回到上次的位置（{placed.Left},{placed.Top}"
-                                + $" → {window.Left},{window.Top}）");
+                                + $" → {window.Left},{window.Top}；"
+                                + $"关之前客户区 {placedSize}，现在 {window.ClientSize}）");
                         return false;
                     }
 
@@ -113,6 +134,13 @@ namespace SmokeTest
                     reopened.Close();
                     PumpMessages(200);
                 }
+
+                // 把会话还原：这一段的失败会直接结束整个测试（设置状态无所谓），
+                // 但成功之后要保证后面的步骤看到的是原来的设置。
+                var restore = AppSettings.Load();
+                restore.LastPlaylist = previousPlaylist;
+                restore.LastPlaylistIndex = previousIndex;
+                restore.Save();
 
                 Log(15, "桌面歌词全套正常：见上一条；另外开关与位置能存下来，"
                         + "重新启动自动回到上次的位置");
@@ -309,6 +337,10 @@ namespace SmokeTest
             window.ShowNextLine = true;
             PumpMessages(120);
 
+            // ---- 1.1.0：控制条（播放 / 暂停、上一首、下一首、停止）----
+            if (!CheckDesktopLyricsControls(window)) return false;
+            if (!CheckDesktopLyricsControlsSetting(form, window)) return false;
+
             var smallWidth = window.Width;
             window.FontSize = 60;
             PumpMessages(120);
@@ -461,14 +493,18 @@ namespace SmokeTest
             }
 
             // ---- 超长的一句：必须折行，且宽度被工作区的比例钳住（否则会横穿整个桌面） ----
+            // ⚠ 两行都写成超长：主窗体的界面计时会不断把"真实播放位置"推过来，
+            // 位置跑到第二行时这一句就换成第二行了。只让第一行超长的话，这条断言会随
+            // "跑到第几秒"随机变红（实测被推过界一次，报的是"超长句没有折行"）。
+            // 另外：设完位置**不泵消息**就断言——布局是同步算出来的，一泵就可能被换掉文字。
             var shortHeight = window.Height;
+            var shortSize = window.ClientSize;
+            var longLine = new string('长', 160);
 
-            var longDocument = LyricsDocument.Parse(
-                $"[00:01.00]{new string('长', 160)}\n[00:05.00]第二句", "长句测试");
+            var longDocument = LyricsDocument.Parse($"[00:01.00]{longLine}\n[00:05.00]{longLine}", "长句测试");
 
             window.SetTrack("超长句", longDocument);
             window.UpdatePosition(TimeSpan.FromSeconds(2));
-            PumpMessages(150);
 
             if (window.Width > (int)(area.Width * 0.9) + 2)
             {
@@ -478,9 +514,14 @@ namespace SmokeTest
 
             if (window.Height <= shortHeight)
             {
-                Log(15, $"桌面歌词检查：超长句没有折行（高度还是 {window.Height}）");
+                Log(15, "桌面歌词检查：超长句没有折行"
+                        + $"（高度还是 {window.Height}，之前 {shortHeight}；"
+                        + $"客户区 {shortSize} → {window.ClientSize}；"
+                        + $"文档 {longDocument.Lines.Count} 行、当前显示「{window.CurrentText}」）");
                 return false;
             }
+
+            PumpMessages(150);
 
             if (!area.Contains(window.Bounds))
             {
@@ -564,10 +605,92 @@ namespace SmokeTest
                 return false;
             }
 
+            // 放在最后：它会把内容和位置都改掉（所以它自己负责恢复，见函数里的 finally）
+            if (!CheckLyricsResizeAnchor(window, lyrics)) return false;
+
             Log(15, "桌面歌词正常：菜单开启、跟着进度换句、排版随选项变、能拖动、"
                     + "锁定即穿透、不抢焦点、Ctrl+D 可开关、全屏不被收走（对照组侧栏被收起）、"
                     + $"窗口留在屏幕内，画面背景全透明（四角 alpha≤1）且有 {opaquePixels} 个不透明像素");
             return true;
+        }
+
+        /// <summary>
+        /// 1.1.0：窗口跟着文字伸缩时锚在哪一边。
+        /// <para>
+        /// 用户<b>没动过</b>它时（位置来自设置恢复 / 设置方案 / 首次居中）锚<b>左上角</b>：
+        /// 内容一变就以中心为锚的话，"上次放在这儿"会被半屏的宽度差当场挪走。
+        /// 用户<b>拖过</b>之后才锚<b>水平中心</b>：歌词换一句就变宽变窄，锚在左边会左右乱跳。
+        /// </para>
+        /// <para>这条是补出来的：以前一律锚中心，"重启后回到上次位置"会随机偏掉半屏
+        /// （实测 1218 → 368，且时红时绿）。</para>
+        /// </summary>
+        private static bool CheckLyricsResizeAnchor(DesktopLyricsWindow window, LyricsDocument lyrics)
+        {
+            var saved = window.Location;
+
+            try
+            {
+                // 摆到"设置里的位置"：MoveTo 就代表"这个位置不是用户拖出来的"。
+                // ⚠ 靠工作区左边放：下面要让内容变宽来验锚点，放在右边的话
+                // 窗口一宽就会被 ClampToWorkingArea 推回屏幕内，那是另一回事，会把这条检查带偏。
+                var area = Screen.FromControl(window).WorkingArea;
+                var target = new Point(area.Left + 40, Math.Max(area.Top, window.Top));
+                window.MoveTo(target);
+
+                var narrow = LyricsDocument.Parse("[00:01.00]短\n[00:03.00]句", "锚点测试");
+                var wide = LyricsDocument.Parse(
+                    $"[00:01.00]{new string('长', 40)}\n[00:03.00]{new string('长', 40)}", "锚点测试");
+
+                window.SetTrack("锚点测试", narrow);
+                window.UpdatePosition(TimeSpan.FromSeconds(2));
+                var narrowWidth = window.Width;
+
+                window.SetTrack("锚点测试", wide);
+                window.UpdatePosition(TimeSpan.FromSeconds(2));
+
+                if (window.Width <= narrowWidth)
+                {
+                    Log(15, "桌面歌词锚点检查：内容变长之后窗口没有变宽（这一段就没验到锚点）");
+                    return false;
+                }
+
+                if (window.Left != target.X)
+                {
+                    Log(15, "桌面歌词锚点检查：没拖动过时，内容变化把窗口挪走了"
+                            + $"（Left {target.X} → {window.Left}，宽 {narrowWidth} → {window.Width}）");
+                    return false;
+                }
+
+                // 真的拖一下（走真实拖动那条路，和用户手动拖一样）：
+                // 之后内容变化应当改成以水平中心为锚
+                DragWindow(window, fromX: 5, fromY: 5, toX: 25, toY: 5);
+                PumpMessages(150);
+
+                var center = window.Left + window.Width / 2;
+
+                window.SetTrack("锚点测试", narrow);
+                window.UpdatePosition(TimeSpan.FromSeconds(2));
+
+                if (Math.Abs(window.Left + window.Width / 2 - center) > 1)
+                {
+                    Log(15, "桌面歌词锚点检查：拖过之后内容变化没有以中心为锚"
+                            + $"（中心 {center} → {window.Left + window.Width / 2}）");
+                    return false;
+                }
+
+                Log(15, "桌面歌词锚点正常：没拖过时内容变化保住左上角（重启后位置不会被挪走），"
+                        + "拖过之后改以水平中心为锚");
+                return true;
+            }
+            finally
+            {
+                // 把内容和位置都还原：这一条改了内容，而后面（关窗、重启）还要看正常内容下
+                // 窗口的宽度——不还原的话"重启后回到上次位置"会被宽度变化带偏（实测踩过）。
+                window.SetTrack("测试曲名", lyrics);
+                window.UpdatePosition(lyrics.Lines[0].Time);
+                window.MoveTo(saved);
+                PumpMessages(150);
+            }
         }
 
         /// <summary>
@@ -578,6 +701,307 @@ namespace SmokeTest
         /// 以前托盘里只有一个开关，关掉再打开仍然是锁定的，人就卡在那儿了。
         /// </para>
         /// </summary>
+        /// <summary>
+        /// 1.1.0：桌面歌词的控制条（播放 / 暂停、上一首、下一首、停止）。
+        /// <para>
+        /// 验四件事：未锁定时四个按钮都在客户区里、互不重叠、而且**排在文字下方**
+        /// （拿"关掉控制条时窗口的高度"当基准：控制条必须从那个高度再往下才开始）；
+        /// 命中测试认得每个按钮的中心、不会把歌词本身当成按钮；
+        /// 点下去真的抛出对应命令（<c>SendMessage</c> 发一对按下/松开，不依赖合成鼠标），
+        /// 而"按在按钮上、松在别处"不算点中；
+        /// 关掉或锁定之后一个都不画、窗口跟着变矮、点击也不再响应。
+        /// </para>
+        /// <para>用完把 <c>ShowControls</c> 与 <c>Locked</c> 还原：后面的检查（锁定样式、真鼠标拖动）
+        /// 不能被这里改过的状态影响。</para>
+        /// </summary>
+        private static bool CheckDesktopLyricsControls(DesktopLyricsWindow window)
+        {
+            var originalLocked = window.Locked;
+
+            try
+            {
+                window.Locked = false;
+
+                // ⚠ 取值之间**不泵消息**：布局是同步算出来的，而主窗体的界面计时会把
+                // "真实播放位置"推过来换掉文字——一泵，这里比的就不是"开没开控制条"，
+                // 而是"换了句歌词"，断言会随机变红。
+                window.ShowControls = false;
+                var textOnlyHeight = window.Height;
+
+                window.ShowControls = true;
+                var withControls = window.Height;
+                var bounds = window.ControlBounds;
+                var contentBottom = window.ContentBottom;
+
+                if (bounds.Count != 4)
+                {
+                    Log(15, $"桌面歌词控制条：未锁定时应当有 4 个按钮，实际 {bounds.Count} 个");
+                    return false;
+                }
+
+                if (withControls <= textOnlyHeight)
+                {
+                    Log(15, $"桌面歌词控制条：打开控制条之后窗口没有变高（{textOnlyHeight} → {withControls}）");
+                    return false;
+                }
+
+                for (var i = 0; i < bounds.Count; i++)
+                {
+                    var box = bounds[i];
+
+                    if (box.Left < 0 || box.Top < 0 ||
+                        box.Right > window.ClientSize.Width || box.Bottom > window.ClientSize.Height)
+                    {
+                        Log(15, $"桌面歌词控制条：第 {i + 1} 个按钮超出客户区（{box}，客户区 {window.ClientSize}）");
+                        return false;
+                    }
+
+                    // 控制条必须在文字下方：从"文字底部"再往下才开始
+                    // （注意不能拿"只有文字时窗口的高度"当基准——那里面还含一段下内边距）
+                    if (box.Top < contentBottom)
+                    {
+                        Log(15, $"桌面歌词控制条：第 {i + 1} 个按钮压到文字上了"
+                                + $"（Top={box.Top}，文字底部 {contentBottom}）");
+                        return false;
+                    }
+
+                    for (var j = i + 1; j < bounds.Count; j++)
+                    {
+                        if (box.IntersectsWith(bounds[j]))
+                        {
+                            Log(15, $"桌面歌词控制条：第 {i + 1} 和第 {j + 1} 个按钮重叠了");
+                            return false;
+                        }
+                    }
+
+                    var center = new Point(box.Left + box.Width / 2, box.Top + box.Height / 2);
+                    var hit = window.ControlIndexAt(center);
+
+                    if (hit != i)
+                    {
+                        Log(15, $"桌面歌词控制条：第 {i + 1} 个按钮的中心命中了 {hit}");
+                        return false;
+                    }
+                }
+
+                if (window.ControlIndexAt(new Point(bounds[0].Left - 12, 6)) >= 0)
+                {
+                    Log(15, "桌面歌词控制条：歌词区域被当成了按钮");
+                    return false;
+                }
+
+                // ---- 点下去真的抛出命令 ----
+                var clicks = new List<DesktopLyricsWindow.LyricsControl>();
+                void Collect(DesktopLyricsWindow.LyricsControl control) => clicks.Add(control);
+
+                window.ControlClicked += Collect;
+
+                try
+                {
+                    // ⚠ 每次点击前都重新取一遍布局：窗口是"跟着文字伸缩"的，
+                    // 异步加载的歌词一落地，或者悬停状态一变，按钮的位置就会挪。
+                    // 拿先前拍下的矩形去点，点到的是别的地方（实测因此随机变红过）。
+                    var first = window.ControlBounds[0];
+                    ClickWindow(window, first.Left + first.Width / 2, first.Top + first.Height / 2);
+
+                    if (clicks.Count != 1 || clicks[0] != DesktopLyricsWindow.LyricsControl.PlayPause)
+                    {
+                        Log(15, "桌面歌词控制条：点第一个按钮抛出的命令不对"
+                                + $"（{clicks.Count} 次，{(clicks.Count > 0 ? clicks[0].ToString() : "无")}，期望一次 PlayPause）");
+                        return false;
+                    }
+
+                    // 按在按钮上、松在别处：不算点中
+                    var third = window.ControlBounds[2];
+                    var downX = third.Left + 2;
+                    var downY = third.Top + 2;
+
+                    SendMessage(window.Handle, 0x0201, (IntPtr)1, MouseLParam(downX, downY));
+                    SendMessage(window.Handle, 0x0202, IntPtr.Zero, MouseLParam(downX, third.Bottom + 40));
+                    PumpMessages(120);
+
+                    if (clicks.Count != 1)
+                    {
+                        Log(15, "桌面歌词控制条：按在按钮上、松在别处，也当成点中了");
+                        return false;
+                    }
+
+                    // ---- 双击歌词 = 播放 / 暂停 ----
+                    // 消息序列按真实双击来：按下 / 松开 / 双击 / 松开——只发 WM_LBUTTONDBLCLK
+                    // 是不够的，WinForms 不会认为那是一次双击。
+                    // 不用挪真实光标：程序记的是"按下时那个点"，比实时光标位置可靠。
+                    const int wmDown = 0x0201;
+                    const int wmUp = 0x0202;
+                    const int wmDoubleClick = 0x0203;
+
+                    var textPoint = new Point(window.ClientSize.Width / 2, Math.Max(2, window.ContentBottom - 4));
+
+                    clicks.Clear();
+                    SendMessage(window.Handle, wmDown, (IntPtr)1, MouseLParam(textPoint.X, textPoint.Y));
+                    SendMessage(window.Handle, wmUp, IntPtr.Zero, MouseLParam(textPoint.X, textPoint.Y));
+                    SendMessage(window.Handle, wmDoubleClick, (IntPtr)1, MouseLParam(textPoint.X, textPoint.Y));
+                    SendMessage(window.Handle, wmUp, IntPtr.Zero, MouseLParam(textPoint.X, textPoint.Y));
+                    PumpMessages(150);
+
+                    if (clicks.Count != 1 || clicks[0] != DesktopLyricsWindow.LyricsControl.PlayPause)
+                    {
+                        Log(15, "桌面歌词控制条：双击歌词没有触发播放 / 暂停"
+                                + $"（{clicks.Count} 次，{(clicks.Count > 0 ? string.Join("、", clicks) : "无")}）");
+                        return false;
+                    }
+
+                    // 双击落在按钮上：只算一次按钮点击（这里是第 3 个按钮 = 下一首）。
+                    // 断言"命令种类是 Next"正是为了把两条路分开：
+                    // 少了那道闸门，这里会变成两次（对播放/暂停等于白按、对下一首就是跳两首）。
+                    var onButtonControl = window.ControlBounds[2];
+                    var onButton = new Point(
+                        onButtonControl.Left + onButtonControl.Width / 2,
+                        onButtonControl.Top + onButtonControl.Height / 2);
+
+                    clicks.Clear();
+                    SendMessage(window.Handle, wmDown, (IntPtr)1, MouseLParam(onButton.X, onButton.Y));
+                    SendMessage(window.Handle, wmUp, IntPtr.Zero, MouseLParam(onButton.X, onButton.Y));
+                    SendMessage(window.Handle, wmDoubleClick, (IntPtr)1, MouseLParam(onButton.X, onButton.Y));
+                    SendMessage(window.Handle, wmUp, IntPtr.Zero, MouseLParam(onButton.X, onButton.Y));
+                    PumpMessages(150);
+
+                    if (clicks.Count != 1 || clicks[0] != DesktopLyricsWindow.LyricsControl.Next)
+                    {
+                        Log(15, "桌面歌词控制条：双击按钮的行为不对（期望只有那一下按钮点击 = 一次 Next）"
+                                + $"（{clicks.Count} 次，{(clicks.Count > 0 ? string.Join("、", clicks) : "无")}）");
+                        return false;
+                    }
+                }
+                finally
+                {
+                    window.ControlClicked -= Collect;
+                }
+
+                // ---- 关掉控制条 ----
+                // ⚠ 这里重新量一遍"基准"：上面那些点击会泵消息，界面计时可能已经把歌词换了句，
+                // 拿早先那个基准来比，比的就不是"控制条"，而是"换了句歌词"。
+                window.ShowControls = false;
+                var offHeight = window.Height;
+                var offCount = window.ControlBounds.Count;
+
+                window.ShowControls = true;
+                var onHeight = window.Height;
+
+                if (offCount != 0 || offHeight >= onHeight)
+                {
+                    Log(15, "桌面歌词控制条：关掉之后按钮还在，或者高度没有变矮"
+                            + $"（{offCount} 个按钮，{onHeight} → {offHeight}）");
+                    return false;
+                }
+
+                // ---- 锁定：一个都不画，点击也不再响应 ----
+                window.Locked = true;
+
+                if (window.ControlBounds.Count != 0 || window.Height >= onHeight)
+                {
+                    Log(15, $"桌面歌词控制条：锁定之后还画着 {window.ControlBounds.Count} 个按钮"
+                            + $"（高度 {onHeight} → {window.Height}）");
+                    return false;
+                }
+
+                clicks.Clear();
+                window.ControlClicked += Collect;
+
+                try
+                {
+                    // 锁定后窗口对鼠标是穿透的（那一条由扩展样式检查负责）；
+                    // 这里验的是"就算消息送到了，程序也不该响应"——命中测试直接不给按钮。
+                    var target = bounds[0];
+                    ClickWindow(window, target.Left + target.Width / 2, target.Top + target.Height / 2);
+
+                    if (clicks.Count != 0)
+                    {
+                        Log(15, "桌面歌词控制条：锁定（鼠标穿透）时点击仍然触发了命令");
+                        return false;
+                    }
+                }
+                finally
+                {
+                    window.ControlClicked -= Collect;
+                }
+
+                Log(15, "桌面歌词控制条正常：未锁定时四个按钮排在文字下方、互不重叠、命中测试准确，"
+                        + "点一下抛出对应命令（按在按钮上松在别处不算点中），"
+                        + "关掉或锁定之后一个都不画、窗口跟着变矮、点它也不再响应");
+                return true;
+            }
+            finally
+            {
+                window.Locked = originalLocked;
+                window.ShowControls = true;
+                PumpMessages(150);
+            }
+        }
+
+        /// <summary>
+        /// 1.1.0：控制条与菜单 / 设置的联动——「显示控制条」这一项要能开关它（勾选状态跟着走），
+        /// 点一下设置就落进 <c>AppSettings</c>，关掉之后窗口真的变矮。
+        /// </summary>
+        private static bool CheckDesktopLyricsControlsSetting(播放器.MainForm form, DesktopLyricsWindow window)
+        {
+            var menu = FindViewMenuItem(form, "桌面歌词");
+            var item = menu == null ? null : FindMenuItem(menu.DropDownItems, "显示控制条（播放 / 上一首 / 下一首 / 停止）");
+
+            if (item == null)
+            {
+                Log(15, "桌面歌词控制条检查：子菜单里没有「显示控制条」这一项");
+                return false;
+            }
+
+            var original = SettingsOf(form).DesktopLyricsShowControls;
+
+            try
+            {
+                if (!item.Checked)
+                {
+                    Log(15, "桌面歌词控制条检查：控制条是开着的，菜单项却没勾上");
+                    return false;
+                }
+
+                var withControls = window.Height;
+
+                // 菜单点击是直接调 OnClick 的（同步），所以点完立刻取值，中间不泵消息
+                if (!ClickMenuItem(item)) return false;
+
+                if (window.ShowControls || item.Checked || SettingsOf(form).DesktopLyricsShowControls)
+                {
+                    Log(15, "桌面歌词控制条检查：点一下之后窗口没关掉，或者菜单 / 设置没跟着走"
+                            + $"（窗口 {window.ShowControls}、勾选 {item.Checked}、设置 {SettingsOf(form).DesktopLyricsShowControls}）");
+                    return false;
+                }
+
+                if (window.Height >= withControls)
+                {
+                    Log(15, $"桌面歌词控制条检查：关掉之后窗口没有变矮（{withControls} → {window.Height}）");
+                    return false;
+                }
+
+                if (!ClickMenuItem(item)) return false;
+                PumpMessages(200);
+
+                if (!window.ShowControls || !item.Checked || window.ControlBounds.Count != 4)
+                {
+                    Log(15, "桌面歌词控制条检查：再点一下没有恢复（关掉之后就该能开回来）");
+                    return false;
+                }
+
+                Log(15, "桌面歌词控制条与菜单联动正常：「显示控制条」勾选状态、窗口高度、设置项三者一致，"
+                        + "关掉再开回来都对");
+                return true;
+            }
+            finally
+            {
+                SettingsOf(form).DesktopLyricsShowControls = original;
+                window.ShowControls = original;
+                PumpMessages(150);
+            }
+        }
+
         private static bool CheckDesktopLyricsTraySubmenu(播放器.MainForm form)
         {
             if (form.TrayDesktopLyrics is not { } tray)
@@ -1049,6 +1473,21 @@ namespace SmokeTest
 
             try
             {
+                // 先主动把光标挪开、等悬停收掉，再拍"静止"那一张。
+                // 不然光标本来就停在歌词上时（真人鼠标刚好停在那儿、或上一条检查用过鼠标），
+                // 前后两张屏幕截图一模一样，这条检查会随机变红——那是断言不可靠，不是功能坏了。
+                Cursor.Position = new Point(
+                    Math.Max(0, window.Left - 200),
+                    Math.Max(0, window.Top - 200));
+
+                PumpMessages(400);
+
+                if (window.Hovering)
+                {
+                    Log(15, "桌面歌词检查：光标已经挪开了，悬停状态却没收掉（_hovering 还是 true）");
+                    return false;
+                }
+
                 if (!TryReadAlpha(window, 0, 0, out var idleAlpha))
                 {
                     Log(15, "桌面歌词检查：读不到位图，验不了鼠标悬停");
@@ -1064,10 +1503,20 @@ namespace SmokeTest
                 // 屏幕上此刻的样子（鼠标不在歌词上）
                 var idleScreen = CaptureScreen(window.Bounds);
 
-                // 只挪进窗口矩形（窗口正中间，多半落在两行字之间的空隙上）
-                Cursor.Position = window.PointToScreen(new Point(window.Width / 2, window.Height / 2));
+                // 挪进窗口矩形。⚠ 位置要现算：窗口跟着文字伸缩、钳制也可能刚把它挪过，
+                // 算早了就会把光标放到窗口外面——"悬停没发生"看起来就像"悬停背景坏了"。
+                // 光标还可能被真人鼠标挪走，所以试几次；实在停不住就如实跳过这一条。
+                for (var attempt = 0; attempt < 3 && !window.Hovering; attempt++)
+                {
+                    Cursor.Position = window.PointToScreen(new Point(window.Width / 2, window.Height / 2));
+                    PumpMessages(300);
+                }
 
-                PumpMessages(400);
+                if (!window.Hovering)
+                {
+                    Log(15, "桌面歌词检查：光标没能停在歌词上（可能有人正在动鼠标），悬停这一条跳过");
+                    return true;
+                }
 
                 // 屏幕上现在必须不一样了：看内存里的位图不够，
                 // UpdateLayeredWindow 没生效时内存位图照样是新的、屏幕却纹丝不动

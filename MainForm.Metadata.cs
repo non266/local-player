@@ -117,6 +117,10 @@ namespace 播放器
 
             sidebarPanel.UpdatePosition(position);
             _desktopLyrics?.UpdatePosition(position);
+
+            // 顺手把"在不在播"推过去：控制条第一个按钮画播放还是暂停靠它。
+            // 属性 setter 里有相等判断，没变的时候不会重画。
+            SyncDesktopLyricsPlayingState();
         }
 
         /// <summary>组装「媒体信息」页的内容。</summary>

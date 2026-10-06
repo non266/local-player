@@ -91,7 +91,7 @@ namespace 播放器.Core
                 "LyricsFontFamily",
                 "DesktopLyricsEnabled", "DesktopLyricsFontSize", "DesktopLyricsOpacity",
                 "DesktopLyricsLocked", "DesktopLyricsShowNext", "DesktopLyricsShowTranslation",
-                "DesktopLyricsColor",
+                "DesktopLyricsShowControls", "DesktopLyricsColor",
                 "OnlineLookup", "LrcApiBaseUrl", "LrcApiToken"
             },
             [SettingsSection.Output] = new[]

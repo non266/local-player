@@ -65,6 +65,25 @@ namespace SmokeTest
         private static IntPtr MouseLParam(int x, int y) => (IntPtr)((y << 16) | (x & 0xFFFF));
 
         /// <summary>
+        /// 往窗口里发一对"按下 + 松开"，模拟一次鼠标点击。
+        /// <para>
+        /// 走 <c>SendMessage</c> 而不是合成鼠标输入：既不受"这台机器上有没有人在动鼠标"影响，
+        /// 也不受分层窗口逐像素命中测试影响——测的是"点下去之后程序做了什么"，
+        /// 而不是系统有没有把点击派发过来（那个由扩展样式那条检查负责）。
+        /// </para>
+        /// </summary>
+        private static void ClickWindow(Form window, int x, int y)
+        {
+            const int wmLButtonDown = 0x0201;
+            const int wmLButtonUp = 0x0202;
+            const int mkLButton = 0x0001;
+
+            SendMessage(window.Handle, wmLButtonDown, (IntPtr)mkLButton, MouseLParam(x, y));
+            SendMessage(window.Handle, wmLButtonUp, IntPtr.Zero, MouseLParam(x, y));
+            PumpMessages(120);
+        }
+
+        /// <summary>
         /// 这段时间里光标有没有动过（用来判断"这台机器上有没有真人正在用鼠标"）。
         /// <para>
         /// 合成鼠标输入和真人鼠标走的是同一条通道，分不清来源；所以只能在动手之前

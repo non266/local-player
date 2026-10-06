@@ -35,6 +35,8 @@ namespace 播放器
 
         private const string DesktopLyricsTranslationTag = "desktop-lyrics-translation";
 
+        private const string DesktopLyricsControlsTag = "desktop-lyrics-controls";
+
         private const string DesktopLyricsLockTag = "desktop-lyrics-lock";
 
         /// <summary>「外观…」那一项：文字里带着当前字号与浓度，每次展开菜单时刷新。</summary>
@@ -127,6 +129,11 @@ namespace 播放器
             target.Add(CreateDesktopLyricsOption(
                 "有翻译时第二行显示翻译", DesktopLyricsTranslationTag,
                 () => SetDesktopLyricsShowTranslation(!_settings.DesktopLyricsShowTranslation)));
+
+            // 控制条：播放 / 暂停、上一首、下一首、停止。锁定（鼠标穿透）时它不显示。
+            target.Add(CreateDesktopLyricsOption(
+                "显示控制条（播放 / 上一首 / 下一首 / 停止）", DesktopLyricsControlsTag,
+                () => SetDesktopLyricsShowControls(!_settings.DesktopLyricsShowControls)));
 
             var lockItem = CreateDesktopLyricsOption(
                 "锁定（鼠标穿透）", DesktopLyricsLockTag, ToggleDesktopLyricsLock);
@@ -415,6 +422,7 @@ namespace 播放器
                 {
                     DesktopLyricsNextTag => _settings.DesktopLyricsShowNext,
                     DesktopLyricsTranslationTag => _settings.DesktopLyricsShowTranslation,
+                    DesktopLyricsControlsTag => _settings.DesktopLyricsShowControls,
                     DesktopLyricsLockTag => _settings.DesktopLyricsLocked,
                     _ => menuItem.Checked
                 };
@@ -498,6 +506,9 @@ namespace 播放器
             // 往歌词窗口上拖字体文件 = 走和菜单导入完全相同的那条路
             window.FontFilesDropped += OnFontFilesDropped;
 
+            // 控制条上的四个按钮 = 托盘菜单里那四个命令，走的是同一批方法
+            window.ControlClicked += OnDesktopLyricsControlClicked;
+
             window.SetPalette(_palette);
             ApplyDesktopLyricsOptions(window);
 
@@ -556,6 +567,8 @@ namespace 播放器
             window.Locked = _settings.DesktopLyricsLocked;
             window.ShowNextLine = _settings.DesktopLyricsShowNext;
             window.SecondLineIsTranslation = _settings.DesktopLyricsShowTranslation;
+            window.ShowControls = _settings.DesktopLyricsShowControls;
+            window.Playing = _engine.IsPlaying;
             window.ColorChoice = _settings.DesktopLyricsColor;
             window.FontFamilyName = _settings.LyricsFontFamily;
         }
@@ -670,6 +683,19 @@ namespace 播放器
                 : "桌面歌词的第二行：总是显示下一句");
         }
 
+        /// <summary>
+        /// 是否在桌面歌词下面显示控制条（播放 / 暂停、上一首、下一首、停止）。
+        /// <para>锁定（鼠标穿透）时它一律不显示——那时候按钮点不到，画出来只会让人误解。</para>
+        /// </summary>
+        internal void SetDesktopLyricsShowControls(bool value)
+        {
+            _settings.DesktopLyricsShowControls = value;
+            ApplyDesktopLyricsOptions();
+            SyncDesktopLyricsChecks();
+
+            SetStatus(value ? "桌面歌词显示控制条" : "桌面歌词不显示控制条（双击歌词仍可播放 / 暂停）");
+        }
+
         internal void SetDesktopLyricsLocked(bool value)
         {
             _settings.DesktopLyricsLocked = value;
@@ -750,6 +776,49 @@ namespace 播放器
             window.SetTrack(CurrentTrackTitle(), _track.ShiftedLyrics);
             window.UpdatePosition(
                 _engine.HasMedia ? TimeSpan.FromMilliseconds(_engine.Time) : TimeSpan.Zero);
+
+            SyncDesktopLyricsPlayingState();
+        }
+
+        /// <summary>把"正在播放吗"推给桌面歌词：控制条第一个按钮据此画播放 / 暂停。</summary>
+        private void SyncDesktopLyricsPlayingState()
+        {
+            var window = _desktopLyrics;
+            if (window == null) return;
+
+            window.Playing = _engine.HasMedia && _engine.IsPlaying;
+        }
+
+        /// <summary>
+        /// 桌面歌词控制条上的按钮被点了。
+        /// <para>
+        /// 走的就是托盘菜单那四个命令（同一批方法），所以"从哪儿点"不会有两套行为：
+        /// 「下一首」带上 <c>userInitiated: true</c>，和托盘一致。
+        /// </para>
+        /// </summary>
+        private void OnDesktopLyricsControlClicked(DesktopLyricsWindow.LyricsControl control)
+        {
+            switch (control)
+            {
+                case DesktopLyricsWindow.LyricsControl.PlayPause:
+                    TogglePlayPause();
+                    break;
+
+                case DesktopLyricsWindow.LyricsControl.Previous:
+                    PlayPrevious();
+                    break;
+
+                case DesktopLyricsWindow.LyricsControl.Next:
+                    PlayNext(true);
+                    break;
+
+                case DesktopLyricsWindow.LyricsControl.Stop:
+                    StopPlayback();
+                    break;
+            }
+
+            // 命令下去之后状态可能立刻变了（暂停/继续），别等下一次界面计时
+            SyncDesktopLyricsPlayingState();
         }
 
         /// <summary>退出时记下位置。</summary>

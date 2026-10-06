@@ -25,7 +25,7 @@ namespace 播放器.Ui
     /// 代价是内容不能再用 <c>OnPaint</c> 画，必须自己画进位图再推给系统。
     /// </para>
     /// </summary>
-    internal sealed class DesktopLyricsWindow : Form
+    internal sealed partial class DesktopLyricsWindow : Form
     {
         /// <summary>下一句相对主句的字号比例。</summary>
         private const float NextLineRatio = 0.62f;
@@ -194,6 +194,12 @@ namespace 播放器.Ui
         private Point _dragOrigin;
         private Point _dragWindowOrigin;
 
+        /// <summary>
+        /// 用户拖动过之后为 true：内容引起的尺寸变化以水平中心为锚（见 <see cref="ResizeKeepingCenter"/>）。
+        /// 没拖过时锚左上角——那时位置来自设置，不该被内容变化挪走。
+        /// </summary>
+        private bool _anchoredByContent;
+
         /// <summary>鼠标是不是正停在歌词上（停住时给一块背景，否则用户看不出该抓哪儿）。</summary>
         private bool _hovering;
 
@@ -344,6 +350,10 @@ namespace 播放器.Ui
                 if (_locked) EndHover();
 
                 if (_locked && _dragging) _dragging = false;
+
+                // 控制条只在不锁定时出现：锁定要把那一行收掉、窗口跟着变矮
+                ClearHoveredControl();
+                ApplyContent();
             }
         }
 
@@ -467,6 +477,11 @@ namespace 播放器.Ui
         {
             Location = location;
             ClampToWorkingArea();
+
+            // 这次位置不是用户拖出来的（来自设置恢复 / 设置方案切换 / 居中），
+            // 所以内容随后变化时不要以中心为锚——否则"上次放在这儿"会被
+            // 半屏的宽度差重新居中、当场挪走（冒烟第 15 步实测 1218 → 368）。
+            _anchoredByContent = false;
         }
 
         /// <summary>
@@ -662,6 +677,7 @@ namespace 播放器.Ui
             // 锁定的意思是"这个窗口在鼠标眼里不存在"，那就不该有任何提示
             if (_locked)
             {
+                ClearHoveredControl();
                 EndHover();
                 return;
             }
@@ -671,7 +687,12 @@ namespace 播放器.Ui
 
             // 按"窗口矩形"判断而不是按像素：矩形之内都算还在歌词上，
             // 这样两块文字之间的空隙、以及字的描边之外那点边距，都算在里面。
-            var inside = ClientRectangle.Contains(PointToClient(Cursor.Position));
+            var client = PointToClient(Cursor.Position);
+            var inside = ClientRectangle.Contains(client);
+
+            // 按钮高亮要跟着光标走，所以放在 inside 的早退之前——
+            // 在两个按钮之间移动时 inside 一直是 true，早退的话高亮就永远不动了。
+            UpdateHoveredControl(client);
 
             if (inside == _hovering) return;
 
@@ -933,10 +954,13 @@ namespace 播放器.Ui
             _nextHeight = next.Height;
 
             var contentWidth = Math.Max(current.Width, next.Width);
-            var contentHeight = _currentHeight + (_hasNext ? LineGap + _nextHeight : 0);
 
             var width = Math.Max(MinimumBoxWidth, (int)Math.Ceiling(contentWidth + PaddingX * 2 + WrapSlack));
-            var height = Math.Max(1, (int)Math.Ceiling(contentHeight + PaddingY * 2));
+            var height = Math.Max(1, (int)Math.Ceiling(ContentHeight + PaddingY * 2 + ControlsTotalHeight));
+
+            // 控制条常驻，所以窗口至少要能放下它：歌词很短时（比如只有 "♪"）也要撑到这个宽度，
+            // 否则四个按钮会被裁掉一半。
+            if (ControlsVisible) width = Math.Max(width, ControlsTotalWidth + PaddingX * 2);
 
             if (ClientSize.Width != width || ClientSize.Height != height)
                 ResizeKeepingCenter(new Size(width, height));
@@ -945,15 +969,20 @@ namespace 播放器.Ui
         }
 
         /// <summary>
-        /// 改宽度时保持水平中心不动。
-        /// <para>歌词换一句就变宽变窄，如果锚在左边，窗口会左右乱跳；锚在中心看起来才是"在屏幕那个位置"。 </para>
+        /// 改尺寸时怎么锚。
+        /// <para>
+        /// 用户<b>没动过</b>它时（位置来自设置恢复、设置方案、或首次居中）锚<b>左上角</b>：
+        /// 那时"上次放在这儿"是用户的意图，内容一变就重新居中会把它挪走半屏。
+        /// 用户<b>拖过</b>之后锚<b>水平中心</b>：歌词换一句就变宽变窄，锚在左边窗口会左右乱跳，
+        /// 锚在中心看起来才是"在屏幕那个位置"。
+        /// </para>
         /// </summary>
         private void ResizeKeepingCenter(Size size)
         {
-            var center = Left + Width / 2;
+            var anchor = _anchoredByContent ? Left + Width / 2 : Left;
 
             ClientSize = size;
-            Location = new Point(center - Width / 2, Top);
+            Location = new Point(_anchoredByContent ? anchor - Width / 2 : anchor, Top);
 
             ClampToWorkingArea();
         }
@@ -1017,6 +1046,9 @@ namespace 播放器.Ui
                     var nextTop = top + _currentHeight + LineGap;
                     DrawOutlined(g, _nextText, NextFont, new RectangleF(left, nextTop, boxWidth, _nextHeight + Slice));
                 }
+
+                // 控制条在文字下方（锁定或关掉时它自己不画，窗口也已经变矮了）
+                DrawControls(g);
             }
 
             _surface?.Dispose();
@@ -1111,7 +1143,14 @@ namespace 播放器.Ui
         {
             base.OnMouseDown(e);
 
+            // 记下按下的位置：双击那道"是不是落在按钮上"的判断用它，而不是实时光标位置
+            _lastMousePoint = e.Location;
+
             if (_locked || e.Button != MouseButtons.Left) return;
+
+            // 落在控制条按钮上就是"按按钮"，不是拖动：
+            // 拖动是桌面歌词唯一的移动方式，不能被按钮吃掉；反过来点按钮也不该把窗口拖走。
+            if (TryPressControl(e.Location)) return;
 
             _dragging = true;
             _dragOrigin = PointToScreen(e.Location);
@@ -1122,11 +1161,17 @@ namespace 播放器.Ui
         {
             base.OnMouseMove(e);
 
+            // 拖动中窗口跟着光标跑，按钮的"悬停"没有意义；不拖动时让高亮跟手，不等计时器节拍
+            if (!_dragging) UpdateHoveredControl(e.Location);
+
             if (!_dragging) return;
 
             // 用"窗口当初的位置 + 鼠标位移"来算，而不是累加每次的增量：
             // 累加会把每一次取整误差留下来，拖久了窗口会和光标脱节。
             var now = PointToScreen(e.Location);
+
+            // 用户真的动过它了：之后内容引起的伸缩以中心为锚（见 ResizeKeepingCenter）
+            _anchoredByContent = true;
 
             Location = new Point(
                 _dragWindowOrigin.X + now.X - _dragOrigin.X,
@@ -1137,6 +1182,8 @@ namespace 播放器.Ui
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            if (e.Button == MouseButtons.Left && _pressedControl >= 0) ReleaseControl(e.Location);
+
             _dragging = false;
             base.OnMouseUp(e);
 

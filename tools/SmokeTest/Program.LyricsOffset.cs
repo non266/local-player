@@ -504,8 +504,12 @@ namespace SmokeTest
                 return false;
             }
 
+            var onDiskBeforeClose = ReadDiskLyricsOffset(synced);
+
             form.Close();
             PumpMessages(250);
+
+            var onDiskAfterClose = ReadDiskLyricsOffset(synced);
 
             using (var reopened = new 播放器.MainForm(Array.Empty<string>()))
             {
@@ -529,7 +533,19 @@ namespace SmokeTest
 
                 if (restored != 500)
                 {
-                    Log(18, $"歌词偏移检查：重新启动之后这个文件的偏移没有回来（{restored} 毫秒）");
+                    // 三种"偏移没回来"要分得开，否则下次只能猜：
+                    //   ① 磁盘上本来就没了（关窗时被写掉）→ 落盘链路的问题
+                    //   ② 磁盘上是 500，但重开的窗体当前根本不是这首 → 会话被别的东西清掉了
+                    //   ③ 磁盘上是 500、当前也确实是这首，却读到 0 → 读回来那一步的问题
+                    var nowPath = SessionOf(reopened).Path;
+
+                    Log(18, $"歌词偏移检查：重新启动之后这个文件的偏移没有回来（{restored} 毫秒）。"
+                            + $"磁盘上：关窗前 {onDiskBeforeClose}、关窗后 {onDiskAfterClose}、"
+                            + $"现在 {ReadDiskLyricsOffset(synced)} 毫秒；"
+                            + $"重开窗体的当前文件「{nowPath ?? "（没有）"}」"
+                            + (string.Equals(nowPath, synced, StringComparison.OrdinalIgnoreCase)
+                                ? "（就是这首，读回来那一步的问题）"
+                                : "（不是这首：会话被别的东西清掉/换掉了）"));
                     return false;
                 }
 
@@ -545,5 +561,9 @@ namespace SmokeTest
 
         private static long CurrentOffset(Form form) =>
             SessionOf(form).LyricsOffsetMilliseconds;
+
+        /// <summary>直接从磁盘上读这个文件的歌词偏移（读不到就是 0）。失败信息里用它区分"谁把偏移弄丢了"。</summary>
+        private static long ReadDiskLyricsOffset(string path) =>
+            PlaybackHistory.Load().TryGetLyricsOffset(path, out var milliseconds) ? milliseconds : 0;
     }
 }

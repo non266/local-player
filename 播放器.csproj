@@ -16,7 +16,7 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <AssemblyTitle>全能本地播放器</AssemblyTitle>
     <Product>播放器</Product>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Company></Company>
     <NeutralLanguage>zh-CN</NeutralLanguage>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>

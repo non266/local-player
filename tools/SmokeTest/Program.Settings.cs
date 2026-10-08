@@ -82,6 +82,7 @@ namespace SmokeTest
 
                 if (!CheckPlaybackHistory()) return false;
                 if (!CheckPerFileAdjustments()) return false;
+                if (!CheckHistoryWriteBehind()) return false;
                 if (!CheckSettingsSalvage()) return false;
 
                 Log(8, "设置 JSON 往返正确，损坏内容可安全降级；播放历史与按文件记住的调整都正确");
@@ -96,6 +97,141 @@ namespace SmokeTest
             {
                 TryDeleteDirectory(folder);
             }
+        }
+
+        /// <summary>
+        /// M7：一次写入还在飞的时候又有了改动 —— 那次改动必须**最终落盘**。
+        /// <para>
+        /// 以前 <c>SaveInBackground()</c> 在"已有一次写入在飞"时直接早退，把这次改动留给
+        /// "下一次调用"；可关掉「记住播放进度」之后，按文件的调整（歌词偏移 / 音画 / 字幕延迟）
+        /// <b>只剩这一条落盘路径</b>（定时落盘与退出落盘都以那个开关为前提），
+        /// 于是"调完立刻关程序"可能把这次调整留在内存里。同一处还有第二个口子：
+        /// 退出时那条同步 <c>Save()</c> 不看"在飞"标志，可能被更旧的快照后落地盖回去。
+        /// </para>
+        /// <para>
+        /// 判据（靠测试门闩把时序摆出来，不靠运气）：把一次写入**按住**，
+        /// 按住期间再改一次，然后放行 —— 磁盘上最终必须是**新的**那个值；同步那条同理。
+        /// </para>
+        /// </summary>
+        private static bool CheckHistoryWriteBehind()
+        {
+            // 只当一个"历史键"用，不必真的存在这个文件
+            var probe = Path.Combine(AppSettings.SettingsDirectory, "write-behind-probe.mp3");
+            var history = PlaybackHistory.Load();
+
+            using var gate = new ManualResetEventSlim(false);
+            using var inWrite = new ManualResetEventSlim(false);
+
+            try
+            {
+                history.BeforeWriteGate = null;
+                history.RecordLyricsOffset(probe, 0);
+                history.Save();
+
+                if (ReadDiskLyricsOffset(probe) != 0)
+                {
+                    Log(8, "落盘复查检查：起点没清干净（磁盘上不是 0）");
+                    return false;
+                }
+
+                // ---- ① 后台写入在飞时又改了一次 ----
+                var adjustments = new PerFileAdjustments(history);
+                history.BeforeWriteGate = () => { inWrite.Set(); gate.Wait(5000); };
+
+                adjustments.RecordLyricsOffset(probe, 111);      // 排上一次写入，被门闩按住
+
+                if (!inWrite.Wait(3000))
+                {
+                    Log(8, "落盘复查检查：没能把一次后台写入按住（门闩没被调用）");
+                    return false;
+                }
+
+                adjustments.RecordLyricsOffset(probe, 222);      // 写入在飞：这一次必须由后台补写带走
+
+                gate.Set();
+
+                if (!WaitForDiskLyricsOffset(probe, 222, 5))
+                {
+                    Log(8, "落盘复查检查：写入在飞时改的那一次没有最终落盘"
+                            + $"（磁盘上是 {ReadDiskLyricsOffset(probe)} 毫秒，期望 222）");
+                    return false;
+                }
+
+                // ---- ② 退出时那条同步写，必须先等"在飞的那次"落地 ----
+                // 判据用**时长**，不用最终内容：两个写者用的是"临时文件 + 改名"，
+                // 撞在一起时其中一个会失败并把 _dirty 置回去，最后内容反而会被补写救回来——
+                // 那是另一条自愈路径，验不出"有没有等"。而"等没等"本身是可判定的：
+                // 门闩按住 300 ms，同步写就该在 200 ms 之后才返回。
+                gate.Reset();
+                inWrite.Reset();
+
+                history.RecordLyricsOffset(probe, 333);
+                history.SaveInBackground();
+
+                if (!inWrite.Wait(3000))
+                {
+                    Log(8, "落盘复查检查：第二次也没能按住写入");
+                    return false;
+                }
+
+                // 后台那次已经卡在门闩里了：把门闩摘掉，别让它再把这次**同步写**也按住——
+                // 要量的是"同步写有没有等"。
+                history.BeforeWriteGate = null;
+
+                history.RecordLyricsOffset(probe, 444);
+
+                var waitWatch = System.Diagnostics.Stopwatch.StartNew();
+                var release = System.Threading.Tasks.Task.Run(() => { Thread.Sleep(300); gate.Set(); });
+                history.Save();
+                waitWatch.Stop();
+                release.Wait();
+
+                if (waitWatch.ElapsedMilliseconds < 200)
+                {
+                    Log(8, "落盘复查检查：退出时那条同步写没有等在飞的那次写入"
+                            + $"（{waitWatch.ElapsedMilliseconds} ms 就返回了；在飞的那次要 300 ms 才放行）");
+                    return false;
+                }
+
+                // 落定之后，磁盘上应当是**最新**那个值（旧快照后落地就会被它盖回去）
+                var settle = DateTime.UtcNow.AddSeconds(3);
+                while (DateTime.UtcNow < settle && !history.SaveInBackground()) Thread.Sleep(20);
+
+                if (!WaitForDiskLyricsOffset(probe, 444, 5))
+                {
+                    Log(8, "落盘复查检查：退出时那条同步写被更旧的快照盖回去了"
+                            + $"（磁盘上是 {ReadDiskLyricsOffset(probe)} 毫秒，期望 444）");
+                    return false;
+                }
+
+                Log(8, "落盘复查正常：写入在飞时改的那次由后台补写带走（一次都不丢），"
+                        + "退出时那条同步写会先等在飞的那次落地（不会被旧快照盖回去）");
+                return true;
+            }
+            finally
+            {
+                // 门闩绝不能留给后面的步骤（否则会把别人的写入按住）
+                history.BeforeWriteGate = null;
+                gate.Set();
+
+                history.RecordLyricsOffset(probe, 0);
+                history.Save();
+            }
+        }
+
+        /// <summary>等到磁盘上这个文件的歌词偏移等于期望值（读的是文件，不是内存）。</summary>
+        private static bool WaitForDiskLyricsOffset(string path, long expected, int seconds)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(seconds);
+
+            while (DateTime.UtcNow < deadline)
+            {
+                if (ReadDiskLyricsOffset(path) == expected) return true;
+
+                Thread.Sleep(50);
+            }
+
+            return ReadDiskLyricsOffset(path) == expected;
         }
 
         /// <summary>

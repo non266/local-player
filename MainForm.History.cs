@@ -18,6 +18,12 @@ namespace 播放器
         private PerFileAdjustments? _adjustments;
 
         /// <summary>
+        /// 只读入口：这份窗体的播放历史（给冒烟测试摆"写入在飞时又改了"的时序用；
+        /// 主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。
+        /// </summary>
+        internal PlaybackHistory History => _history;
+
+        /// <summary>
         /// 按文件记住的调整（音画 / 字幕延迟、歌词偏移）。
         /// <para>和播放进度共用 <see cref="_history"/>，但落盘时机不同：
         /// 调整是用户调出来的，改一次就立刻落盘。</para>

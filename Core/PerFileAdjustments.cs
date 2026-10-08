@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace 播放器.Core
 {
@@ -66,22 +68,53 @@ namespace 播放器.Core
             return new TrackAdjustments(audio, subtitle, offset);
         }
 
-        /// <summary>记住这个文件的音画 / 字幕延迟，并立刻排一次后台落盘。</summary>
+        /// <summary>记住这个文件的音画 / 字幕延迟，并立刻落盘（一次都不许丢，见 <see cref="SaveEagerly"/>）。</summary>
         public void RecordDelays(string? path, long audioDelayMilliseconds, long subtitleDelayMilliseconds)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
 
             _history.RecordDelays(path, audioDelayMilliseconds, subtitleDelayMilliseconds);
-            _history.SaveInBackground();
+            SaveEagerly();
         }
 
-        /// <summary>记住这个文件的歌词偏移，并立刻排一次后台落盘。</summary>
+        /// <summary>记住这个文件的歌词偏移，并立刻落盘（一次都不许丢，见 <see cref="SaveEagerly"/>）。</summary>
         public void RecordLyricsOffset(string? path, long milliseconds)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
 
             _history.RecordLyricsOffset(path, milliseconds);
-            _history.SaveInBackground();
+            SaveEagerly();
+        }
+
+        /// <summary>
+        /// "改一次就落盘"这条承诺的落实处。
+        /// <para>
+        /// 直接排一次后台写入；要是**已经有一次写入在飞**（<see cref="PlaybackHistory.SaveInBackground"/>
+        /// 返回 <c>false</c>，改动只留在内存里），就在后台补一次——不能只等"下一次调用"：
+        /// <b>关掉「记住播放进度」之后，按文件的调整只剩这一条落盘路径</b>
+        /// （定时落盘与退出落盘都以那个开关为前提），而用户很可能调完就关程序。
+        /// </para>
+        /// <para>
+        /// 补写用的是**这个实例**（也就是持有这次改动的那个）：历史是"一个实例一份内存副本、
+        /// 共写同一个文件"，让写入任务自己复查 <c>_dirty</c> 而重写会把别的实例的旧快照冲出去。
+        /// 补几次还排不上（比如磁盘卡住）就退回同步写一次——它会先等在飞那次落地。
+        /// </para>
+        /// </summary>
+        private void SaveEagerly()
+        {
+            if (_history.SaveInBackground()) return;
+
+            Task.Run(() =>
+            {
+                for (var attempt = 0; attempt < 20; attempt++)
+                {
+                    Thread.Sleep(50);
+
+                    if (_history.SaveInBackground()) return;
+                }
+
+                _history.Save();
+            });
         }
     }
 }

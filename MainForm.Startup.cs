@@ -113,7 +113,11 @@ namespace 播放器
             tsbTogglePlaylist.Click += (s, e) => menuViewPlaylist.Checked = !menuViewPlaylist.Checked;
 
             // ---- 进度与音量 ----
-            trackSeek.MouseDown += (s, e) => _userSeeking = true;
+            // 只有左键才算"用户在拖动进度条"：右键点一下不该让界面计时器停摆、更不该顺手 seek 一次。
+            trackSeek.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left) _userSeeking = true;
+            };
             trackSeek.MouseUp += OnSeekMouseUp;
             trackSeek.Scroll += OnSeekScroll;
             trackVolume.Scroll += OnVolumeScroll;

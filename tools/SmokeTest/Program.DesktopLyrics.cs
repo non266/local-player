@@ -1805,7 +1805,7 @@ namespace SmokeTest
                     Log(15, $"桌面歌词检查：真鼠标拖不动（{start} → {moved}，期望 {expected}；"
                             + $"本线程收到 按下{watcher.DownCount} 移动{watcher.MoveCount} 抬起{watcher.UpCount}）——"
                             + "注意「按下 0 次」通常意味着那次点击被窗口自己取消了"
-                            + "（曾经就是「把前台还回去」把点击一起吃掉，见 README 6.8）");
+                            + "（曾经就是「把前台还回去」把点击一起吃掉，见 README「桌面歌词：一个\"不该被注意到\"的窗口」）");
                     return false;
                 }
             }

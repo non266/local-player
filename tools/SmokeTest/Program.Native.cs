@@ -48,6 +48,21 @@ namespace SmokeTest
             }
         }
 
+        // 鼠标消息与按键位：给"按住拖动"那种要分好几步发、中间还要断言的检查用。
+        // 进度条这类子控件要发到**它自己的句柄**上（座标是它的客户区座标），
+        // 走 SendMessage 还有个好处：不受"这台机器上有没有人在动鼠标"影响。
+        private const int WmMouseMove = 0x0200;
+        private const int WmLButtonDown = 0x0201;
+        private const int WmLButtonUp = 0x0202;
+        private const int WmRButtonDown = 0x0204;
+        private const int WmRButtonUp = 0x0205;
+        private const int WmMouseLeave = 0x02A3;
+        private const int MkLButton = 0x0001;
+
+        /// <summary>给某个控件发一条鼠标消息（<paramref name="x"/> / <paramref name="y"/> 是它的客户区座标）。</summary>
+        private static void SendMouseTo(Control control, int message, int x, int y, int buttons = 0) =>
+            SendMessage(control.Handle, message, (IntPtr)buttons, MouseLParam(x, y));
+
         /// <summary>往窗口里发一串鼠标消息，模拟一次真实的拖动。</summary>
         private static void DragWindow(Form window, int fromX, int fromY, int toX, int toY)
         {

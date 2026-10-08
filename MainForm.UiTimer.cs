@@ -40,7 +40,12 @@ namespace 播放器
                 _suppressSeekEvent = false;
             }
 
-            lblCurrentTime.Text = TimeFormatter.FormatWithHours(TimeSpan.FromMilliseconds(time));
+            // ⚠ 拖动期间不要用引擎时间覆盖"当前时间"：那一格显示的是用户要跳到的位置
+            // （由 OnSeekScroll 写）。以前这里无条件写，计时器每 200 ms 就把它盖回去一次，
+            // 表现就是"拖动时时间反复跳回真实播放进度"——两个写者互相盖。
+            if (!_userSeeking)
+                lblCurrentTime.Text = TimeFormatter.FormatWithHours(TimeSpan.FromMilliseconds(time));
+
             lblTotalTime.Text = length > 0
                 ? TimeFormatter.FormatWithHours(TimeSpan.FromMilliseconds(length))
                 : "--:--:--";
@@ -65,6 +70,8 @@ namespace 播放器
 
         private void OnSeekMouseUp(object? sender, MouseEventArgs e)
         {
+            // 只有左键拖动才算数：右键点一下进度条不该顺手 seek 一次（它只是"停下"，不该改变播放位置）。
+            if (e.Button != MouseButtons.Left) return;
             if (!_userSeeking) return;
             _userSeeking = false;
 

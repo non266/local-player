@@ -364,7 +364,12 @@ namespace 播放器.Ui
         protected override void OnMouseLeave(EventArgs e)
         {
             _hovering = false;
-            _dragging = false;
+
+            // 只在"真的没有捕获"时才结束拖动：按住拖到控件外面（比如进度条下方）时，
+            // 鼠标其实还在捕获中、还会继续把移动消息送进来——以前这里无条件清掉 _dragging，
+            // 于是"拖出去之后就不跟手了"。
+            if (_dragging && !Capture) _dragging = false;
+
             HideTip();
             Invalidate();
             base.OnMouseLeave(e);

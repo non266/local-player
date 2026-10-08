@@ -57,6 +57,11 @@ namespace 播放器
         /// </summary>
         internal AppSettings Settings => _settings;
 
+        /// <summary>
+        /// 只读入口：引擎（给冒烟测试读"现在到底在播哪儿"，例如拖动进度条时不许被 seek）。
+        /// </summary>
+        internal PlayerEngine Engine => _engine;
+
         private readonly PlayerEngine _engine;
 
         private readonly Playlist _playlist = new Playlist();

@@ -307,8 +307,26 @@ namespace 播放器
             SaveSession();
         }
 
-        private void OnFormClosedInternal(object? sender, FormClosedEventArgs e)
+        private void OnFormClosedInternal(object? sender, FormClosedEventArgs e) => ShutdownForm();
+
+        /// <summary>
+        /// 收尾：停表、落下历史、放掉引擎与各种资源。
+        /// <para>
+        /// <b>两条路都要走到这里</b>：正常关窗（<see cref="OnFormClosedInternal"/>）和
+        /// <b>只 Dispose 没 Close</b>（<see cref="Dispose(bool)"/>，冒烟里的 <c>using var form</c>
+        /// 就是这种用法）。以前只在 FormClosed 里收尾，于是"只 Dispose"会留下一个
+        /// <b>还在跑的 200 ms 计时器</b>和一个没放的引擎：那个计时器每 20 秒就把
+        /// <b>自己那份旧历史</b>（<c>_history</c> 是一个实例一份内存副本）写回磁盘，
+        /// 把别人刚写进去的记录盖掉——第 18 步偶发红的一个真实来源。
+        /// </para>
+        /// </summary>
+        private void ShutdownForm()
         {
+            if (_shutdown) return;
+            _shutdown = true;
+
+            FlushHistory();
+
             _disposed = true;
 
             _uiTimer.Stop();

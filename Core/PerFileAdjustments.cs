@@ -4,17 +4,19 @@ using System.Threading.Tasks;
 
 namespace 播放器.Core
 {
-    /// <summary>某个文件上次用的三样调整（毫秒）。没有记录时三项都是 0。</summary>
+    /// <summary>某个文件上次用的那几样调整（延迟是毫秒；没有记录时都是"没调过"）。</summary>
     public readonly struct TrackAdjustments
     {
         public TrackAdjustments(
             long audioDelayMilliseconds,
             long subtitleDelayMilliseconds,
-            long lyricsOffsetMilliseconds)
+            long lyricsOffsetMilliseconds,
+            ScreenRotation rotation = ScreenRotation.None)
         {
             AudioDelayMilliseconds = audioDelayMilliseconds;
             SubtitleDelayMilliseconds = subtitleDelayMilliseconds;
             LyricsOffsetMilliseconds = lyricsOffsetMilliseconds;
+            Rotation = rotation;
         }
 
         /// <summary>音画延迟：正值 = 声音延后。</summary>
@@ -26,11 +28,15 @@ namespace 播放器.Core
         /// <summary>歌词偏移：正值 = 歌词提前（和 LRC 的 <c>[offset:]</c> 同号）。</summary>
         public long LyricsOffsetMilliseconds { get; }
 
-        /// <summary>三样都是 0（等于"这个文件没调过"）。</summary>
+        /// <summary>画面旋转 / 翻转（按文件记住；<see cref="ScreenRotation.None"/> = 没转过）。</summary>
+        public ScreenRotation Rotation { get; }
+
+        /// <summary>几样都是"没调过"。</summary>
         public bool IsEmpty =>
             AudioDelayMilliseconds == 0 &&
             SubtitleDelayMilliseconds == 0 &&
-            LyricsOffsetMilliseconds == 0;
+            LyricsOffsetMilliseconds == 0 &&
+            Rotation == ScreenRotation.None;
     }
 
     /// <summary>
@@ -55,7 +61,7 @@ namespace 播放器.Core
             _history = history ?? throw new ArgumentNullException(nameof(history));
 
         /// <summary>
-        /// 取某个文件上次用的三样调整。没记过、或者路径不可记（网络流 / 空路径）时都是 0——
+        /// 取某个文件上次用的几样调整。没记过、或者路径不可记（网络流 / 空路径）时都是"没调过"——
         /// 读不会凭空建记录，所以"最近播放"不会被读操作污染。
         /// </summary>
         public TrackAdjustments Get(string? path)
@@ -64,8 +70,9 @@ namespace 播放器.Core
 
             _history.TryGetDelays(path, out var audio, out var subtitle);
             _history.TryGetLyricsOffset(path, out var offset);
+            _history.TryGetRotation(path, out var rotation);
 
-            return new TrackAdjustments(audio, subtitle, offset);
+            return new TrackAdjustments(audio, subtitle, offset, rotation);
         }
 
         /// <summary>记住这个文件的音画 / 字幕延迟，并立刻落盘（一次都不许丢，见 <see cref="SaveEagerly"/>）。</summary>
@@ -83,6 +90,17 @@ namespace 播放器.Core
             if (string.IsNullOrWhiteSpace(path)) return;
 
             _history.RecordLyricsOffset(path, milliseconds);
+            SaveEagerly();
+        }
+
+        /// <summary>
+        /// 记住这个文件的画面旋转 / 翻转，并立刻落盘（转个画面是按文件记的，换片要能自己回来）。
+        /// </summary>
+        public void RecordRotation(string? path, ScreenRotation rotation)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+
+            _history.RecordRotation(path, rotation);
             SaveEagerly();
         }
 

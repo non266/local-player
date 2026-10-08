@@ -26,6 +26,9 @@ namespace 播放器
             if (state is PlayerState.Stopped or PlayerState.Ended or PlayerState.Error)
                 sidebarPanel.VideoTools.SetPlaybackAvailable(false);
 
+            // 「画面旋转」那一组按"有没有画面"来置灰：音频文件点了也没用
+            RefreshRotationMenu();
+
             // 任务栏缩略图上的按钮跟着切换播放/暂停图标。
             _taskbarButtons?.SetPlaying(state == PlayerState.Playing);
 
@@ -98,7 +101,13 @@ namespace 播放器
             PlayNext(false);
         }
 
-        private void OnEngineTracksChanged(object? sender, EventArgs e) => RebuildTrackMenus();
+        private void OnEngineTracksChanged(object? sender, EventArgs e)
+        {
+            RebuildTrackMenus();
+
+            // 轨道变了（换片、字幕加载）"有没有视频轨"也可能变了
+            RefreshRotationMenu();
+        }
 
         private void OnShuffleChanged(object? sender, EventArgs e)
         {

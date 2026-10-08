@@ -24,6 +24,13 @@ namespace 播放器.Core
         /// <summary>拼一个媒体要带的全部选项。</summary>
         /// <param name="isStream">网络流（用网络缓存）还是本地文件（用文件缓存）。</param>
         /// <param name="normalizeVolume">要不要挂音量均衡。</param>
+        /// <remarks>
+        /// 🔴 <b>画面旋转不在这里</b>，虽然它也是一个"滤镜"。理由是实测出来的：
+        /// <c>transform</c> 是视频输出级的滤镜，只认<b>内核</b>的
+        /// <c>--video-filter</c> / <c>--transform-type</c>；写成媒体选项
+        /// （<c>:video-filter=transform</c> / <c>:transform-type=…</c>）四组写法全都不生效。
+        /// 见 <see cref="PlayerEngine.CoreArguments"/>。
+        /// </remarks>
         public static IReadOnlyList<string> For(bool isStream, bool normalizeVolume)
         {
             var options = new List<string>

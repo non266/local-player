@@ -13,6 +13,9 @@ namespace SmokeTest
 
         private static bool TestVideoFeatures()
         {
+            // 1.3.0 B-2：画面旋转 / 翻转（素材自己用 ffmpeg 合成，所以不依赖 播放器_TEST_VIDEO）
+            if (!CheckVideoRotation()) return false;
+
             var video = Environment.GetEnvironmentVariable("播放器_TEST_VIDEO");
 
             if (string.IsNullOrWhiteSpace(video) || !File.Exists(video))
@@ -471,6 +474,500 @@ namespace SmokeTest
                 PumpMessages(SettleAfterStepMs);
             }
         }
+
+        // -----------------------------------------------------------------
+        // B-2（1.3.0）：画面旋转 / 翻转
+        //
+        // 判据用"四个象限的颜色按预期搬家"，不是"像素差很大"那种弱判据：
+        // 旋转 180° 和水平翻转都会让整幅画面变得很不一样，弱判据分不出它们谁是谁。
+        // 素材由 ffmpeg 现场合成（一次性，不入库）：四个象限红 / 绿 / 蓝 / 黄，
+        // 没有 ffmpeg 就照 播放器_TEST_VIDEO 的先例打印原因后跳过。
+        // -----------------------------------------------------------------
+
+        /// <summary>四象限素材：宽高、以及画上去的四个颜色。</summary>
+        private const int QuadrantWidth = 320;
+
+        private const int QuadrantHeight = 240;
+
+        /// <summary>
+        /// B-2：画面旋转 / 翻转（按文件记住）。
+        /// <para>
+        /// 三段：<b>纯函数</b>（选项串按取值拼对、历史里那串字读得回来、认不出来的当不旋转）→
+        /// <b>真的转了</b>（合成四象限短片，用「视图 → 画面旋转」真实的菜单项逐个切，
+        /// 每次截一帧，断言四个象限的颜色按预期搬家）→ <b>按文件记住</b>
+        /// （切走再切回来，旋转自己回来）。
+        /// </para>
+        /// <para>
+        /// 每一次观测到的排布都打进日志：libvlc 的 <c>transform-type=90</c> 究竟是顺时针还是逆时针
+        /// <b>不靠猜</b>——实测出来是哪一边，菜单上的字就跟哪一边（C1 的教训："有插件"不等于"真的有效"）。
+        /// </para>
+        /// </summary>
+        private static bool CheckVideoRotation()
+        {
+            // ---- ① 纯函数：内核参数与那串字 ----
+            // 🔴 旋转只能在**内核**这一级设（媒体级四组写法实测全不生效），
+            // 所以判据落在 CoreArguments 上——那才是真正决定画面转不转的地方。
+            var clockwise = PlayerEngine.CoreArguments(ScreenRotation.Clockwise90);
+
+            if (!clockwise.Contains("--video-filter=transform") || !clockwise.Contains("--transform-type=90"))
+            {
+                Log(13, "画面旋转检查：顺时针 90° 的内核参数不对（" + string.Join(" ", clockwise) + "）");
+                return false;
+            }
+
+            var upsideDown = PlayerEngine.CoreArguments(ScreenRotation.UpsideDown);
+
+            if (!upsideDown.Contains("--transform-type=180"))
+            {
+                Log(13, "画面旋转检查：180° 的内核参数不对（" + string.Join(" ", upsideDown) + "）");
+                return false;
+            }
+
+            if (PlayerEngine.CoreArguments(ScreenRotation.None).Any(arg => arg.Contains("transform", StringComparison.Ordinal)))
+            {
+                Log(13, "画面旋转检查：不旋转的时候内核上还挂着 transform 滤镜");
+                return false;
+            }
+
+            if (ScreenRotations.Parse(string.Empty) != ScreenRotation.None ||
+                ScreenRotations.Parse("Clockwise90") != ScreenRotation.Clockwise90 ||
+                ScreenRotations.Parse("hflip") != ScreenRotation.FlipHorizontal ||
+                ScreenRotations.Parse("顺时针") != ScreenRotation.None)
+            {
+                Log(13, "画面旋转检查：历史里那串字读回来不对"
+                        + $"（空 → {ScreenRotations.Parse(string.Empty)}、"
+                        + $"Clockwise90 → {ScreenRotations.Parse("Clockwise90")}、"
+                        + $"hflip → {ScreenRotations.Parse("hflip")}、"
+                        + $"顺时针 → {ScreenRotations.Parse("顺时针")}）");
+                return false;
+            }
+
+            // 每个取值都要有自己的 libvlc 取值，且互不重复
+            var types = ScreenRotations.All
+                .Where(entry => entry.Value != ScreenRotation.None)
+                .Select(entry => ScreenRotations.TransformType(entry.Value))
+                .ToList();
+
+            if (types.Any(type => string.IsNullOrEmpty(type)) || types.Distinct().Count() != types.Count)
+            {
+                Log(13, "画面旋转检查：取值表里有两项对应同一个 transform-type（" + string.Join(" / ", types) + "）");
+                return false;
+            }
+
+            // ---- ② 真视频：四个象限的颜色按预期搬家 ----
+            if (!TryCreateQuadrantClip(out var clip, out var reason))
+            {
+                Log(13, "画面旋转检查：跳过（" + reason + "）");
+                return true;
+            }
+
+            // ===== 临时实验结束 =====
+            try
+            {
+                // 两首：第二首是同一个片子的副本（路径不同 = 一份独立的"按文件记住"）
+                var second = Path.Combine(AppContext.BaseDirectory, "rotate-quadrants-2.mp4");
+                File.Copy(clip, second, overwrite: true);
+
+                try
+                {
+                    return CheckRotationOnMainForm(clip, second);
+                }
+                finally
+                {
+                    TryDelete(second);
+                }
+            }
+            finally
+            {
+                TryDelete(clip);
+            }
+        }
+
+        /// <summary>
+        /// B-2 的真视频那一段：在真窗体上用「视图 → 画面旋转」的菜单项逐个切，
+        /// 每次截一帧读四个象限；最后验"按文件记住"（另一首不受影响、切回来自己回来）。
+        /// </summary>
+        private static bool CheckRotationOnMainForm(string clip, string second)
+        {
+            using var form = new 播放器.MainForm(new[] { clip, second });
+            form.Show();
+            PumpMessages(400);
+
+            var engine = form.Engine;
+            var menu = form.MenuRotation;
+
+            if (menu == null)
+            {
+                Log(13, "画面旋转检查：找不到「视图 → 画面旋转」");
+                return false;
+            }
+
+            if (!PumpUntil(() => engine.HasMedia && engine.HasVideo, 15000))
+            {
+                Log(13, $"画面旋转检查：四象限短片没播起来（有媒体 {engine.HasMedia}，有画面 {engine.HasVideo}）");
+                return false;
+            }
+
+            // 期望的排布：左上 / 右上 / 左下 / 右下（实测出来的，见 docs/1.3.0计划.md 的 B-2）
+            var expected = new Dictionary<ScreenRotation, string[]>
+            {
+                [ScreenRotation.None] = new[] { "红", "绿", "蓝", "黄" },
+                [ScreenRotation.Clockwise90] = new[] { "蓝", "红", "黄", "绿" },
+                [ScreenRotation.UpsideDown] = new[] { "黄", "蓝", "绿", "红" },
+                [ScreenRotation.CounterClockwise90] = new[] { "绿", "黄", "红", "蓝" },
+                [ScreenRotation.FlipHorizontal] = new[] { "绿", "红", "黄", "蓝" },
+                [ScreenRotation.FlipVertical] = new[] { "蓝", "黄", "红", "绿" }
+            };
+
+            var first = true;
+            var observed = new Dictionary<ScreenRotation, string>();
+
+            foreach (var (label, value) in ScreenRotations.All)
+            {
+                var item = RotationMenuItem(menu, value);
+
+                if (item == null)
+                {
+                    Log(13, $"画面旋转检查：菜单里没有「{label}」这一项");
+                    return false;
+                }
+
+                if (first)
+                {
+                    // 还没切过：先确认素材本身与截图链路是好的（否则后面全是在量别的东西）
+                    if (!PumpUntil(() => engine.Time >= 300, 8000))
+                    {
+                        Log(13, $"画面旋转检查：短片没有推进（{engine.Time} ms）");
+                        return false;
+                    }
+                }
+                else
+                {
+                    var before = engine.Time;
+
+                    item.PerformClick();
+                    PumpMessages(200);
+
+                    if (!PumpUntil(() => engine.HasMedia && engine.IsPlaying, 15000))
+                    {
+                        Log(13, $"画面旋转检查：切到「{label}」之后没有重新播起来");
+                        return false;
+                    }
+
+                    // 位置保持：换个画面不该把进度丢回开头（重载之后要回到切之前那一刻附近）
+                    if (!PumpUntil(() => Math.Abs(engine.Time - before) < 1500, 10000))
+                    {
+                        Log(13, $"画面旋转检查：切到「{label}」之后位置没回来"
+                                + $"（切之前在 {before} ms，现在 {engine.Time} ms）");
+                        return false;
+                    }
+                }
+
+                first = false;
+
+                // 停在固定的一帧再截图：素材是静态图案，所以 vout 的滞后不影响判据
+                engine.SeekTo(1000);
+                PumpMessages(700);
+
+                var actual = SnapshotQuadrants(engine, "rotate-" + value);
+
+                if (actual == null)
+                {
+                    Log(13, $"画面旋转检查：「{label}」截不到画面");
+                    return false;
+                }
+
+                observed[value] = string.Join(string.Empty, actual);
+
+                Log(13, $"画面旋转观测：「{label}」→ 左上{actual[0]} 右上{actual[1]} "
+                        + $"左下{actual[2]} 右下{actual[3]}");
+
+                if (!actual.SequenceEqual(expected[value]))
+                {
+                    Log(13, $"画面旋转检查：「{label}」的四个象限没有按预期搬家"
+                            + $"（观测 左上{actual[0]} 右上{actual[1]} 左下{actual[2]} 右下{actual[3]}；"
+                            + $"期望 左上{expected[value][0]} 右上{expected[value][1]} "
+                            + $"左下{expected[value][2]} 右下{expected[value][3]}）");
+                    return false;
+                }
+            }
+
+            if (observed.Values.Distinct().Count() < 5)
+            {
+                Log(13, "画面旋转检查：几种旋转截出来的画面几乎一样（"
+                        + string.Join(" / ", observed.Select(pair => pair.Key + "=" + pair.Value)) + "）");
+                return false;
+            }
+
+            // ---- ③ 按文件记住：切到另一首（没转过）不受影响，切回来自己回来 ----
+            var play = FindTopMenuItem(form, "播放");
+            var nextItem = play == null ? null : FindMenuItem(play.DropDownItems, "下一个");
+            var previousItem = play == null ? null : FindMenuItem(play.DropDownItems, "上一个");
+
+            if (nextItem == null || previousItem == null)
+            {
+                Log(13, "画面旋转检查：找不到「播放 → 下一个 / 上一个」");
+                return false;
+            }
+
+            var remembered = engine.Rotation;
+
+            if (remembered == ScreenRotation.None)
+            {
+                Log(13, "画面旋转检查：六种都切完了，最后一轮却没留下旋转值");
+                return false;
+            }
+
+            nextItem.PerformClick();
+            PumpMessages(300);
+
+            if (!PumpUntil(() => engine.CurrentPath != null &&
+                                 string.Equals(engine.CurrentPath, second, StringComparison.OrdinalIgnoreCase), 15000))
+            {
+                Log(13, "画面旋转检查：切到另一首没成功（现在在播 "
+                        + $"{Path.GetFileName(engine.CurrentPath ?? string.Empty)}）");
+                return false;
+            }
+
+            if (engine.Rotation != ScreenRotation.None)
+            {
+                Log(13, $"画面旋转检查：另一首（从没转过）却带着旋转 {engine.Rotation}");
+                return false;
+            }
+
+            engine.SeekTo(1000);
+            PumpMessages(700);
+
+            var otherQuadrants = SnapshotQuadrants(engine, "rotate-other");
+
+            if (otherQuadrants == null)
+            {
+                Log(13, "画面旋转检查：另一首截不到画面");
+                return false;
+            }
+
+            if (!otherQuadrants.SequenceEqual(expected[ScreenRotation.None]))
+            {
+                Log(13, "画面旋转检查：另一首的画面也被转了（"
+                        + $"左上{otherQuadrants[0]} 右上{otherQuadrants[1]} "
+                        + $"左下{otherQuadrants[2]} 右下{otherQuadrants[3]}）");
+                return false;
+            }
+
+            // 回到第一首：它自己记着的旋转要回来（先退到 3 秒以内，否则"上一个"是回本曲开头）
+            engine.SeekTo(500);
+            PumpMessages(300);
+            previousItem.PerformClick();
+            PumpMessages(300);
+
+            if (!PumpUntil(() => engine.CurrentPath != null &&
+                                 string.Equals(engine.CurrentPath, clip, StringComparison.OrdinalIgnoreCase), 15000))
+            {
+                Log(13, "画面旋转检查：切不回第一首（现在在播 "
+                        + $"{Path.GetFileName(engine.CurrentPath ?? string.Empty)}）");
+                return false;
+            }
+
+            if (engine.Rotation != remembered)
+            {
+                Log(13, $"画面旋转检查：切回来之后旋转没跟着回来（记着的是 {remembered}，现在是 {engine.Rotation}）");
+                return false;
+            }
+
+            engine.SeekTo(1000);
+            PumpMessages(700);
+
+            var backQuadrants = SnapshotQuadrants(engine, "rotate-back");
+
+            if (backQuadrants == null || !backQuadrants.SequenceEqual(expected[remembered]))
+            {
+                Log(13, "画面旋转检查：切回来之后画面没转（"
+                        + (backQuadrants == null
+                            ? "截不到画面"
+                            : $"左上{backQuadrants[0]} 右上{backQuadrants[1]} "
+                              + $"左下{backQuadrants[2]} 右下{backQuadrants[3]}") + "）");
+                return false;
+            }
+
+            Log(13, "画面旋转正常：内核参数按取值拼对（不旋转时不挂滤镜）、历史里那串字读得回来，"
+                    + "六种取值各自把四个象限搬到该去的位置（顺时针 90° / 180° / 逆时针 90° / "
+                    + "水平翻转 / 垂直翻转 互不相同），切换会重载并停在原位置，"
+                    + "旋转按文件各记各的（另一首不受影响、切回来自己回来）");
+            return true;
+        }
+
+        /// <summary>在「视图 → 画面旋转」里按取值找菜单项。</summary>
+        private static ToolStripMenuItem? RotationMenuItem(ToolStripMenuItem menu, ScreenRotation rotation)
+        {
+            foreach (var item in menu.DropDownItems.OfType<ToolStripMenuItem>())
+            {
+                if (item.Tag is ScreenRotation tag && tag == rotation) return item;
+            }
+
+            return null;
+        }
+
+        /// <summary>截一帧并读四个象限；截不到返回 <c>null</c>。</summary>
+        private static string[]? SnapshotQuadrants(PlayerEngine engine, string tag)
+        {
+            var shot = Path.Combine(AppContext.BaseDirectory, tag + ".png");
+
+            try
+            {
+                if (!engine.TakeSnapshot(shot) || !File.Exists(shot)) return null;
+
+                using var bitmap = new Bitmap(shot);
+                return ReadQuadrants(bitmap);
+            }
+            finally
+            {
+                TryDelete(shot);
+            }
+        }
+
+        /// <summary>
+        /// 读四个象限的中心颜色，各自归到 红 / 绿 / 蓝 / 黄 里最像的那一个。
+        /// <para>
+        /// 取一小块的平均值而不是单个像素：视频经过 YUV 与压缩，单个像素可能偏得离谱。
+        /// </para>
+        /// </summary>
+        private static string[] ReadQuadrants(Bitmap bitmap)
+        {
+            var names = new[] { "左上", "右上", "左下", "右下" };
+            var colours = new string[4];
+
+            for (var i = 0; i < 4; i++)
+            {
+                var x = (i % 2 == 0 ? bitmap.Width / 4 : bitmap.Width * 3 / 4);
+                var y = (i < 2 ? bitmap.Height / 4 : bitmap.Height * 3 / 4);
+
+                long r = 0, g = 0, b = 0;
+                var count = 0;
+
+                for (var dy = -5; dy <= 5; dy++)
+                {
+                    for (var dx = -5; dx <= 5; dx++)
+                    {
+                        var px = Math.Clamp(x + dx, 0, bitmap.Width - 1);
+                        var py = Math.Clamp(y + dy, 0, bitmap.Height - 1);
+
+                        var colour = bitmap.GetPixel(px, py);
+                        r += colour.R;
+                        g += colour.G;
+                        b += colour.B;
+                        count++;
+                    }
+                }
+
+                colours[i] = ClassifyColour((int)(r / count), (int)(g / count), (int)(b / count));
+            }
+
+            return colours;
+        }
+
+        /// <summary>把平均颜色归到四象限用的那四个颜色里最像的一个（认不出来返回 <c>"?"</c>）。</summary>
+        private static string ClassifyColour(int r, int g, int b)
+        {
+            const int Margin = 60;
+
+            if (r > b + Margin && g > b + Margin) return "黄";
+            if (r > g + Margin && r > b + Margin) return "红";
+            if (g > r + Margin && g > b + Margin) return "绿";
+            if (b > r + Margin && b > g + Margin) return "蓝";
+
+            return $"?({r},{g},{b})";
+        }
+
+        /// <summary>
+        /// 用 ffmpeg 现场合成一段四象限短片（左上红、右上绿、左下蓝、右下黄）。
+        /// <para>
+        /// 路径来自 <c>播放器_TEST_FFMPEG</c>，没设就用本机那把（见 docs/1.3.0计划.md 的假设）；
+        /// 两个都没有时返回 false 并给出理由（照 <c>播放器_TEST_VIDEO</c> 的规矩：跳过要出声）。
+        /// </para>
+        /// <para>
+        /// 刻意<b>不重定向</b>子进程的输出：冒烟测试可能跑在受限环境里，
+        /// 管道那头创建不出来会直接抛异常，而这里根本不需要读它的输出（日志级别压到 error）。
+        /// </para>
+        /// </summary>
+        private static bool TryCreateQuadrantClip(out string path, out string reason)
+        {
+            path = Path.Combine(AppContext.BaseDirectory, "rotate-quadrants.mp4");
+            reason = string.Empty;
+
+            var ffmpeg = Environment.GetEnvironmentVariable("播放器_TEST_FFMPEG");
+
+            if (string.IsNullOrWhiteSpace(ffmpeg))
+                ffmpeg = @"D:\ffmpeg-8.0-full_build\bin\ffmpeg.exe";
+
+            if (!File.Exists(ffmpeg))
+            {
+                reason = "没有 ffmpeg（设 播放器_TEST_FFMPEG 指一个，或者装到计划里那把路径）";
+                return false;
+            }
+
+            TryDelete(path);
+
+            var filter = string.Join(",", new[]
+            {
+                $"drawbox=x=0:y=0:w={QuadrantWidth / 2}:h={QuadrantHeight / 2}:c=red@1:t=fill",
+                $"drawbox=x={QuadrantWidth / 2}:y=0:w={QuadrantWidth / 2}:h={QuadrantHeight / 2}:c=green@1:t=fill",
+                $"drawbox=x=0:y={QuadrantHeight / 2}:w={QuadrantWidth / 2}:h={QuadrantHeight / 2}:c=blue@1:t=fill",
+                $"drawbox=x={QuadrantWidth / 2}:y={QuadrantHeight / 2}:w={QuadrantWidth / 2}:h={QuadrantHeight / 2}:c=yellow@1:t=fill",
+                "format=yuv420p"
+            });
+
+            var arguments = new[]
+            {
+                "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi",
+                "-i", $"color=c=black:s={QuadrantWidth}x{QuadrantHeight}:d=4:r=10",
+                "-vf", filter,
+                "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                path
+            };
+
+            try
+            {
+                using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = ffmpeg,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    Arguments = string.Join(" ", arguments.Select(QuoteArgument))
+                });
+
+                if (process == null)
+                {
+                    reason = "ffmpeg 起不来";
+                    return false;
+                }
+
+                if (!process.WaitForExit(30000))
+                {
+                    try { process.Kill(entireProcessTree: true); } catch (Exception) { /* 杀不掉就算了 */ }
+
+                    reason = "ffmpeg 30 秒没跑完";
+                    return false;
+                }
+
+                if (process.ExitCode != 0 || !File.Exists(path))
+                {
+                    reason = $"ffmpeg 合成四象限短片失败（退出码 {process.ExitCode}）";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = "调 ffmpeg 失败：" + ex.Message;
+                return false;
+            }
+        }
+
+        /// <summary>命令行的路径参数要带引号（Program Files 那种空格路径）。</summary>
+        private static string QuoteArgument(string argument) =>
+            argument.Any(char.IsWhiteSpace) ? "\"" + argument + "\"" : argument;
 
         /// <summary>打开视频并等到真正开始播放。</summary>
         private static bool PlayVideo(PlayerEngine engine, string video, out string error)

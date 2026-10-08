@@ -242,6 +242,9 @@ namespace 播放器
                 // 还没有媒体，逐帧与延迟按钮先禁用
                 sidebarPanel.VideoTools.SetPlaybackAvailable(false);
 
+                // 「画面旋转」整组也先禁用（没有画面时旋转是空操作）
+                RefreshRotationMenu();
+
                 menuResumePlayback.Checked = _settings.ResumePlayback;
                 menuRestorePlaylist.Checked = _settings.RestoreLastPlaylist;
                 menuGlobalMediaKeys.Checked = _settings.GlobalMediaKeys;

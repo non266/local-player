@@ -18,8 +18,33 @@ namespace 播放器.Core
     public sealed class PlayerEngine : IDisposable
     {
         private readonly ISynchronizeInvoke _ui;
-        private readonly LibVLC _libVlc;
-        private readonly MediaPlayer _mediaPlayer;
+
+        /// <summary>
+        /// 当前用的 libvlc 内核。
+        /// <para>
+        /// <b>不是 readonly</b>：画面旋转（<c>--video-filter=transform --transform-type=…</c>）
+        /// 只能在内核这一级设，所以"换一种旋转"就是"换一个内核"
+        /// （理由与实测见 <see cref="CoreArguments"/>）。
+        /// </para>
+        /// </summary>
+        private LibVLC _libVlc;
+
+        private MediaPlayer _mediaPlayer;
+
+        /// <summary>按旋转值缓存的内核：一个旋转值一个，惰性创建，最多 6 个。</summary>
+        private readonly Dictionary<ScreenRotation, LibVLC> _cores = new Dictionary<ScreenRotation, LibVLC>();
+
+        /// <summary>当前这个内核上带着哪种画面旋转。</summary>
+        private ScreenRotation _coreRotation;
+
+        /// <summary>正在换内核：这期间旧播放器发出来的状态事件要丢掉（那不是在放的东西）。</summary>
+        private bool _switchingCore;
+
+        // 换内核之后要重新铺上去的几样（libvlc 的播放器状态是每个播放器各一份）
+        private int _desiredVolume = 100;
+        private bool _desiredMuted;
+        private float _desiredRate = 1.0f;
+        private EqualizerState? _equalizerState;
 
         /// <summary>构造这个引擎的线程，也就是 UI 线程。</summary>
         private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
@@ -44,28 +69,144 @@ namespace 播放器.Core
         {
             _ui = ui ?? throw new ArgumentNullException(nameof(ui));
 
-            _libVlc = new LibVLC(
+            _libVlc = CreateCore(ScreenRotation.None);
+            _coreRotation = ScreenRotation.None;
+            _mediaPlayer = CreatePlayer(_libVlc);
+        }
+
+        /// <summary>
+        /// 一个内核要带的参数。
+        /// <para>
+        /// 🔴 <b>画面旋转只能在这里设</b>，这一点是实测出来的（B-2 的前置验证，四组探针）：
+        /// <c>transform</c> 是<b>视频输出级</b>的滤镜，它读的是<b>内核</b>的配置——
+        /// 媒体级的 <c>:video-filter=transform</c> / <c>:transform-type=…</c> 不论怎么写都不生效
+        /// （挂着链子也好、只写类型也好，画面一动不动）；实例级的 <c>--video-filter</c> /
+        /// <c>--transform-type</c> 立刻生效，而且<b>媒体级也覆盖不了内核里的类型</b>。
+        /// 所以"换了旋转值"就必须"换内核"，见 <see cref="EnsureCore"/>。
+        /// </para>
+        /// </summary>
+        internal static string[] CoreArguments(ScreenRotation rotation)
+        {
+            var args = new List<string>
+            {
                 "--no-video-title-show",   // 不在画面上叠加文件名
                 "--no-snapshot-preview",   // 截图时不闪一下预览
                 "--no-stats",
-                "--quiet");
+                "--quiet"
+            };
 
-            _mediaPlayer = new MediaPlayer(_libVlc);
+            var type = ScreenRotations.TransformType(rotation);
 
-            _mediaPlayer.Opening += (s, e) => { _endReached = false; SetState(PlayerState.Opening); };
-            _mediaPlayer.Playing += (s, e) => { _endReached = false; SetState(PlayerState.Playing); RaiseTracksChanged(); };
-            _mediaPlayer.Paused += (s, e) => SetState(PlayerState.Paused);
-            _mediaPlayer.Stopped += (s, e) => OnStopped();
-            _mediaPlayer.EndReached += (s, e) => OnEndReached();
-            _mediaPlayer.EncounteredError += (s, e) => OnEncounteredError();
-            _mediaPlayer.ESAdded += (s, e) => RaiseTracksChanged();
-            _mediaPlayer.ESDeleted += (s, e) => RaiseTracksChanged();
+            if (type != null)
+            {
+                args.Add("--video-filter=" + ScreenRotations.VideoFilter);
+                args.Add("--transform-type=" + type);
+            }
+
+            return args.ToArray();
         }
 
-        /// <summary>底层 LibVLC 实例，供时长扫描等辅助模块复用。</summary>
+        /// <summary>建一个内核并记进缓存（同一个旋转值只建一次）。</summary>
+        private LibVLC CreateCore(ScreenRotation rotation)
+        {
+            var core = new LibVLC(CoreArguments(rotation));
+            _cores[rotation] = core;
+            return core;
+        }
+
+        /// <summary>在新内核上建一个播放器，作为交换前的准备（状态由 <see cref="EnsureCore"/> 铺回去）。</summary>
+        private MediaPlayer CreatePlayer(LibVLC core)
+        {
+            var player = new MediaPlayer(core);
+
+            player.Opening += (s, e) => { if (!_switchingCore) OnOpening(); };
+            player.Playing += (s, e) => { if (!_switchingCore) OnPlaying(); };
+            player.Paused += (s, e) => { if (!_switchingCore) SetState(PlayerState.Paused); };
+            player.Stopped += (s, e) => { if (!_switchingCore) OnStopped(); };
+            player.EndReached += (s, e) => { if (!_switchingCore) OnEndReached(); };
+            player.EncounteredError += (s, e) => { if (!_switchingCore) OnEncounteredError(); };
+            player.ESAdded += (s, e) => { if (!_switchingCore) RaiseTracksChanged(); };
+            player.ESDeleted += (s, e) => { if (!_switchingCore) RaiseTracksChanged(); };
+
+            return player;
+        }
+
+        private void OnOpening()
+        {
+            _endReached = false;
+            SetState(PlayerState.Opening);
+        }
+
+        private void OnPlaying()
+        {
+            _endReached = false;
+            SetState(PlayerState.Playing);
+            RaiseTracksChanged();
+        }
+
+        /// <summary>
+        /// 把内核换成带 <paramref name="rotation"/> 的那个（同一个就什么都不做）。
+        /// <para>
+        /// 顺序要紧：<b>先建新播放器 → 通知界面把窗口改挂过去 → 再放掉旧播放器</b>。
+        /// 反过来的话窗口上会留着一个已经释放的播放器。
+        /// </para>
+        /// <para>
+        /// 旧<b>内核</b>不释放，留在 <see cref="_cores"/> 里（同一个旋转值下次还要用：
+        /// 关掉程序时统一释放）。
+        /// </para>
+        /// </summary>
+        private void EnsureCore(ScreenRotation rotation)
+        {
+            if (rotation == _coreRotation) return;
+
+            if (!_cores.TryGetValue(rotation, out var core)) core = CreateCore(rotation);
+
+            var old = _mediaPlayer;
+
+            _switchingCore = true;
+
+            try
+            {
+                DisposeCurrentMedia();
+
+                try { old.Stop(); }
+                catch (Exception ex) { AppLog.Swallowed("换内核之前停旧播放器失败。", ex); }
+
+                _libVlc = core;
+                _coreRotation = rotation;
+                _mediaPlayer = CreatePlayer(core);
+
+                ApplyPlayerState(_mediaPlayer);
+            }
+            finally
+            {
+                _switchingCore = false;
+            }
+
+            // 界面必须在这里把 VideoView 改挂到新的 Player 上（旧的那个紧接着就被释放）
+            CoreRebuilt?.Invoke(this, EventArgs.Empty);
+
+            try { old.Dispose(); }
+            catch (Exception ex) { AppLog.Swallowed("释放旧播放器失败。", ex); }
+        }
+
+        /// <summary>把"用户那一套"铺到一个（可能是全新的）播放器上。</summary>
+        private void ApplyPlayerState(MediaPlayer player)
+        {
+            player.Volume = Math.Clamp(_desiredVolume, 0, 100);
+            player.Mute = _desiredMuted;
+            player.SetRate(Math.Clamp(_desiredRate, 0.25f, 4.0f));
+
+            if (_equalizerState != null) ApplyEqualizerTo(player, _equalizerState);
+        }
+
+        /// <summary>
+        /// 底层 LibVLC 实例，供时长扫描等辅助模块复用。
+        /// <para>⚠ 换画面旋转时它会被换掉（见 <see cref="CoreRebuilt"/>），不要长期持有。</para>
+        /// </summary>
         public LibVLC LibVlc => _libVlc;
 
-        /// <summary>底层 MediaPlayer，仅供 VideoView 绑定使用。</summary>
+        /// <summary>底层 MediaPlayer，仅供 VideoView 绑定使用（换旋转时会换新的，见 <see cref="CoreRebuilt"/>）。</summary>
         public MediaPlayer Player => _mediaPlayer;
 
         /// <summary>当前引擎状态。</summary>
@@ -90,6 +231,16 @@ namespace 播放器.Core
 
         /// <summary>音轨/字幕轨道列表发生变化。</summary>
         public event EventHandler? TracksChanged;
+
+        /// <summary>
+        /// <b>内核被换掉了</b>（换画面旋转时）：<see cref="Player"/> 与 <see cref="LibVlc"/> 都是新的了。
+        /// <para>
+        /// ⚠ 处理器里<b>必须</b>把 <c>VideoView.MediaPlayer</c> 改挂到新的 <see cref="Player"/> 上，
+        /// 并把持有旧 <see cref="LibVlc"/> 的东西（时长扫描）重建——旧播放器在这个事件之后
+        /// 立刻就被释放了。
+        /// </para>
+        /// </summary>
+        public event EventHandler? CoreRebuilt;
 
         // ---- 属性 -------------------------------------------------------------
 
@@ -123,14 +274,22 @@ namespace 播放器.Core
         public int Volume
         {
             get => Math.Clamp(_mediaPlayer.Volume, 0, 100);
-            set => _mediaPlayer.Volume = Math.Clamp(value, 0, 100);
+            set
+            {
+                _desiredVolume = Math.Clamp(value, 0, 100);
+                _mediaPlayer.Volume = _desiredVolume;
+            }
         }
 
         /// <summary>是否静音。</summary>
         public bool Muted
         {
             get => _mediaPlayer.Mute;
-            set => _mediaPlayer.Mute = value;
+            set
+            {
+                _desiredMuted = value;
+                _mediaPlayer.Mute = value;
+            }
         }
 
         /// <summary>播放速率（1.0 为正常速度）。</summary>
@@ -141,7 +300,11 @@ namespace 播放器.Core
                 var rate = _mediaPlayer.Rate;
                 return rate <= 0 ? 1.0f : rate;
             }
-            set => _mediaPlayer.SetRate(Math.Clamp(value, 0.25f, 4.0f));
+            set
+            {
+                _desiredRate = Math.Clamp(value, 0.25f, 4.0f);
+                _mediaPlayer.SetRate(_desiredRate);
+            }
         }
 
         /// <summary>画面宽高比，例如 <c>"16:9"</c>；<c>null</c> 或空串表示默认。</summary>
@@ -164,6 +327,19 @@ namespace 播放器.Core
         /// </summary>
         public bool NormalizeVolume { get; set; }
 
+        /// <summary>
+        /// 画面旋转 / 翻转。
+        /// <para>
+        /// ⚠ 它是<b>内核级</b>选项（libvlc 3 的 <c>transform</c> 只能这么设，实测见
+        /// <see cref="CoreArguments"/>）：换它就要<b>换内核</b>，所以真正生效的时刻是
+        /// <see cref="Open"/>（界面那边是"按文件记住"的，开播之前摆好）。
+        /// </para>
+        /// </summary>
+        public ScreenRotation Rotation { get; set; }
+
+        /// <summary>当前媒体里有没有视频轨（音频文件、纯音频串流都是 false）。</summary>
+        public bool HasVideo => FindVideoTrack() != null;
+
         // ---- 打开与播放 -------------------------------------------------------
 
         /// <summary>
@@ -176,6 +352,10 @@ namespace 播放器.Core
 
             if (!MediaFormats.IsOpenable(path))
                 throw new FileNotFoundException("找不到媒体文件。", path);
+
+            // 画面旋转是内核级选项：要换的那种旋转和当前内核不一致时，在这里先换内核
+            // （界面会在 CoreRebuilt 里把窗口改挂到新播放器上）。
+            EnsureCore(Rotation);
 
             // 先释放上一个媒体，避免 libvlc 侧引用堆积。
             DisposeCurrentMedia();
@@ -324,11 +504,21 @@ namespace 播放器.Core
         /// <returns>是否成功。</returns>
         public bool ApplyEqualizer(EqualizerState? state)
         {
+            _equalizerState = state;
+            return ApplyEqualizerTo(_mediaPlayer, state);
+        }
+
+        /// <summary>
+        /// 把均衡器设置铺到指定的播放器上（换内核之后要重新铺一遍——
+        /// 均衡器是挂在播放器上的，不是内核上的）。
+        /// </summary>
+        private static bool ApplyEqualizerTo(MediaPlayer player, EqualizerState? state)
+        {
             try
             {
                 if (state == null || !state.Enabled)
                 {
-                    _mediaPlayer.UnsetEqualizer();
+                    player.UnsetEqualizer();
                     return true;
                 }
 
@@ -341,7 +531,7 @@ namespace 播放器.Core
                 equalizer.SetPreamp(state.Preamp);
                 for (var band = 0; band < bands; band++) equalizer.SetAmp(amps[band], (uint)band);
 
-                _mediaPlayer.SetEqualizer(equalizer);
+                player.SetEqualizer(equalizer);
                 return true;
             }
             catch (Exception)
@@ -873,11 +1063,17 @@ namespace 播放器.Core
             }
             catch (Exception) { }
 
-            try
+            // 缓存着的那几个内核（每个旋转值一个）也一起放掉
+            foreach (var core in _cores.Values)
             {
-                _libVlc.Dispose();
+                try
+                {
+                    core.Dispose();
+                }
+                catch (Exception) { }
             }
-            catch (Exception) { }
+
+            _cores.Clear();
         }
     }
 }

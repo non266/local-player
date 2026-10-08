@@ -84,6 +84,9 @@ namespace SmokeTest
                 // 1.3.0 A-3：「下一首播放」队列——插播时列表当前项不动，插播完回到列表继续
                 if (!CheckPlayNextQueue()) return false;
 
+                // 1.3.0：只 Dispose 没 Close 的表单必须把计时器停掉（僵尸会写旧历史）
+                if (!CheckDisposedFormStopsTimers()) return false;
+
                 // 启动是否恢复上次的播放列表：默认关（打开就是空列表），开关打开才恢复
                 if (!CheckStartupPlaylistPreference()) return false;
 
@@ -1680,6 +1683,65 @@ namespace SmokeTest
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// 只 Dispose 没 Close 的表单必须收干净。
+        /// <para>
+        /// 这是 1.3.0 查"第 18 步偶发红"时揪出来的：界面计时器以前<b>只在 FormClosed 里停</b>，
+        /// 而冒烟里到处是 <c>using var form</c>（只 Dispose、从不 Close），于是那个表单的
+        /// 200 ms 计时器<b>一直跑下去</b>——每 200 ms 读一次引擎、每 100 拍（20 秒）把
+        /// <b>自己那份旧历史</b>写回 <c>history.json</c>。历史是"一个实例一份内存副本、共写同一个文件"，
+        /// 所以僵尸那一下会把别的实例刚写进去的记录盖掉：第 18 步"偏移没写进 history.json"
+        /// 就是这么偶发红的（单跑这一步从来是绿的——那会儿还没有僵尸）。
+        /// </para>
+        /// </summary>
+        private static bool CheckDisposedFormStopsTimers()
+        {
+            var wav = Path.Combine(AppContext.BaseDirectory, "dispose-form.wav");
+            WriteWav(wav, seconds: 30, frequency: 440);
+
+            try
+            {
+                var form = new 播放器.MainForm(new[] { wav });
+
+                try
+                {
+                    form.Show();
+                    PumpMessages(400);
+
+                    if (!form.UiTimerRunning)
+                    {
+                        Log(6, "只 Dispose 检查：刚打开窗体时界面计时器就没在跑");
+                        return false;
+                    }
+
+                    PumpUntil(() => form.Engine.HasMedia && form.Engine.IsPlaying, 10000);
+
+                    // 冒烟里最常见的那种用法：只 Dispose，不 Close
+                    form.Dispose();
+                    PumpMessages(300);
+
+                    if (form.UiTimerRunning)
+                    {
+                        Log(6, "只 Dispose 的表单还在跑界面计时器"
+                                + "（它会每 20 秒把自己那份旧历史写回磁盘，盖掉别人刚写的记录）");
+                        return false;
+                    }
+
+                    Log(6, "只 Dispose 的表单收尾正常：界面计时器停了"
+                            + "（以前它会一直跑，每 20 秒把旧历史写回磁盘）");
+                    return true;
+                }
+                finally
+                {
+                    form.Dispose();
+                }
+            }
+            finally
+            {
+                TryDelete(wav);
+            }
         }
 
         /// <summary>

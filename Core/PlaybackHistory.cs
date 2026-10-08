@@ -32,6 +32,14 @@ namespace 播放器.Core
         /// 差得往往不是同一个数。</para>
         /// </summary>
         public long LyricsOffsetMilliseconds { get; set; }
+
+        /// <summary>
+        /// 这个文件上次用的画面旋转 / 翻转（<see cref="ScreenRotations.ToStorage"/> 写的那串字；
+        /// 空 = 不旋转）。
+        /// <para><b>只增字段</b>：老 <c>history.json</c> 里没有它，读出来就是空串 = 不旋转，
+        /// 不影响别的记录。</para>
+        /// </summary>
+        public string Rotation { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -235,6 +243,41 @@ namespace 播放器.Core
 
             milliseconds = record.LyricsOffsetMilliseconds;
             return milliseconds != 0;
+        }
+
+        /// <summary>
+        /// 记住某个文件的画面旋转 / 翻转。
+        /// <para>和 <see cref="RecordDelays"/> 一样刻意不动 <see cref="PlaybackRecord.LastPlayedUtc"/>：
+        /// 转个画面不等于"重新看过这个文件"，否则"最近播放"的顺序会被它搅乱。</para>
+        /// </summary>
+        public void RecordRotation(string filePath, ScreenRotation rotation)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return;
+            if (MediaFormats.IsStreamUri(filePath)) return;
+
+            if (!_records.TryGetValue(filePath, out var record))
+            {
+                record = new PlaybackRecord { FilePath = filePath };
+                _records[filePath] = record;
+            }
+
+            var value = ScreenRotations.ToStorage(rotation);
+            if (string.Equals(record.Rotation, value, StringComparison.Ordinal)) return;
+
+            record.Rotation = value;
+            _dirty = true;
+        }
+
+        /// <summary>取某个文件上次用的画面旋转；没记过时给"不旋转"。</summary>
+        public bool TryGetRotation(string filePath, out ScreenRotation rotation)
+        {
+            rotation = ScreenRotation.None;
+
+            if (string.IsNullOrWhiteSpace(filePath)) return false;
+            if (!_records.TryGetValue(filePath, out var record)) return false;
+
+            rotation = ScreenRotations.Parse(record.Rotation);
+            return rotation != ScreenRotation.None;
         }
 
         /// <summary>只清掉播放进度，保留"最近播放"。</summary>

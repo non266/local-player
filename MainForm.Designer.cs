@@ -8,10 +8,16 @@ namespace 播放器
         /// <summary>清理所有正在使用的资源。</summary>
         protected override void Dispose(bool disposing)
         {
-            if (disposing && (components != null))
+            if (disposing)
             {
-                components.Dispose();
+                // ⚠ 收尾不能只挂在 FormClosed 上：**只 Dispose 没 Close**（冒烟里的 using var form）
+                // 不会触发 FormClosed，那样会留下一个还在跑的计时器和一个没放的引擎，
+                // 前者的定时落盘会把别的实例刚写的历史盖掉。见 ShutdownForm 的说明。
+                ShutdownForm();
+
+                components?.Dispose();
             }
+
             base.Dispose(disposing);
         }
 

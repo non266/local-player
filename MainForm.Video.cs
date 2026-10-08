@@ -25,6 +25,7 @@ namespace 播放器
         private ToolStripMenuItem? _menuDeinterlace;
         private ToolStripMenuItem? _menuSync;
         private ToolStripMenuItem? _menuFrameStep;
+        private ToolStripMenuItem? _menuRotation;
 
         private System.Windows.Forms.Timer? _frameStepTimer;
         private bool _pendingFrameStep;
@@ -38,9 +39,125 @@ namespace 播放器
         private void ConfigureVideoMenus()
         {
             ConfigureDeinterlaceMenu();
+            ConfigureRotationMenu();
             ConfigureSyncMenu();
             ConfigureFrameStepMenu();
             WireVideoToolsView();
+        }
+
+        /// <summary>
+        /// 「视图 → 画面旋转」：不旋转 / 顺时针 90° / 180° / 逆时针 90° / 水平翻转 / 垂直翻转。
+        /// <para>
+        /// 按文件记住（和音画延迟一样），而且是<b>媒体级</b>滤镜：切换要重载当前这一首，
+        /// 但位置保持——旋转多半是"看着不对才去调"的，把进度丢掉会很难受。
+        /// </para>
+        /// </summary>
+        private void ConfigureRotationMenu()
+        {
+            _menuRotation = new ToolStripMenuItem("画面旋转");
+
+            foreach (var (label, value) in Core.ScreenRotations.All)
+            {
+                var item = new ToolStripMenuItem(label) { Tag = value, Name = "menuRotation" + value };
+                item.Click += (s, e) => SetRotation((ScreenRotation)item.Tag!);
+                _menuRotation.DropDownItems.Add(item);
+            }
+
+            InsertIntoViewMenu(_menuRotation, menuViewAspect);
+        }
+
+        /// <summary>只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。</summary>
+        internal ToolStripMenuItem? MenuRotation => _menuRotation;
+
+        /// <summary>建一个时长扫描器接在当前内核上（换内核之后要重来一遍）。</summary>
+        private DurationScanner CreateScanner()
+        {
+            var scanner = new DurationScanner(_engine.LibVlc);
+            scanner.DurationFound += OnDurationFound;
+
+            return scanner;
+        }
+
+        private void RebuildScanner() => _scanner = CreateScanner();
+
+        /// <summary>
+        /// 引擎换了内核（换画面旋转时，libvlc 3 的 <c>transform</c> 只能在内核级设）：
+        /// 把窗口与时长扫描改挂到新播放器 / 新内核上，并把音量 / 静音 / 速率 / 均衡器重新铺一遍
+        /// ——那些状态挂在<b>播放器</b>上，换了播放器就没了。
+        /// </summary>
+        private void OnEngineCoreRebuilt()
+        {
+            videoView.MediaPlayer = _engine.Player;
+
+            _scanner.DurationFound -= OnDurationFound;
+            _scanner.Dispose();
+            RebuildScanner();
+
+            _engine.Volume = _settings.Volume;
+            _engine.Muted = _settings.Muted;
+            _engine.Rate = _settings.Rate <= 0 ? 1.0f : _settings.Rate;
+            ApplyEqualizer();
+
+            UpdateVolumeLabel();
+
+            AppLog.Info("换了 libvlc 内核以应用画面旋转。");
+        }
+
+        /// <summary>
+        /// 画面旋转 / 翻转。<b>按文件记住</b>，改完重载当前这一首才生效（媒体级滤镜）。
+        /// </summary>
+        private void SetRotation(ScreenRotation rotation)
+        {
+            if (_track.Path is not { Length: > 0 } path)
+            {
+                SetStatus("请先播放一个视频，再调整画面旋转");
+                return;
+            }
+
+            // 音频文件没有画面：如实说一句，别记一条用不上的设置
+            if (!_engine.HasVideo && rotation != _engine.Rotation)
+            {
+                SetStatus("这个文件没有画面（音频），旋转对它没有作用");
+                return;
+            }
+
+            Adjustments.RecordRotation(path, rotation);
+
+            _engine.Rotation = rotation;
+            ApplyRotationMenu(rotation);
+
+            var position = _engine.Time;
+
+            PlayIndex(_playlist.CurrentIndex);
+
+            // 重载之后回到原来的位置（界面计时器会在媒体真的播起来之后定位）。
+            _pendingResume = position > 0 ? TimeSpan.FromMilliseconds(position) : (TimeSpan?)null;
+
+            SetStatus($"画面旋转：{Core.ScreenRotations.Describe(rotation)}"
+                      + $"（已重新起播以应用，从 {TimeFormatter.FormatWithHours(TimeSpan.FromMilliseconds(position))} 继续）");
+        }
+
+        private void ApplyRotationMenu(ScreenRotation rotation)
+        {
+            if (_menuRotation == null) return;
+
+            foreach (ToolStripItem item in _menuRotation.DropDownItems)
+            {
+                if (item is ToolStripMenuItem menuItem && menuItem.Tag is ScreenRotation value)
+                    menuItem.Checked = value == rotation;
+            }
+        }
+
+        /// <summary>
+        /// 没有画面（音频、或者还没开始播）时整组点不动：旋转对它是空操作，
+        /// 点了没反应只会让人以为功能坏了。
+        /// </summary>
+        private void RefreshRotationMenu()
+        {
+            if (_menuRotation == null) return;
+
+            _menuRotation.Enabled = _engine.HasMedia && _engine.HasVideo;
+            ApplyRotationMenu(_engine.Rotation);
         }
 
         private void ConfigureDeinterlaceMenu()

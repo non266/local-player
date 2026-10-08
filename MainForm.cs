@@ -73,7 +73,14 @@ namespace 播放器
         /// </summary>
         internal Playlist Playlist => _playlist;
 
-        private readonly DurationScanner _scanner;
+        /// <summary>
+        /// 时长扫描器。
+        /// <para>
+        /// <b>不是 readonly</b>：它拿着一个 libvlc 内核，而换画面旋转会换内核
+        /// （见 <see cref="OnEngineCoreRebuilt"/>），那时候要重建一个。
+        /// </para>
+        /// </summary>
+        private DurationScanner _scanner;
 
         private readonly System.Windows.Forms.Timer _uiTimer;
 
@@ -121,6 +128,16 @@ namespace 播放器
         /// <summary>状态栏那一行字（测试报失败时连同它一起说出来）。</summary>
         internal string StatusText => lblStatus.Text ?? string.Empty;
 
+        /// <summary>
+        /// 界面计时器还在不在跑（给冒烟测试用）。
+        /// <para>
+        /// 它每 200 ms 读一次引擎、每 20 秒把这份实例的历史落一次盘；
+        /// <b>只 Dispose 没 Close</b> 的表单要是没把它停掉，就会变成一个一直写旧数据的僵尸
+        /// （见 <c>ShutdownForm</c> 的说明）。
+        /// </para>
+        /// </summary>
+        internal bool UiTimerRunning => _uiTimer.Enabled;
+
         /// <summary>桌面歌词解锁热键（Ctrl+Alt+D）是否注册上了。</summary>
         private bool _desktopLyricsHotKeyRegistered;
 
@@ -135,6 +152,9 @@ namespace 播放器
         private bool _suspendUiEvents;
 
         private bool _disposed;
+
+        /// <summary>收尾是否已经跑过（关窗与 Dispose 都会来，只能收一次）。</summary>
+        private bool _shutdown;
 
         private int _consecutiveErrors;
 
@@ -156,8 +176,11 @@ namespace 播放器
             _engine = new PlayerEngine(this);
             videoView.MediaPlayer = _engine.Player;
 
-            _scanner = new DurationScanner(_engine.LibVlc);
-            _scanner.DurationFound += OnDurationFound;
+            // 换画面旋转时引擎会换内核（libvlc 3 的 transform 只能在实例级设）：
+            // 窗口与时长扫描都要重新接上，播放器状态也要重新铺一遍。
+            _engine.CoreRebuilt += (s, e) => OnEngineCoreRebuilt();
+
+            _scanner = CreateScanner();
 
             _uiTimer = new System.Windows.Forms.Timer { Interval = 200 };
             _uiTimer.Tick += OnUiTimerTick;

@@ -109,6 +109,10 @@ namespace 播放器
                     // 同一首重新起播（例如开了音量均衡要重载媒体）不算换歌，见那个方法的说明。
                     ClearAbLoopForOtherFile(item.FilePath);
 
+                    // 画面旋转是内核级选项（libvlc 3 的 transform 只能在实例级设）：
+                    // 必须在创建媒体之前摆好，开播时那个内核不一致就换内核（换片自动恢复）。
+                    _engine.Rotation = Adjustments.Get(item.FilePath).Rotation;
+
                     AppLog.Info($"打开媒体：{item.FilePath}");
 
                     _engine.Open(item.FilePath);

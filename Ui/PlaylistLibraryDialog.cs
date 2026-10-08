@@ -51,9 +51,13 @@ namespace 播放器.Ui
         private readonly Button _appendButton = new Button();
         private readonly Button _newButton = new Button();
         private readonly Button _renameButton = new Button();
+        private readonly Button _batchButton = new Button();
         private readonly Button _deleteButton = new Button();
         private readonly Button _folderButton = new Button();
         private readonly Button _closeButton = new Button();
+
+        /// <summary>正在拖自己的行（调整歌单顺序）——用来和"从外面拖 m3u 进来"区分开。</summary>
+        private bool _draggingRow;
 
         private readonly Selection _result;
 
@@ -124,7 +128,10 @@ namespace 播放器.Ui
         {
             _hint.AutoSize = true;
             _hint.Text = "歌单存在数据目录的「播放列表」文件夹里，一个歌单一个 m3u8 文件。"
-                         + "双击一行就能载入；按住 Ctrl / Shift 可以多选，多选之后「删除」会一次删掉这几个。"
+                         + "双击一行就能载入；按住 Ctrl / Shift 可以多选，多选之后「删除」会一次删掉这几个、"
+                         + "「批量重命名…」会按这里的顺序把它们改成「基名 1」「基名 2」…。"
+                         + "拖动一行可以调整歌单顺序（顺序记在同一个文件夹的「" + PlaylistLibrary.OrderFileName
+                         + "」里，删掉它就回到按名字排）。"
                          + "外面的 m3u / m3u8 也可以直接拖进来收进歌单库。";
             _list.View = View.Details;
             _list.FullRowSelect = true;
@@ -147,6 +154,12 @@ namespace 播放器.Ui
             _list.DragEnter += OnDragEnter;
             _list.DragDrop += OnDragDrop;
 
+            // 拖动自己的一行 = 调整歌单顺序（和"从外面拖文件进来"是两条路，见 _draggingRow）
+            _list.ItemDrag += OnRowDrag;
+            _list.DragOver += OnRowsDragOver;
+            _list.DragDrop += OnRowsDragDrop;
+            _list.DragLeave += (s, e) => _list.InsertionMark.Index = -1;
+
             _detail.AutoSize = true;
 
             _loadButton.Text = "载入（替换当前列表）";
@@ -161,6 +174,9 @@ namespace 播放器.Ui
             _renameButton.Text = "重命名…";
             _renameButton.Click += (s, e) => RenameSelected();
 
+            _batchButton.Text = "批量重命名…";
+            _batchButton.Click += (s, e) => BatchRename(null);
+
             _deleteButton.Text = "删除";
             _deleteButton.Click += (s, e) => DeleteSelected(confirm: true);
 
@@ -173,7 +189,7 @@ namespace 播放器.Ui
             Controls.AddRange(new Control[]
             {
                 _hint, _list, _detail,
-                _loadButton, _appendButton, _newButton, _renameButton, _deleteButton,
+                _loadButton, _appendButton, _newButton, _renameButton, _batchButton, _deleteButton,
                 _folderButton, _closeButton
             });
 
@@ -226,6 +242,7 @@ namespace 播放器.Ui
             var closeWidth = Scaled(90);
             var newWidth = Scaled(120);
             var renameWidth = Scaled(90);
+            var batchWidth = Scaled(130);
             var deleteWidth = Scaled(76);
             var folderWidth = Scaled(140);
 
@@ -242,8 +259,11 @@ namespace 播放器.Ui
             _renameButton.Bounds = new Rectangle(
                 _newButton.Right + gap, secondRow, renameWidth, buttonHeight);
 
+            _batchButton.Bounds = new Rectangle(
+                _renameButton.Right + gap, secondRow, batchWidth, buttonHeight);
+
             _deleteButton.Bounds = new Rectangle(
-                _renameButton.Right + gap, secondRow, deleteWidth, buttonHeight);
+                _batchButton.Right + gap, secondRow, deleteWidth, buttonHeight);
 
             _folderButton.Bounds = new Rectangle(
                 _deleteButton.Right + gap, secondRow, folderWidth, buttonHeight);
@@ -341,6 +361,9 @@ namespace 播放器.Ui
             _loadButton.Enabled = count == 1;
             _appendButton.Enabled = count == 1;
             _renameButton.Enabled = count == 1;
+
+            // 批量重命名要的就是"选了好几份"：一份直接点「重命名…」就够了
+            _batchButton.Enabled = count > 1;
 
             // 删除支持多选：选中几个就删几个，按钮上直接写出个数
             _deleteButton.Enabled = count > 0;
@@ -565,6 +588,258 @@ namespace 播放器.Ui
             }
         }
 
+        // ---- 拖动换位（调整歌单顺序） -------------------------------------------
+
+        private void OnRowDrag(object? sender, ItemDragEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+
+            // 和主列表一样只拖"一行"：多选时拖哪一行都不明确（多选是给删除 / 批量重命名用的）
+            if (_list.SelectedItems.Count != 1) return;
+            if (e.Item is not ListViewItem row) return;
+
+            _draggingRow = true;
+
+            try
+            {
+                _list.DoDragDrop(row, DragDropEffects.Move);
+            }
+            finally
+            {
+                _draggingRow = false;
+                _list.InsertionMark.Index = -1;
+            }
+        }
+
+        private void OnRowsDragOver(object? sender, DragEventArgs e)
+        {
+            if (!_draggingRow) return;      // 从外面拖文件进来时走导入那条路
+
+            var point = _list.PointToClient(new Point(e.X, e.Y));
+            var target = _list.InsertionMark.NearestIndex(point);
+
+            if (target > -1)
+            {
+                var bounds = _list.GetItemRect(target);
+
+                _list.InsertionMark.AppearsAfterItem = point.Y > bounds.Top + bounds.Height / 2;
+                _list.InsertionMark.Index = target;
+            }
+
+            e.Effect = DragDropEffects.Move;
+        }
+
+        private void OnRowsDragDrop(object? sender, DragEventArgs e)
+        {
+            if (!_draggingRow) return;      // 同上
+
+            var insertAt = _list.InsertionMark.Index;
+            var after = _list.InsertionMark.AppearsAfterItem;
+            _list.InsertionMark.Index = -1;
+
+            if (insertAt < 0 || _list.SelectedIndices.Count != 1) return;
+
+            MoveSelectedTo(TargetIndex(_list.SelectedIndices[0], insertAt, after));
+        }
+
+        /// <summary>
+        /// 拖放的"插到哪儿"换成"挪完之后的最终下标"。
+        /// <para>
+        /// 插到自己后面时要减一：把自己从列表里摘掉之后，后面的下标会整体前移一位。
+        /// 主列表的拖动换位是同一个算术（那里写在 <c>OnPlaylistReorderDrop</c> 里）；
+        /// 这里抽成纯函数是为了能直接断言——差一位这种错在界面上很难看出来。
+        /// </para>
+        /// </summary>
+        internal static int TargetIndex(int from, int insertAt, bool after)
+        {
+            var target = after ? insertAt + 1 : insertAt;
+
+            if (target > from) target--;
+
+            return Math.Max(0, target);
+        }
+
+        /// <summary>
+        /// 把选中的那一行挪到第 <paramref name="targetIndex"/> 位，<b>顺序立即写进顺序文件</b>
+        /// （这个窗口的语义就是"直接动文件"，拖完不落盘等于白拖）。
+        /// </summary>
+        internal bool MoveSelectedTo(int targetIndex) => MoveSelectedTo(targetIndex, interactive: true);
+
+        /// <summary>
+        /// 同上；<paramref name="interactive"/> 为 false 时失败也不弹框（理由写进窗口里那行字），
+        /// 供冒烟测试驱动——模态框会把测试挂死。
+        /// </summary>
+        internal bool MoveSelectedTo(int targetIndex, bool interactive)
+        {
+            var selected = SelectedPlaylist();
+            if (selected == null) return false;
+
+            if (!PlaylistLibrary.Move(selected.Name, targetIndex, out var error))
+            {
+                if (interactive)
+                    MessageBox.Show(this, error, "调整歌单顺序失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                _note = error;
+                UpdateDetail();
+                return false;
+            }
+
+            _result.Changed = true;
+            Reload(selected.Name);
+
+            _note = $"已把「{selected.Name}」挪到第 {targetIndex + 1} 位"
+                    + $"（顺序记在 {PlaylistLibrary.OrderFileName} 里，删掉它就回到按名字排）。";
+
+            UpdateDetail();
+            return true;
+        }
+
+        // ---- 批量重命名 ---------------------------------------------------------
+
+        /// <summary>
+        /// 批量重命名选中的歌单：按<b>列表显示顺序</b>依次改成「基名 1」「基名 2」…
+        /// <para>
+        /// <b>先把所有新名字验一遍，再动文件</b>：任何一个不合法、或者撞上别的歌单，
+        /// 就一个文件都不动——批量操作改到一半最难受（手上几个改了一半的名字，
+        /// 还得自己去分辨哪几个是新的）。
+        /// </para>
+        /// <para><paramref name="rawBaseName"/> 为 <c>null</c> 时弹输入框（冒烟测试直接传基名）。</para>
+        /// </summary>
+        /// <returns>真的改了几个。</returns>
+        internal int BatchRename(string? rawBaseName) => BatchRename(rawBaseName, interactive: true);
+
+        /// <summary>
+        /// 同上；<paramref name="interactive"/> 为 false 时<b>一个对话框都不弹</b>
+        /// （理由写进窗口下方那行字里），供冒烟测试驱动——模态框会把测试挂死。
+        /// </summary>
+        internal int BatchRename(string? rawBaseName, bool interactive)
+        {
+            var selected = SelectedPlaylists();
+
+            // 被挡住时统一走这里：该弹框的弹框，不弹框时也要把理由留在窗口里
+            int Reject(string message, string title)
+            {
+                if (interactive)
+                {
+                    MessageBox.Show(this, message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+
+                _note = message.Replace(Environment.NewLine, " ");
+                UpdateDetail();
+                return 0;
+            }
+
+            if (selected.Count < 2)
+            {
+                if (interactive && rawBaseName == null)
+                {
+                    MessageBox.Show(
+                        this,
+                        "批量重命名要先选中两份以上；只改一份直接点「重命名…」就行。",
+                        "批量重命名歌单",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+
+                return 0;
+            }
+
+            var baseName = rawBaseName;
+
+            if (baseName == null)
+            {
+                baseName = InputDialog.Show(
+                    this,
+                    "批量重命名歌单",
+                    $"新名字的基名（这 {selected.Count} 份会按这里的顺序变成「基名 1」「基名 2」…）：",
+                    "歌单");
+
+                if (baseName == null) return 0;
+            }
+
+            // ---- ① 先把全部目标名字算出来并验一遍 ----
+            var plans = new List<(string Old, string New)>();
+
+            for (var i = 0; i < selected.Count; i++)
+            {
+                if (!PlaylistLibrary.TryNormalizeName($"{baseName} {i + 1}", out var clean, out var error))
+                    return Reject(error, "批量重命名歌单失败");
+
+                plans.Add((selected[i].Name, clean));
+            }
+
+            foreach (var plan in plans)
+            {
+                // 自己的名字没变（"基名 1"正好就是它现在叫的）：放行，不用动文件
+                if (string.Equals(plan.Old, plan.New, StringComparison.CurrentCultureIgnoreCase)) continue;
+
+                if (PlaylistLibrary.Exists(plan.New))
+                {
+                    return Reject(
+                        $"已经有一个叫「{plan.New}」的歌单了，这次一个文件都没动。"
+                        + Environment.NewLine + Environment.NewLine
+                        + "换个基名，或者先把那份改名 / 删掉再试。",
+                        "批量重命名歌单失败");
+                }
+            }
+
+            var duplicate = plans
+                .GroupBy(plan => plan.New, StringComparer.CurrentCultureIgnoreCase)
+                .FirstOrDefault(group => group.Count() > 1);
+
+            if (duplicate != null)
+                return Reject($"算出来的名字里有重复的「{duplicate.Key}」，这次一个文件都没动。", "批量重命名歌单失败");
+
+            // ---- ② 验完了才动文件 ----
+            var renamed = new List<string>();
+            var failures = new List<string>();
+
+            foreach (var plan in plans)
+            {
+                if (string.Equals(plan.Old, plan.New, StringComparison.CurrentCultureIgnoreCase))
+                {
+                    renamed.Add(plan.New);
+                    continue;
+                }
+
+                if (!PlaylistLibrary.Rename(plan.Old, plan.New, out var actual, out var error))
+                {
+                    failures.Add($"「{plan.Old}」：{error}");
+                    continue;
+                }
+
+                if (IsCurrent(plan.Old)) _result.CurrentName = actual;
+
+                renamed.Add(actual);
+            }
+
+            if (renamed.Count == 0)
+                return Reject(string.Join(Environment.NewLine, failures), "批量重命名歌单失败");
+
+            _result.Changed = true;
+            Reload(renamed[renamed.Count - 1]);
+
+            _note = $"已重命名 {renamed.Count} 个：{string.Join(" / ", renamed)}。";
+
+            if (failures.Count > 0)
+            {
+                _note += $" 另有 {failures.Count} 个没改成：{string.Join("；", failures)}";
+
+                if (interactive)
+                {
+                    MessageBox.Show(
+                        this,
+                        string.Join(Environment.NewLine, failures),
+                        "部分歌单没改成",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+            }
+
+            UpdateDetail();
+            return renamed.Count;
+        }
+
         // ---- 拖入 m3u 导入 -----------------------------------------------------
 
         private static bool HasPlaylistFiles(IDataObject? data)
@@ -584,11 +859,22 @@ namespace 播放器.Ui
                    || string.Equals(extension, ".m3u8", StringComparison.OrdinalIgnoreCase);
         }
 
-        private void OnDragEnter(object? sender, DragEventArgs e) =>
+        private void OnDragEnter(object? sender, DragEventArgs e)
+        {
+            // 拖自己的一行（调整顺序）不是"拖文件进来"，别把它判成 None
+            if (_draggingRow || e.Data?.GetDataPresent(typeof(ListViewItem)) == true)
+            {
+                e.Effect = DragDropEffects.Move;
+                return;
+            }
+
             e.Effect = HasPlaylistFiles(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
+        }
 
         private void OnDragDrop(object? sender, DragEventArgs e)
         {
+            if (_draggingRow || e.Data?.GetDataPresent(typeof(ListViewItem)) == true) return;
+
             if (e.Data?.GetData(DataFormats.FileDrop) is not string[] files) return;
 
             var imported = new List<string>();

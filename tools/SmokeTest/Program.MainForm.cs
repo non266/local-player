@@ -72,6 +72,9 @@ namespace SmokeTest
                 // A1：启动恢复上次列表时不做同步磁盘查询，打不开的交给后台核对标出来
                 if (!CheckRestoreSessionOptimistic()) return false;
 
+                // 启动是否恢复上次的播放列表：默认关（打开就是空列表），开关打开才恢复
+                if (!CheckStartupPlaylistPreference()) return false;
+
                 // A2：全局媒体键"哪几个没注册上"要说清是哪一个
                 if (!CheckMediaKeyReporting()) return false;
 
@@ -750,11 +753,16 @@ namespace SmokeTest
             var settings = AppSettings.Load();
             var previousPlaylist = settings.LastPlaylist;
             var previousIndex = settings.LastPlaylistIndex;
+            var previousRestore = settings.RestoreLastPlaylist;
 
             try
             {
                 settings.LastPlaylist = new List<string> { existing, missing, stream };
                 settings.LastPlaylistIndex = -1;
+
+                // 这一步验的是"恢复这条路上不做同步磁盘查询"，所以必须真的让它恢复：
+                // 那个开关默认是关的（默认打开程序 = 空列表），不显式打开的话这里什么都验不到。
+                settings.RestoreLastPlaylist = true;
                 settings.Save();
 
                 using (var form = new 播放器.MainForm(Array.Empty<string>()))
@@ -822,10 +830,225 @@ namespace SmokeTest
                 var restore = AppSettings.Load();
                 restore.LastPlaylist = previousPlaylist;
                 restore.LastPlaylistIndex = previousIndex;
+                restore.RestoreLastPlaylist = previousRestore;
                 restore.Save();
 
                 TryDeleteDirectory(root);
             }
+        }
+
+        /// <summary>
+        /// 「启动时恢复上次播放列表」开关：<b>默认关 —— 打开程序就是一张空列表</b>。
+        /// <para>
+        /// 判据是<b>同一份设置、两次启动的对比</b>：
+        /// 关着的时候，设置里明明存着上次的列表和「当前歌单」，启动后<b>两样都不该回来</b>
+        /// （空列表挂着歌单名是危险的：往里加两首再点「覆盖保存」，那份歌单就被两首换掉了，
+        /// 所以判据落在"菜单里有没有那个「覆盖保存」入口"上）；
+        /// 开着的时候，同一个歌单名必须真的恢复出来、并有对应的入口。
+        /// 两侧都验才算数——只验"关着是空的"的话，歌单文件压根没建出来也会绿。
+        /// </para>
+        /// </summary>
+        private static bool CheckStartupPlaylistPreference()
+        {
+            // ---- 纯函数那半：默认值 + ForgetSession 清的是哪三项 ----
+            if (new AppSettings().RestoreLastPlaylist)
+            {
+                Log(6, "启动开关检查：新设置的默认值不是「关」（打开程序应当就是空列表）");
+                return false;
+            }
+
+            var probe = new AppSettings { RestoreLastPlaylist = true, LastPlaylistIndex = 3, CurrentPlaylistName = "某个歌单" };
+            probe.LastPlaylist.Add(@"D:\媒体\某首歌.mp3");
+            probe.ForgetSession();
+
+            if (probe.LastPlaylist.Count != 0 || probe.LastPlaylistIndex != -1 || probe.CurrentPlaylistName.Length != 0)
+            {
+                Log(6, "启动开关检查：ForgetSession 没有把三项会话状态都清掉"
+                        + $"（列表 {probe.LastPlaylist.Count} 项、当前项 {probe.LastPlaylistIndex}、"
+                        + $"当前歌单「{probe.CurrentPlaylistName}」）");
+                return false;
+            }
+
+            const string name = "启动开关检查";
+            var keep = Path.Combine(AppContext.BaseDirectory, "startup-keep.mp3");
+            var before = AppSettings.Load();
+
+            try
+            {
+                PlaylistLibrary.Delete(name, out _);
+                PlaylistLibrary.Create(name);       // 真在库里建一份，"开着能恢复"才有意义
+                PlaylistLibrary.Invalidate();
+
+                File.WriteAllBytes(keep, new byte[] { 0x49, 0x44, 0x33, 4 });
+
+                // ---- 关：设置里存着上次的列表和歌单名，启动后两样都不该回来 ----
+                var off = AppSettings.Load();
+                off.RestoreLastPlaylist = false;
+                off.LastPlaylist = new List<string> { keep };
+                off.LastPlaylistIndex = 0;
+                off.CurrentPlaylistName = name;
+                off.Save();
+
+                using (var form = new 播放器.MainForm(Array.Empty<string>()))
+                {
+                    // 显示出来再验：菜单勾选和"关窗落盘"这两件事都要走真实的窗口生命周期
+                    // （没建过句柄的窗体 Close() 不会走 FormClosing，设置也就写不下去）。
+                    form.Show();
+                    PumpMessages(200);
+
+                    var playlist = PlaylistOf(form);
+
+                    if (playlist.Count != 0)
+                    {
+                        Log(6, $"启动开关检查：开关关着，却恢复了 {playlist.Count} 项");
+                        return false;
+                    }
+
+                    if (PlaylistsOf(form).CurrentName.Length != 0)
+                    {
+                        Log(6, $"启动开关检查：空列表却挂着歌单名「{PlaylistsOf(form).CurrentName}」"
+                                + "（往里加两首再点「覆盖保存」就会把那份歌单换掉）");
+                        return false;
+                    }
+
+                    if (PlaylistMenuTexts(form).Any(t => t.Contains("覆盖保存", StringComparison.Ordinal)))
+                    {
+                        Log(6, "启动开关检查：空列表却给出了「覆盖保存」入口，点下去会把那份歌单换成空列表");
+                        return false;
+                    }
+
+                    // 状态栏那句"空列表 + 歌单在哪儿"是给用户看的指路牌。
+                    // 启动警告（比如某个媒体键被别的程序占着）会把它整句换掉，那种情况不算失败。
+                    var status = ReadStatus(form);
+
+                    if (!status.Contains("空列表", StringComparison.Ordinal) &&
+                        !status.Contains("没注册上", StringComparison.Ordinal))
+                    {
+                        Log(6, $"启动开关检查：空着启动，但状态栏没说（「{status}」）");
+                        return false;
+                    }
+
+                    var item = FindRestorePlaylistMenuItem(form);
+
+                    if (item == null)
+                    {
+                        Log(6, "启动开关检查：播放菜单里没有「启动时恢复上次播放列表」这一项");
+                        return false;
+                    }
+
+                    if (item.Checked)
+                    {
+                        Log(6, "启动开关检查：开关关着，菜单却勾着");
+                        return false;
+                    }
+
+                    // 勾上只写设置，不能当场动这张列表（那会盖掉用户正开着的东西）
+                    SetMenuChecked(item, true);
+
+                    if (playlist.Count != 0)
+                    {
+                        Log(6, "启动开关检查：勾上开关当场就把列表改了（应当下次启动才生效）");
+                        return false;
+                    }
+
+                    form.Close();
+                    PumpMessages(200);
+                }
+
+                if (!AppSettings.Load().RestoreLastPlaylist)
+                {
+                    Log(6, "启动开关检查：菜单里勾上之后没有写进设置（关窗时应当落盘）");
+                    return false;
+                }
+
+                // ---- 开：同一份设置，这次开关是开的，必须真的恢复 ----
+                var on = AppSettings.Load();
+                on.RestoreLastPlaylist = true;
+                on.LastPlaylist = new List<string> { keep };
+                on.LastPlaylistIndex = 0;
+                on.CurrentPlaylistName = name;
+                on.Save();
+
+                using (var form = new 播放器.MainForm(Array.Empty<string>()))
+                {
+                    form.Show();
+                    PumpMessages(200);
+
+                    var playlist = PlaylistOf(form);
+
+                    if (playlist.Count != 1 ||
+                        !string.Equals(playlist.Items[0].FilePath, keep, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Log(6, $"启动开关检查：开关开着却没恢复上次的列表（{playlist.Count} 项）");
+                        return false;
+                    }
+
+                    if (!PlaylistsOf(form).IsCurrent(name))
+                    {
+                        Log(6, "启动开关检查：开关开着却没恢复「当前歌单」关联"
+                                + $"（现在挂着「{PlaylistsOf(form).CurrentName}」）");
+                        return false;
+                    }
+
+                    if (!PlaylistMenuTexts(form).Any(t => t.Contains("覆盖保存", StringComparison.Ordinal)))
+                    {
+                        Log(6, "启动开关检查：恢复了列表和歌单关联，菜单里却没有「覆盖保存」入口");
+                        return false;
+                    }
+
+                    var item = FindRestorePlaylistMenuItem(form);
+
+                    if (item == null || !item.Checked)
+                    {
+                        Log(6, "启动开关检查：开关开着，菜单却没勾上");
+                        return false;
+                    }
+
+                    if (ReadStatus(form).Contains("空列表", StringComparison.Ordinal))
+                    {
+                        Log(6, $"启动开关检查：开关开着却说自己是空列表（「{ReadStatus(form)}」）");
+                        return false;
+                    }
+
+                    form.Close();
+                    PumpMessages(150);
+                }
+
+                Log(6, "启动开关检查正常：默认关（打开就是空列表、不挂歌单名、不给「覆盖保存」），"
+                        + "勾上会写进设置、下次启动真的恢复列表与歌单关联（歌单文件全程不动）");
+                return true;
+            }
+            finally
+            {
+                PlaylistLibrary.Delete(name, out _);
+                PlaylistLibrary.Invalidate();
+                TryDelete(keep);
+
+                // 这一步改过设置，必须还原：后面还有十几步各自建窗体读这份设置
+                var restore = AppSettings.Load();
+                restore.RestoreLastPlaylist = before.RestoreLastPlaylist;
+                restore.LastPlaylist = before.LastPlaylist;
+                restore.LastPlaylistIndex = before.LastPlaylistIndex;
+                restore.CurrentPlaylistName = before.CurrentPlaylistName;
+                restore.Save();
+            }
+        }
+
+        /// <summary>播放菜单里的「启动时恢复上次播放列表」那一项（找不到返回 <c>null</c>）。</summary>
+        private static ToolStripMenuItem? FindRestorePlaylistMenuItem(Form form)
+        {
+            var play = FindTopMenuItem(form, "播放");
+            return play == null ? null : FindMenuItem(play.DropDownItems, "启动时恢复上次播放列表");
+        }
+
+        /// <summary>把「文件 → 播放列表」那份菜单重建一遍，返回里面的菜单文字（判据：有没有哪个入口）。</summary>
+        private static List<string> PlaylistMenuTexts(播放器.MainForm form)
+        {
+            form.RebuildPlaylistLibraryMenu(form.MenuFilePlaylists.DropDownItems);
+
+            return form.MenuFilePlaylists.DropDownItems.OfType<ToolStripMenuItem>()
+                .Select(item => item.Text)
+                .ToList();
         }
 
         /// <summary>

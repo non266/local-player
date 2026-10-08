@@ -63,6 +63,7 @@ namespace 播放器
             this.menuShuffle = new System.Windows.Forms.ToolStripMenuItem();
             this.menuPlaySep5 = new System.Windows.Forms.ToolStripSeparator();
             this.menuResumePlayback = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuRestorePlaylist = new System.Windows.Forms.ToolStripMenuItem();
             this.menuGlobalMediaKeys = new System.Windows.Forms.ToolStripMenuItem();
             this.menuClearResume = new System.Windows.Forms.ToolStripMenuItem();
             this.menuSubtitle = new System.Windows.Forms.ToolStripMenuItem();
@@ -282,6 +283,7 @@ namespace 播放器
                 this.menuShuffle,
                 this.menuPlaySep5,
                 this.menuResumePlayback,
+                this.menuRestorePlaylist,
                 this.menuGlobalMediaKeys,
                 this.menuClearResume});
             this.menuPlayback.Name = "menuPlayback";
@@ -423,6 +425,15 @@ namespace 播放器
             this.menuResumePlayback.Name = "menuResumePlayback";
             this.menuResumePlayback.Size = new System.Drawing.Size(200, 22);
             this.menuResumePlayback.Text = "记住播放进度(&M)";
+
+            // 默认不勾：打开程序就是一张空列表（值本身由 ApplySettings 按设置摆）
+            this.menuRestorePlaylist.CheckOnClick = true;
+            this.menuRestorePlaylist.Name = "menuRestorePlaylist";
+            this.menuRestorePlaylist.Size = new System.Drawing.Size(200, 22);
+            this.menuRestorePlaylist.Text = "启动时恢复上次播放列表(&L)";
+            this.menuRestorePlaylist.ToolTipText =
+                "打开程序时把上次退出时的播放列表恢复出来；不勾（默认）则每次打开都是空列表，"
+                + "歌单文件不受影响，随时可在「文件 → 播放列表」里载入";
 
             this.menuGlobalMediaKeys.Checked = true;
             this.menuGlobalMediaKeys.CheckOnClick = true;
@@ -1226,6 +1237,7 @@ namespace 播放器
         private System.Windows.Forms.ToolStripMenuItem menuShuffle;
         private System.Windows.Forms.ToolStripSeparator menuPlaySep5;
         private System.Windows.Forms.ToolStripMenuItem menuResumePlayback;
+        private System.Windows.Forms.ToolStripMenuItem menuRestorePlaylist;
         private System.Windows.Forms.ToolStripMenuItem menuGlobalMediaKeys;
         private System.Windows.Forms.ToolStripMenuItem menuClearResume;
         private System.Windows.Forms.ToolStripMenuItem menuSubtitle;

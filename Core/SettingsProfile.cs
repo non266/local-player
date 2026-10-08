@@ -29,7 +29,7 @@ namespace 播放器.Core
         /// <summary>均衡器、音频输出设备、去隔行。</summary>
         Output,
 
-        /// <summary>记住播放进度、全局媒体键、诊断日志。</summary>
+        /// <summary>记住播放进度、是否恢复上次的播放列表、全局媒体键、诊断日志。</summary>
         Behavior,
 
         /// <summary>上次打开目录 / 上次的播放列表 / 当前歌单 / 当前方案。</summary>
@@ -100,7 +100,7 @@ namespace 播放器.Core
             },
             [SettingsSection.Behavior] = new[]
             {
-                "ResumePlayback", "GlobalMediaKeys", "DiagnosticLog"
+                "ResumePlayback", "RestoreLastPlaylist", "GlobalMediaKeys", "DiagnosticLog"
             },
             [SettingsSection.Session] = new[]
             {
@@ -130,7 +130,7 @@ namespace 播放器.Core
             SettingsSection.Windows => "窗口位置与大小、分栏宽度、悬浮窗的位置与吸附、桌面歌词的位置",
             SettingsSection.Lyrics => "歌词字体、在线歌词与封面（含服务地址与密钥）、桌面歌词的外观",
             SettingsSection.Output => "均衡器、音频输出设备、去隔行",
-            SettingsSection.Behavior => "记住播放进度、全局媒体键、诊断日志",
+            SettingsSection.Behavior => "记住播放进度、启动时是否恢复上次的播放列表、全局媒体键、诊断日志",
             SettingsSection.Session => "上次打开目录、上次的播放列表、当前歌单、当前方案",
             _ => string.Empty
         };

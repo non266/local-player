@@ -371,6 +371,21 @@ namespace SmokeTest
             return null;
         }
 
+        /// <summary>在顶层菜单里按文字前缀找（例如 <c>播放(&amp;P)</c>）；找不到返回 <c>null</c>。</summary>
+        private static ToolStripMenuItem? FindTopMenuItem(Form form, string prefix)
+        {
+            var menu = form.MainMenuStrip;
+            if (menu == null) return null;
+
+            foreach (ToolStripItem top in menu.Items)
+            {
+                if (top is ToolStripMenuItem item && item.Text.StartsWith(prefix, StringComparison.Ordinal))
+                    return item;
+            }
+
+            return null;
+        }
+
         /// <summary>在一层菜单项里按文字找（比较前先去掉助记符）。</summary>
         private static ToolStripMenuItem FindMenuItem(ToolStripItemCollection items, string text)
         {

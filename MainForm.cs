@@ -140,6 +140,12 @@ namespace 播放器
             _startupArgs = startupArgs ?? Array.Empty<string>();
             _settings = AppSettings.Load();
 
+            // 「启动时恢复上次播放列表」默认关：关掉时这一次启动算一次全新会话——
+            // 列表 / 当前项 / "当前歌单"关联都在这里清成空（清法见 AppSettings.ForgetSession）。
+            // 放在这里是因为后面所有代码（歌单关联、RestoreSession、标题）都直接读这几项，
+            // 清一次就都对了，不必在每个读取点各判一次。
+            if (!_settings.RestoreLastPlaylist) _settings.ForgetSession();
+
             AttachSingleInstance(singleInstance);
 
             _engine = new PlayerEngine(this);
@@ -186,7 +192,13 @@ namespace 播放器
 
             UpdateTransportState();
             UpdateWindowTitle();
-            SetStatus("就绪");
+
+            // 空着启动时把那句"歌单在哪儿"说出来：默认就是这个状态，
+            // 不说的话用户看着空列表只会以为列表丢了。
+            SetStatus(_settings.RestoreLastPlaylist
+                ? "就绪"
+                : "就绪（本次是空列表，可在「文件 → 播放列表」里载入歌单）");
+
             ReportLoadWarnings();
             _uiTimer.Start();
         }

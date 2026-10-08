@@ -177,6 +177,24 @@ namespace 播放器
         }
 
         /// <summary>
+        /// 「启动时恢复上次播放列表」开关。
+        /// <para>
+        /// <b>只写设置，不动现在这张列表</b>——勾上之后当场把上次的列表塞进来才是意外，
+        /// 何况那会盖掉用户正在听的东西。下次启动才生效，所以状态栏把这一点说清楚。
+        /// </para>
+        /// </summary>
+        private void OnRestoreLastPlaylistChanged(object? sender, EventArgs e)
+        {
+            if (_suspendUiEvents) return;
+
+            _settings.RestoreLastPlaylist = menuRestorePlaylist.Checked;
+
+            SetStatus(menuRestorePlaylist.Checked
+                ? "已开启：下次启动会恢复这次退出时的播放列表"
+                : "已关闭：下次启动是空列表（歌单文件不动，可在「文件 → 播放列表」里载入）");
+        }
+
+        /// <summary>
         /// 给冒烟测试用：把一条窗口消息喂给窗口（等价于系统发来一条）。
         /// <para><see cref="WndProc"/> 是 <c>protected override</c>，测试要的是"发消息"这个动作本身。</para>
         /// </summary>

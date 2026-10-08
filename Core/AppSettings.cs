@@ -51,6 +51,20 @@ namespace 播放器.Core
         /// <summary>是否记住每个文件的播放进度，下次打开自动续播。</summary>
         public bool ResumePlayback { get; set; } = true;
 
+        /// <summary>
+        /// 启动时要不要把上次退出时的播放列表恢复出来。<b>默认关：打开程序就是一张空列表。</b>
+        /// <para>
+        /// 关掉时这一次启动算<b>全新的一次</b>：列表、当前项、以及"当前歌单"那层关联都不恢复
+        /// （见 <see cref="ForgetSession"/>）。<b>歌单文件一个字节都不动</b>——
+        /// 想接着听上次那份，在「文件 → 播放列表」里点一下就能载入回来。
+        /// </para>
+        /// <para>
+        /// 关掉<b>不影响退出时的记录</b>：上次的列表照样写进设置。这样用户把开关打开之后，
+        /// 拿到的就是"上一次关闭时的那份列表"，而不是几周前残留的一份旧数据。
+        /// </para>
+        /// </summary>
+        public bool RestoreLastPlaylist { get; set; }
+
         /// <summary>是否注册全局媒体键（程序在后台也能用 ⏯⏭⏮ 控制）。</summary>
         public bool GlobalMediaKeys { get; set; } = true;
 
@@ -270,6 +284,25 @@ namespace 播放器.Core
 
         /// <summary>上次退出时选中的条目索引。</summary>
         public int LastPlaylistIndex { get; set; } = -1;
+
+        /// <summary>
+        /// 把"上次会话"的那几项状态清成"全新一次运行"：列表、当前项、当前歌单关联。
+        /// <para>
+        /// 只动<b>内存里这份设置</b>，一个文件都不碰：磁盘上的歌单文件照旧，
+        /// 退出时的记录也照旧（<c>SaveSession</c> 会按当时的真实情况重新写）。
+        /// </para>
+        /// <para>
+        /// "当前歌单"这层关联也要清，是因为它单独留着会骗人：一张空列表挂着歌单名，
+        /// 往里加两首再点「覆盖保存」，那份歌单就被两首替换掉了。
+        /// 清掉之后状态是诚实的——"还没有对应歌单"，替换前该问的都会问。
+        /// </para>
+        /// </summary>
+        public void ForgetSession()
+        {
+            LastPlaylist = new List<string>();
+            LastPlaylistIndex = -1;
+            CurrentPlaylistName = string.Empty;
+        }
 
         /// <summary>
         /// 数据目录（设置与播放历史都放这里）。

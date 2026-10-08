@@ -70,6 +70,7 @@ namespace 播放器
 
             // ---- 播放记忆与系统集成 ----
             menuResumePlayback.CheckedChanged += OnResumePlaybackChanged;
+            menuRestorePlaylist.CheckedChanged += OnRestoreLastPlaylistChanged;
             menuGlobalMediaKeys.CheckedChanged += OnGlobalMediaKeysChanged;
             menuClearResume.Click += (s, e) => ClearAllResumePositions();
             menuFileRecent.DropDownOpening += (s, e) => RebuildRecentMenu();
@@ -236,6 +237,7 @@ namespace 播放器
                 sidebarPanel.VideoTools.SetPlaybackAvailable(false);
 
                 menuResumePlayback.Checked = _settings.ResumePlayback;
+                menuRestorePlaylist.Checked = _settings.RestoreLastPlaylist;
                 menuGlobalMediaKeys.Checked = _settings.GlobalMediaKeys;
 
                 // 「当前歌单」要在恢复播放列表之前就位：标题里的前缀、覆盖保存入口都靠它
@@ -359,6 +361,11 @@ namespace 播放器
 
         /// <summary>
         /// 恢复上次退出时的播放列表。
+        /// <para>
+        /// <b>要不要恢复由设置决定</b>：<c>RestoreLastPlaylist</c> 默认关，
+        /// 关掉时构造函数已经用 <see cref="AppSettings.ForgetSession"/> 把
+        /// <c>LastPlaylist</c> 清空了，这里自然什么都不做——所以这个开关没有第二处判断。
+        /// </para>
         /// <para>
         /// <b>这里一次磁盘都不查</b>：以前对每个路径调 <c>MediaFormats.IsOpenable</c>（同步
         /// <c>File.Exists</c>），而上次若是从已经离线的网络共享 / NAS 播的，每个路径都要等一次

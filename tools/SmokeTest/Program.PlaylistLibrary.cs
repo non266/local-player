@@ -1032,6 +1032,11 @@ namespace SmokeTest
             }
 
             // ---- 关掉再开：当前歌单要跟着设置回来 ----
+            // 这一条现在归「启动时恢复上次播放列表」管：那个开关默认是关的（打开就是空列表、
+            // 也不挂歌单名），所以要显式打开它才验得到。验完还原，免得影响后面的步骤。
+            var restoreSetting = SettingsOf(form).RestoreLastPlaylist;
+            SettingsOf(form).RestoreLastPlaylist = true;
+
             form.Close();
             PumpMessages(250);
 
@@ -1052,9 +1057,14 @@ namespace SmokeTest
                 PumpMessages(150);
             }
 
+            var afterRestart = AppSettings.Load();
+            afterRestart.RestoreLastPlaylist = restoreSetting;
+            afterRestart.Save();
+
             Log(17, "歌单库与主窗体联动正常：保存后标题带上歌单名、切歌不算改动、"
                     + "加/删项才标「未保存」、覆盖保存写回磁盘、点菜单项会替换当前列表、"
-                    + "新建空歌单会清空当前列表并切过去（新歌单能写进去），重启后当前歌单还在；"
+                    + "新建空歌单会清空当前列表并切过去（新歌单能写进去），"
+                    + "重启后当前歌单还在（开着「启动时恢复上次播放列表」时）；"
                     + "「文件 → 播放列表」把歌单库和 m3u 收在一处（文件菜单下不再单挂那两项、"
                     + "追加与替换分列两项、快捷键提示与实际接的键一致、列表空时保存两项点不动），"
                     + "m3u 的另存为 / 追加 / 替换各按自己的语义生效");

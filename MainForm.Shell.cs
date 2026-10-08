@@ -89,6 +89,13 @@ namespace 播放器
             }
 
             lblRate.Text = _engine.Rate.ToString("0.##") + "x";
+
+            // A-B 循环那几项的可用状态跟着"有没有媒体"走（不可用时菜单项点不动，
+            // 但菜单文字里的"当前时间"要等下拉时才刷新）。
+            RefreshAbLoopMenu();
+
+            // 「下一首播放」那两项跟着"列表空不空 / 队列空不空"走，同理。
+            RefreshQueueMenu();
         }
 
         private void UpdateWindowTitle()

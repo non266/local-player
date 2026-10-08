@@ -26,7 +26,7 @@ namespace 播放器.Core
         /// <summary>歌词字体、在线歌词与封面（含服务地址与密钥）、桌面歌词的外观与位置。</summary>
         Lyrics,
 
-        /// <summary>均衡器、音频输出设备、去隔行。</summary>
+        /// <summary>均衡器、音量均衡、音频输出设备、去隔行。</summary>
         Output,
 
         /// <summary>记住播放进度、是否恢复上次的播放列表、全局媒体键、诊断日志。</summary>
@@ -96,7 +96,7 @@ namespace 播放器.Core
             },
             [SettingsSection.Output] = new[]
             {
-                "Equalizer", "Deinterlace", "AudioDeviceId", "AudioDeviceModule"
+                "Equalizer", "NormalizeVolume", "Deinterlace", "AudioDeviceId", "AudioDeviceModule"
             },
             [SettingsSection.Behavior] = new[]
             {
@@ -129,7 +129,7 @@ namespace 播放器.Core
             SettingsSection.Interface => "主题、播放列表与侧栏、窗口置顶、托盘、排序方式",
             SettingsSection.Windows => "窗口位置与大小、分栏宽度、悬浮窗的位置与吸附、桌面歌词的位置",
             SettingsSection.Lyrics => "歌词字体、在线歌词与封面（含服务地址与密钥）、桌面歌词的外观",
-            SettingsSection.Output => "均衡器、音频输出设备、去隔行",
+            SettingsSection.Output => "均衡器、音量均衡、音频输出设备、去隔行",
             SettingsSection.Behavior => "记住播放进度、启动时是否恢复上次的播放列表、全局媒体键、诊断日志",
             SettingsSection.Session => "上次打开目录、上次的播放列表、当前歌单、当前方案",
             _ => string.Empty

@@ -213,6 +213,18 @@ namespace 播放器.Core
         /// <summary>均衡器设置（开关、前置放大、各频段增益）。</summary>
         public EqualizerState Equalizer { get; set; } = new EqualizerState();
 
+        /// <summary>
+        /// 音量均衡（给媒体挂 libvlc 的 <c>normvol</c> 音频滤镜）：把忽大忽小的音量拉平。
+        /// <para>
+        /// <b>默认关</b>：它是有代价的（动态被压平），不该替用户默认打开。
+        /// </para>
+        /// <para>
+        /// ⚠ 这是<b>媒体级</b>选项（见 <see cref="PlayerEngine.NormalizeVolume"/>）：
+        /// 改设置只影响之后打开的媒体，切换菜单时程序会重载当前这一首。
+        /// </para>
+        /// </summary>
+        public bool NormalizeVolume { get; set; }
+
         // ---- 视频相关 ---------------------------------------------------------
 
         /// <summary>

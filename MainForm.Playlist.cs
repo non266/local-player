@@ -79,7 +79,9 @@ namespace 播放器
 
                     // 序号用模型索引 + 1：筛选时编号保持稳定，不会跳来跳去。
                     var row = new ListViewItem((i + 1).ToString()) { Tag = i };
-                    row.SubItems.Add(source.DisplayName);
+
+                    // 「下一首播放」排进队的行在标题前挂个 ▶（标记只存在内存里，见 PlaylistItem.Queued）。
+                    row.SubItems.Add(source.Queued ? "▶ " + source.DisplayName : source.DisplayName);
                     row.SubItems.Add(source.DurationText);
                     row.ToolTipText = source.HasError && !string.IsNullOrEmpty(source.ErrorMessage)
                         ? source.FilePath + Environment.NewLine + "无法播放：" + source.ErrorMessage
@@ -89,7 +91,7 @@ namespace 播放器
                     {
                         row.ForeColor = _palette.ErrorFore;
                     }
-                    else if (i == _playlist.CurrentIndex)
+                    else if (IsNowPlayingRow(source, i))
                     {
                         row.Font = _playingItemFont;
                         row.ForeColor = _palette.PlayingFore;
@@ -119,10 +121,30 @@ namespace 播放器
             UpdateTransportState();
         }
 
+        /// <summary>
+        /// 这一行是不是"现在正在播的那一项"（加粗显示）。
+        /// <para>
+        /// 一般就是列表的当前项；但「下一首播放」的插播会刻意不动当前项，
+        /// 那会儿要按<b>引擎真正打开的路径</b>来认，否则加粗的是另外一首，和状态栏自相矛盾。
+        /// </para>
+        /// <para>还没开始播（例如刚恢复会话）时退回"加粗当前项"，和以前一样。</para>
+        /// </summary>
+        private bool IsNowPlayingRow(PlaylistItem item, int index)
+        {
+            var path = _engine.CurrentPath;
+
+            if (!string.IsNullOrEmpty(path))
+                return string.Equals(path, item.FilePath, StringComparison.OrdinalIgnoreCase);
+
+            return index == _playlist.CurrentIndex;
+        }
+
         /// <summary>把当前播放项滚动到可见位置并选中。</summary>
         private void HighlightPlayingItem()
         {
-            var row = FindRow(_playlist.CurrentIndex);
+            // 按引擎路径找：插播时"在播的那一项"和"列表当前项"不是同一项。
+            var index = PlayingPlaylistIndex();
+            var row = FindRow(index >= 0 ? index : _playlist.CurrentIndex);
             if (row == null) return;
 
             row.EnsureVisible();

@@ -63,6 +63,15 @@ namespace 播放器.Core
         /// <summary>无法播放的原因。</summary>
         public string? ErrorMessage { get; set; }
 
+        /// <summary>
+        /// 是否排在「下一首播放」队列里（列表标题前显示 <c>▶</c>）。
+        /// <para>
+        /// <b>只在内存里用，不写盘</b>：那块标记跟着 <see cref="PlaybackQueue"/> 走，
+        /// 而队列本身不落盘（见它的说明），所以下次打开程序时不该留下 <c>▶</c>。
+        /// </para>
+        /// </summary>
+        public bool Queued { get; set; }
+
         public override string ToString() => DisplayName;
     }
 }

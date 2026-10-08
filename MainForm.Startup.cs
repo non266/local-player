@@ -159,6 +159,8 @@ namespace 播放器
             tspDown.Click += (s, e) => MoveSelected(1);
 
             cmsPlay.Click += (s, e) => PlaySelectedItem();
+            cmsPlayNext.Click += (s, e) => QueueSelectedForNext();
+            cmsClearQueue.Click += (s, e) => ClearPlayNextQueue();
             cmsRemove.Click += (s, e) => RemoveSelectedPlaylistItems();
             cmsMoveUp.Click += (s, e) => MoveSelected(-1);
             cmsMoveDown.Click += (s, e) => MoveSelected(1);
@@ -243,6 +245,11 @@ namespace 播放器
                 menuResumePlayback.Checked = _settings.ResumePlayback;
                 menuRestorePlaylist.Checked = _settings.RestoreLastPlaylist;
                 menuGlobalMediaKeys.Checked = _settings.GlobalMediaKeys;
+
+                // 音量均衡是媒体级选项：这里只把开关与引擎的取值对上，
+                // 真正生效要等下次创建媒体（_suspendUiEvents 也在替我们挡住重载）。
+                if (_menuNormalizeVolume != null) _menuNormalizeVolume.Checked = _settings.NormalizeVolume;
+                _engine.NormalizeVolume = _settings.NormalizeVolume;
 
                 // 「当前歌单」要在恢复播放列表之前就位：标题里的前缀、覆盖保存入口都靠它
                 ApplyPlaylistLibrarySettings();

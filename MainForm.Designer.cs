@@ -144,6 +144,8 @@ namespace 播放器
             this.tspPlaylists = new System.Windows.Forms.ToolStripDropDownButton();
             this.contextMenuPlaylist = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.cmsPlay = new System.Windows.Forms.ToolStripMenuItem();
+            this.cmsPlayNext = new System.Windows.Forms.ToolStripMenuItem();
+            this.cmsClearQueue = new System.Windows.Forms.ToolStripMenuItem();
             this.cmsRemove = new System.Windows.Forms.ToolStripMenuItem();
             this.cmsSep1 = new System.Windows.Forms.ToolStripSeparator();
             this.cmsMoveUp = new System.Windows.Forms.ToolStripMenuItem();
@@ -1055,6 +1057,8 @@ namespace 播放器
             // 
             this.contextMenuPlaylist.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
                 this.cmsPlay,
+                this.cmsPlayNext,
+                this.cmsClearQueue,
                 this.cmsRemove,
                 this.cmsSep1,
                 this.cmsMoveUp,
@@ -1072,6 +1076,17 @@ namespace 播放器
             this.cmsPlay.Name = "cmsPlay";
             this.cmsPlay.Size = new System.Drawing.Size(199, 22);
             this.cmsPlay.Text = "播放(&P)";
+
+            // 
+            // cmsPlayNext / cmsClearQueue（「下一首播放」队列：勾选状态与队列长度在运行时更新）
+            // 
+            this.cmsPlayNext.Name = "cmsPlayNext";
+            this.cmsPlayNext.Size = new System.Drawing.Size(199, 22);
+            this.cmsPlayNext.Text = "下一首播放(&Q)";
+
+            this.cmsClearQueue.Name = "cmsClearQueue";
+            this.cmsClearQueue.Size = new System.Drawing.Size(199, 22);
+            this.cmsClearQueue.Text = "清空下一首队列";
 
             this.cmsRemove.Name = "cmsRemove";
             this.cmsRemove.Size = new System.Drawing.Size(199, 22);
@@ -1318,6 +1333,8 @@ namespace 播放器
         private System.Windows.Forms.ToolStripDropDownButton tspPlaylists;
         private System.Windows.Forms.ContextMenuStrip contextMenuPlaylist;
         private System.Windows.Forms.ToolStripMenuItem cmsPlay;
+        private System.Windows.Forms.ToolStripMenuItem cmsPlayNext;
+        private System.Windows.Forms.ToolStripMenuItem cmsClearQueue;
         private System.Windows.Forms.ToolStripMenuItem cmsRemove;
         private System.Windows.Forms.ToolStripSeparator cmsSep1;
         private System.Windows.Forms.ToolStripMenuItem cmsMoveUp;

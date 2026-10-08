@@ -37,7 +37,8 @@ namespace 播放器
             switch (state)
             {
                 case PlayerState.Playing:
-                    SetStatus("正在播放：" + (_playlist.Current?.DisplayName ?? string.Empty));
+                    // 按"引擎真正在播的那一份"报，而不是列表的当前项：插播时两者不是同一项。
+                    SetStatus("正在播放：" + NowPlayingDisplayName() + QueueStatusSuffix());
                     break;
                 case PlayerState.Paused:
                     SetStatus("已暂停");
@@ -64,6 +65,9 @@ namespace 播放器
                 _engine.Replay();
                 return;
             }
+
+            // 「下一首播放」队列优先：先播插播的那几首，队列空了再回到列表原来的位置继续。
+            if (PlayNextFromQueue()) return;
 
             PlayNext(false);
         }

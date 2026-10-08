@@ -47,6 +47,26 @@ namespace SmokeTest
             }
         }
 
+        /// <summary>
+        /// 泵消息直到条件成立（或超时）。
+        /// <para>
+        /// 判据里不含"必须多快成立"：慢机器上定位就是要多花几百毫秒，
+        /// 拿固定等待时间当基准会变成抽风式红（维护手册第 1 节的经验）。
+        /// </para>
+        /// </summary>
+        private static bool PumpUntil(Func<bool> condition, int milliseconds)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(milliseconds);
+
+            while (!condition())
+            {
+                if (DateTime.UtcNow >= deadline) return false;
+                PumpMessages(50);
+            }
+
+            return true;
+        }
+
         private static int ReadUInt16(byte[] data, int offset) => (data[offset] << 8) | data[offset + 1];
 
         private static long ReadUInt32(byte[] data, int offset) =>

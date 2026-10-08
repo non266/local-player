@@ -155,6 +155,15 @@ namespace 播放器.Core
             set => _mediaPlayer.AspectRatio = string.IsNullOrWhiteSpace(value) ? null : value;
         }
 
+        /// <summary>
+        /// 音量均衡（给媒体挂 libvlc 的 <c>normvol</c> 音频滤镜）。
+        /// <para>
+        /// ⚠ 这是<b>媒体级</b>选项：它写进媒体的选项串，<b>改它不会影响已经打开的媒体</b>，
+        /// 要重新创建媒体（也就是重载当前这一首）才生效。界面那边切换时会重载并说明。
+        /// </para>
+        /// </summary>
+        public bool NormalizeVolume { get; set; }
+
         // ---- 打开与播放 -------------------------------------------------------
 
         /// <summary>
@@ -711,17 +720,16 @@ namespace 播放器.Core
 
         private Media CreateMedia(string path)
         {
-            Media media;
-            if (MediaFormats.IsStreamUri(path) && Uri.TryCreate(path, UriKind.Absolute, out var uri))
-            {
-                media = new Media(_libVlc, uri);
-                media.AddOption(":network-caching=1000");
-            }
-            else
-            {
-                media = new Media(_libVlc, path, FromType.FromPath);
-                media.AddOption(":file-caching=300");
-            }
+            // 串流走 Uri 构造，本地文件走路径构造；选项串由 MediaOptions 拼（纯函数，便于断言）。
+            Uri? uri = null;
+            var isStream = MediaFormats.IsStreamUri(path) && Uri.TryCreate(path, UriKind.Absolute, out uri);
+
+            var media = isStream && uri != null
+                ? new Media(_libVlc, uri)
+                : new Media(_libVlc, path, FromType.FromPath);
+
+            foreach (var option in MediaOptions.For(isStream, NormalizeVolume))
+                media.AddOption(option);
 
             return media;
         }

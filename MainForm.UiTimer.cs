@@ -33,6 +33,11 @@ namespace 播放器
             var length = _engine.Length;
             var time = _engine.Time;
 
+            // A-B 循环：越过 B 点（含正好到 B）就跳回 A 点。拖动进度条时不掺和——
+            // 那会儿用户正捏着位置，把他拽回 A 点只会让人以为进度条坏了。
+            if (!_userSeeking)
+                time = ApplyAbLoop(time);
+
             if (!_userSeeking && length > 0)
             {
                 _suppressSeekEvent = true;

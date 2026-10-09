@@ -683,7 +683,7 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net8.0-windows && dotnet SmokeTest.dll`（20 步，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net8.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（20 步，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：

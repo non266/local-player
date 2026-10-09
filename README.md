@@ -291,10 +291,11 @@ MP3 / FLAC / APE / WAV / AAC / M4A / OGG / Opus / WMA…… 以及外挂字幕�
   以前只报"成功几个"，那一个键按下去没反应却完全看不出来
 - **任务栏缩略图按钮**：鼠标悬停任务栏图标，预览面板上直接有上一个 / 播放暂停 / 下一个
 - **系统媒体控件（SMTC）**：`Win` 键调出的音量弹窗与锁屏界面上显示当前这一首的**曲名 / 歌手**、
-  播放状态与进度条。**这一版只做"显示"**：那几个播放按钮**没有**（要订阅 `ButtonPressed` 事件，
-  它的参数是 WinRT 委托，手写 COM 没法安全实现，详见下文「实现要点 · 系统媒体控件的 COM 互操作」），
-  封面也没有（要 `StorageFile` + 异步 WinRT）；媒体键那条路不受影响，照旧好用。
-  老系统或策略禁掉时**安静降级**（记一条日志，界面上什么都不说）
+  **封面**、播放状态与进度条，并且带**播放 / 暂停 / 停止 / 上一个 / 下一个**那几个按钮
+  （1.4.0 起；封面优先用文件里的**内嵌图**，没有就用**同目录的 `cover.jpg` / `folder.jpg`** 这类外挂图，
+  与侧栏封面同一份判定）。1.3.0 那版只有"显示"、没有按钮与封面——原因与改法见下文
+  「实现要点 · 系统媒体控件的 WinRT 互操作」。媒体键那条路不受影响，照旧好用。
+  老系统或策略禁掉时**安静降级**（记一条日志，界面上什么都不说）。
 
 **字幕与音轨**
 - 自动加载同名字幕，也可手动加载 srt / ass / ssa / sub / idx / vtt / smi 等
@@ -393,7 +394,7 @@ dotnet restore 播放器.csproj
 dotnet build 播放器.csproj -c Release
 
 # 运行
-.\bin\Release\net8.0-windows\播放器.exe
+.\bin\Release\net8.0-windows10.0.19041.0\播放器.exe
 ```
 
 也可以直接用 Visual Studio 打开 `播放器.csproj` 后按 F5。
@@ -461,7 +462,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\pack.ps1
 ## 目录结构
 
 ```
-播放器.csproj          工程文件（net8.0-windows / WinForms / x64）
+播放器.csproj          工程文件（net8.0-windows10.0.19041.0 / WinForms / x64）
 app.manifest           应用清单（长路径支持、受支持的 OS 版本）
 Program.cs             入口：高 DPI 设置、libvlc 初始化、未处理异常兜底
 
@@ -711,7 +712,7 @@ $env:播放器_DATA_DIR = "$PSScriptRoot\data"
 ```powershell
 dotnet build 播放器.csproj -c Debug
 dotnet build tools/SmokeTest/SmokeTest.csproj -c Debug
-cd bin/Debug/net8.0-windows
+cd bin/Debug/net8.0-windows10.0.19041.0
 
 # 第 13 步需要真实视频，用环境变量指给它；不指就自动跳过
 $env:播放器_TEST_VIDEO = "D:\某个视频.mp4"
@@ -870,12 +871,25 @@ LRC 那边还验**同一时间戳的分组**（原文 / 译文算同一句、`Co
 变异：永不换内核 → 以 `画面旋转检查：「顺时针 90°」的四个象限没有按预期搬家（观测 左上红 右上绿 左下蓝 右下黄；期望 左上蓝 右上红 左下黄 右下绿）` 失败。
 第 6 步还多了一段**只 `Dispose` 没 `Close` 的表单必须停掉界面计时器**（它是那个"每 20 秒把旧历史
 写回磁盘"的僵尸，第 18 步偶发红的真凶，见 [docs/维护手册.md](docs/维护手册.md) 的 M1′），
-以及**系统媒体控件**（1.3.0 批次 C）：起播一首 → 断言接口接上了、`IsEnabled` 为真、曲名喂进去
+以及**系统媒体控件**（1.3.0 批次 C；1.4.0 起补齐按钮与封面）：起播一首 → 断言接口接上了、
+`IsEnabled` 为真、曲名喂进去
 **读得回来**（那几个 getter 是真的去问系统那个对象的）、状态 Playing / Paused 跟着变、
-时间轴喂过且时长合理、切歌之后曲名换成新的；拿不到接口时打印原因后跳过。
-变异：只在系统那边还是空的时候喂一次标题 → 以
-`系统媒体控件检查：切歌之后系统那边的曲名还是「smtc-a」，期望「smtc-b」` 失败。
-⚠ 这一段的边界如实写在日志里：**系统界面上画没画出来验不到**，只能人眼看一次。
+时间轴喂过且时长合理、切歌之后曲名换成新的；五个按钮开关全开，并用
+`SmtcSession.SimulateButton`（测试钩子）驱动"按钮按下去之后我们做了什么"——暂停 / 播放真的
+作用在引擎上、「下一个」绕回第一首、「上一个」回到第二首；
+封面那一段用两首各放一个目录的素材（一首旁边没有图、一首旁边放着 `cover.jpg` 与干扰用的
+`album.jpg`）：断言**没内嵌图时挑的是 `cover.jpg`**（而不是枚举顺序更靠前的 `album.jpg`）、
+`CoverSet` 为真（**系统那边确实读了那个文件**）、切到没封面的那首**变空**、切回来**接回来**，
+最后造一个**内嵌 PNG** 的 mp3 断言**内嵌图优先于外挂图**（喂过去的字节就是内嵌那张）。
+拿不到接口时打印原因后跳过（纯规则那两条不跳过，老系统上照验）。
+变异：① 只在系统那边还是空的时候喂一次标题 → 以
+`系统媒体控件检查：切歌之后系统那边的曲名还是「smtc-a」，期望「smtc-b」` 失败；
+② 不喂外挂封面 → `系统媒体控件检查：同目录的 cover.jpg 没被当成封面用上（…）`；
+③ 没有封面时不清旧封面 → `切回没有封面那首之后，封面还挂着上一首的（…）`；
+④ 挑外挂封面时不看命名优先级 → `挑外挂封面：同一目录里 cover.jpg 与 album.jpg 都在时没有按命名优先级选（选中了「album.jpg」，期望 cover.jpg）`；
+⑤ 让外挂图压过内嵌图 → `有内嵌图时封面来源不对（…）`。
+⚠ 这一段的边界如实写在日志里：**系统界面上画没画出来、按钮按下去系统有没有把事件送过来验不到**，
+只能人眼看一次。
 第 12 步如果检试到使用者正开着播放器就自动跳过，不会去打扰那个窗口。
 
 第 16 步是**在线歌词与封面**。它不依赖外网：试试里自己起了一个"假 LrcAPI"
@@ -2119,36 +2133,44 @@ catch (InvalidOperationException) { /* 句柄还没建好：先排队 */ }
 `ITaskbarList` / `ITaskbarList2` / `ITaskbarList3` 的全部方法按原顺序声明齐了，
 **后续维护时不要删改顺序**。所有调用都包了容错，系统不支持时自动降级为没有这组按钮。
 
-#### 系统媒体控件的 COM 互操作（`Ui/SmtcSession.cs`）
+#### 系统媒体控件的 WinRT 互操作（`Ui/SmtcSession.cs`）
 
-同样是"手写 vtable"，但比 `ITaskbarList3` 麻烦一档，因为走的是 **WinRT** 那条路。
-三件值得记下来的事：
+**1.3.0 那一版是"手写 vtable 的 COM"**，1.4.0 起改成**引 WinRT 投影**
+（目标框架 `net8.0-windows10.0.19041.0`）：曲名 / 歌手 / 封面 / 进度 / **按钮事件**
+都是普通属性与事件，不必再自己声明 vtable、也不必自己揉 HSTRING。
+四处值得记下来的事：
 
-1. **接口顺序与 IID 是查出来的，不是猜的**：本机 Windows SDK 的
-   `C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.18362.0\Windows.winmd`
-   里有每个接口的**方法顺序**（拿一个几十行的 `System.Reflection.Metadata` 小程序就能读出来），
-   `SystemMediaTransportControlsInterop.h` 里有那个只在头文件里出现的
-   `ISystemMediaTransportControlsInterop`（`ddb0472d-…`，`GetForWindow(hwnd, iid, out)`）。
-   ⚠ **维护时不要删改方法顺序**：错一个槽会调到别的方法上，而表现是"界面上什么都不显示"。
-   另外 `UpdateTimelineProperties` 在 18362 的 ABI 里属于 **`ISystemMediaTransportControls2`**，
-   不在主接口上；时间轴对象要 `RoActivateInstance("…TimelineProperties")` 现建。
-2. **.NET 运行时不支持两个 WinRT 编组方式**（都是实测报错挣来的）：
-   `UnmanagedType.IInspectable` / `ComInterfaceType.InterfaceIsIInspectable`
-   → `Marshalling as IInspectable is not supported in the .NET runtime.`；
+1. **只有一处还得手写**：`GetForWindow` 属于**头文件里的互操作接口**
+   （`SystemMediaTransportControlsInterop.h`，IID `ddb0472d-…`），投影里没有它。
+   所以照旧自己声明一次（`IUnknown` + `IInspectable` 那三个占位方法 + `GetForWindow`），
+   从 `RoGetActivationFactory` 拿到工厂，再拿裸指针用
+   `WinRT.MarshalInspectable<SystemMediaTransportControls>.FromAbi` 换成投影对象。
+   ⚠ 这个声明里的**方法顺序仍然不能动**：错一个槽就调到别的方法上。
+2. **当初为什么绕远路（留作档案，别再踩）**：.NET 运行时不支持两个 WinRT 编组方式
+   （都是实测报错挣来的）——`UnmanagedType.IInspectable` /
+   `ComInterfaceType.InterfaceIsIInspectable` →
+   `Marshalling as IInspectable is not supported in the .NET runtime.`；
    `UnmanagedType.HString` → `Cannot marshal 'parameter #1'`。
-   于是把 `IInspectable` 的 `GetIids` / `GetRuntimeClassName` / `GetTrustLevel`
-   **当普通方法声明出来占住第 4~6 个槽**（`InterfaceIsIUnknown` + 这 3 个占位，
-   后面的方法就落在第 7 个及以后 ✓），字符串一律用 `IntPtr` 自己调
-   `WindowsCreateString` / `WindowsGetStringRawBuffer` / `WindowsDeleteString`。
-3. **没做按钮，是"安全"而不是"偷懒"**：按钮要 `add_ButtonPressed` 一个 **WinRT 委托**，
-   它也是 `IInspectable` 派生、`Invoke` 在第 6 个槽；托管委托包出去的 CCW 是 `IDispatch` 布局，
-   槽位对不上——系统一按按钮就是栈错乱。所以那几个 `IsXxxEnabled` 开关一律不开：
-   宁可不显示按钮，也不显示一排按不动的按钮。要做就得手写一整套 WinRT 委托 + 异步
-   （`IAsyncOperation`）的互操作，代价和 `CsWinRT` 的活差不多。
+   手写 COM 那版只能拿普通方法占住第 4~6 个槽、字符串走 `WindowsCreateString` 自己管。
+   更关键的是**按钮事件**：`ButtonPressed` 要一个 WinRT 委托，托管委托包出去的 CCW 是
+   `IDispatch` 布局、槽位对不上（按一下就是栈错乱），所以那版索性把
+   `IsPlayEnabled` 那几个开关一律关掉——宁可不显示按钮，也不显示一排按不动的按钮。
+   投影把这些全部变成一行普通代码，这也是"改 TFM"换来的东西。
+3. **封面喂给系统只能走文件**：`DisplayUpdater.Thumbnail` 收的是
+   `RandomAccessStreamReference`，而它只能从 `StorageFile` 造（异步）。
+   于是内嵌封面图先落到数据目录的临时文件（`smtc-cover.jpg` / `.png`…）；
+   **同目录的外挂封面（`cover.jpg` / `folder.jpg`…）本来就在盘上，直接用那个文件**，
+   不必再抄一份。喂过之后**必须调一次 `DisplayUpdater.Update()`**，不然系统那边不刷新。
+   ⚠ 切到**没有封面**的那一首时要**显式清一次**（`Thumbnail = null` + `Update()`），
+   否则音量弹窗里会一直挂着上一首的封面。挑哪张外挂封面由 `Core/SidecarCover.cs` 定，
+   和侧栏封面、"要不要去网上找封面"是**同一份判定**（`cover.jpg` 优先于 `album.jpg` /
+   `folder.jpg`，不看文件系统的枚举顺序）。
 4. **验到哪一层**：冒烟读的是**系统那个对象本身**（`IsEnabled` / `PlaybackStatus` /
-   `Title` / `Artist` 的 getter 都真的去问系统），但**系统界面上画没画出来只能人眼看**。
-   另外有一个坑就是靠这条断言当场抓出来的：会话在 `OnLoad` 里建，而启动那一首的元数据在
-   **构造函数**里已经推过（那时还没有会话）→ 第一首永远是空的；现在建好后补推一次。
+   `Title` / `Artist` 的 getter 都真的去问系统），封面那一段还验了
+   "交给系统的文件被系统读了"（`CoverSet`）；但**系统界面上画没画出来、按钮按下去系统
+   有没有把事件送过来，只能人眼看**。另外有一个坑就是靠这条断言当场抓出来的：会话在
+   `OnLoad` 里建，而启动那一首的元数据在**构造函数**里已经推过（那时还没有会话）→
+   第一首永远是空的；现在建好后补推一次。
 
 ### 数据与文件
 
@@ -2289,12 +2311,14 @@ x64 进程**根本无法加载**另外两个，LibVLCSharp 也是按进程架构
   它只挑一条最像的，同名不同版本时可能挑错，界面上会标出来源歌名 / 歌手供你判断。）
 - 均衡器的滑块是整数 dB，预置曲线的小数部分只有在不碰该频段时才会原样保留。
 - 筛选状态下不支持拖动换位（会提示先清空搜索框）。
-- **系统媒体控件（音量弹窗）只接了"显示"那一半**：曲名 / 歌手 / 播放状态 / 进度会出现在
-  音量弹窗与锁屏上，但**那几个按钮没有**——订阅 `ButtonPressed` 要一个 WinRT 委托，
-  手写 COM 没法安全实现（详见上文「实现要点 · 系统媒体控件的 COM 互操作」），
-  所以 `IsPlayEnabled` 那几个开关一律不开（宁可不显示，也不显示一排按不动的按钮）；
-  封面也没做（要 `StorageFile` + 异步 WinRT）。系统媒体键那条路是另一套（`RegisterHotKey`），
-  不受影响。**系统界面上真的画出来了没有，冒烟验不到，只能人眼看**。
+- **系统媒体控件（音量弹窗）**：曲名 / 歌手 / 播放状态 / 进度 / 封面，以及
+  播放 / 暂停 / 停止 / 上一个 / 下一个那几个按钮，都会出现在音量弹窗与锁屏上（1.4.0 起）。
+  两条**如实说明**的边界：① 封面只喂**内嵌图**或**同目录外挂图**（线上找到的封面也会喂），
+  视频只喂内嵌图 / 外挂图，**没有做"从画面截一张当封面"**；②
+  **系统界面上真的画出来了没有、按钮按下去系统有没有把事件送过来，冒烟验不到，只能人眼看**。
+  系统媒体键那条路是另一套（`RegisterHotKey`），不受影响。
+  另外**要 Windows 10 2004（19041）以上**才有完整能力：更老的系统上程序照常启动，
+  只是这一段拿不到接口（安静降级，媒体键与任务栏按钮都不受影响）。
 - **A-B 循环的几个边界**（1.3.0 批次 A）：A/B 两点取的是"按下菜单那一刻引擎报的时间"，
   所以和你想设的那一刻差个几百毫秒是正常的；换歌或停止会清掉这两点（同一首重新起播不清）；
   没给快捷键（现有单键快捷键已经很挤，避免撞车）。

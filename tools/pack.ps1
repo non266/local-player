@@ -1,4 +1,4 @@
-﻿# 打包：自包含发布 → 便携 zip → Inno Setup 安装程序
+# 打包：自包含发布 → 便携 zip → Inno Setup 安装程序
 #
 # 用法（在仓库根目录或任何地方都行）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\pack.ps1
@@ -137,7 +137,7 @@ if (-not $SkipPublish) {
     Write-Host "=== dotnet publish（自包含 win-x64，首次会联网拉运行时包）===" -ForegroundColor Cyan
 
     # 说明两件实测过的事，免得下次有人重新怀疑一遍：
-    #   1) 这一步会重写 obj\project.assets.json，写进去的图里多出 net8.0-windows/win-x64
+    #   1) 这一步会重写 obj\project.assets.json，写进去的图里多出 net8.0-windows10.0.19041.0/win-x64
     #      这个目标——**不影响**平时的 `dotnet build --no-restore`（实测：构建照常走完，
     #      两条目标的 assets 是合法的）。所以这里不做备份/还原那一套。
     #   2) publish 的输出目录在临时目录里，不碰 bin\Release，所以**程序正开着也能打包**。

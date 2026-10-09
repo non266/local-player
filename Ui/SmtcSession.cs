@@ -90,6 +90,9 @@ namespace 播放器.Ui
         private SystemMediaTransportControls? _controls;
         private bool _disposed;
 
+        /// <summary>封面这份活儿是异步的（系统只认 <c>StorageFile</c>），用它把迟到的旧封面挡掉。</summary>
+        private int _coverToken;
+
         /// <summary>音量弹窗 / 锁屏上那几个按钮被按下了（在 WinRT 的线程上触发）。</summary>
         internal event Action<SmtcButton>? ButtonPressed;
 
@@ -106,6 +109,12 @@ namespace 播放器.Ui
 
         /// <summary>封面有没有喂过（内嵌图落成临时文件之后异步设上去的）。</summary>
         internal bool CoverSet { get; private set; }
+
+        /// <summary>
+        /// 现在这一份封面是从哪个文件喂给系统的（内嵌图会先落成数据目录里的临时文件；
+        /// 同目录的 <c>cover.jpg</c> 这类则直接用原文件）。没有封面时是 <c>null</c>。
+        /// </summary>
+        internal string? CoverPath { get; private set; }
 
         /// <summary>系统那边的 IsEnabled（读回来问系统那个对象）。</summary>
         internal bool IsEnabled => _controls?.IsEnabled ?? false;
@@ -315,8 +324,8 @@ namespace 播放器.Ui
         }
 
         /// <summary>
-        /// 把封面推给系统：内嵌图先落到数据目录里一个临时文件，再让系统自己去读
-        /// （<c>RandomAccessStreamReference.CreateFromFile</c> 只认 <c>StorageFile</c>，而它只能异步拿）。
+        /// 把封面推给系统：内嵌图先落到数据目录里一个临时文件，再走 <see cref="SetCoverFile"/>。
+        /// <para><c>null</c> / 空数组表示"这一首没有封面"，会把系统那边挂着的旧封面清掉。</para>
         /// </summary>
         internal void SetCover(byte[]? data, string? mimeType)
         {
@@ -324,7 +333,7 @@ namespace 播放器.Ui
 
             if (data is not { Length: > 0 })
             {
-                CoverSet = false;
+                SetCoverFile(null);
                 return;
             }
 
@@ -349,18 +358,58 @@ namespace 播放器.Ui
                 return;
             }
 
-            _ = SetCoverAsync(path);
+            SetCoverFile(path);
         }
 
-        private async Task SetCoverAsync(string path)
+        /// <summary>
+        /// 直接把<b>磁盘上的一个图片文件</b>当封面喂给系统（同目录的 <c>cover.jpg</c> 这类就走这条）。
+        /// <para>
+        /// 比 <see cref="SetCover"/> 少一趟读写：文件本来就在盘上，不必再抄进数据目录。
+        /// </para>
+        /// <para>
+        /// 传 <c>null</c>（或文件已经不在）表示没有封面：<b>上一首要是喂过封面就得显式清一次</b>——
+        /// 不清的话，切到下一首没有封面的歌时，音量弹窗里还挂着上一首的封面。
+        /// 本来就没封面（<see cref="CoverPath"/> 也是空的）则什么都不做，不必白跑一趟 WinRT。
+        /// </para>
+        /// </summary>
+        internal void SetCoverFile(string? path)
+        {
+            if (_disposed || _controls == null) return;
+
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) path = null;
+
+            // 本来就没有封面、现在也没有：系统那边不用动（每首歌都白调两次 WinRT 没有意义）
+            if (path == null && CoverPath == null) return;
+
+            CoverPath = path;
+            CoverSet = false;
+
+            _ = SetCoverAsync(path, ++_coverToken);
+        }
+
+        private async Task SetCoverAsync(string? path, int token)
         {
             try
             {
-                var file = await StorageFile.GetFileFromPathAsync(path);
-                if (_disposed || _controls == null) return;
+                RandomAccessStreamReference? thumbnail = null;
 
-                _controls.DisplayUpdater.Thumbnail = RandomAccessStreamReference.CreateFromFile(file);
-                CoverSet = true;
+                if (path != null)
+                {
+                    var file = await StorageFile.GetFileFromPathAsync(path);
+                    thumbnail = RandomAccessStreamReference.CreateFromFile(file);
+                }
+
+                // 换歌很快的时候上一首那份可能还在飞：晚到的不许盖掉现在这一首的
+                if (_disposed || _controls == null || token != _coverToken) return;
+
+                var updater = _controls.DisplayUpdater;
+                updater.Thumbnail = thumbnail;
+
+                // DisplayUpdater 上的改动要靠 Update() 推给系统；只在设封面时不调的话，
+                // 系统那边看着像是"封面喂了却没出来"。
+                updater.Update();
+
+                CoverSet = thumbnail != null;
             }
             catch (Exception ex)
             {
@@ -378,11 +427,14 @@ namespace 播放器.Ui
                 _controls.DisplayUpdater.ClearAll();
                 _controls.PlaybackStatus = MediaPlaybackStatus.Closed;
                 _controls.DisplayUpdater.Thumbnail = null;
+                _controls.DisplayUpdater.Update();
 
                 DurationMilliseconds = 0;
                 PositionMilliseconds = 0;
                 TimelineUpdated = false;
                 CoverSet = false;
+                CoverPath = null;
+                _coverToken++;
             }
             catch (Exception ex)
             {

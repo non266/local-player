@@ -1,4 +1,4 @@
-﻿; 全能本地播放器 —— Inno Setup 6 脚本
+; 全能本地播放器 —— Inno Setup 6 脚本
 ;
 ; 由 tools\pack.ps1 编译（别手工双击这个文件）：脚本会被复制到临时目录再编译，
 ; 所以这里除了同目录的 ChineseSimplified.isl，其它路径一律通过 /D 传进来。
@@ -64,7 +64,9 @@ VersionInfoVersion={#AppVersion}
 VersionInfoProductName={#AppName}
 VersionInfoCompany=non266
 VersionInfoDescription={#AppName} {#AppVersion} 安装程序
-; 程序用的是 net8.0-windows + libvlc，最低按 Win10 要求
+; 程序用的是 net8.0-windows10.0.19041.0 + libvlc，最低按 Win10 要求。
+; ⚠ 19041（Win10 2004）只影响**系统媒体控件（SMTC）**那一段：更老的系统上程序照常启动，
+; 那一段拿不到接口就安静降级（SupportedOSPlatformVersion 仍是 7.0），所以这里不抬门槛。
 MinVersion=10.0
 ; 升级时如果程序正开着，让 Inno 提示关闭（不要偷偷重启它）
 CloseApplications=yes

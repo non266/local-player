@@ -1752,7 +1752,9 @@ namespace SmokeTest
         /// <para>
         /// <b>验到哪一层</b>：这里验的是"接口拿到了、<c>IsEnabled</c> 为真、曲名 / 歌手 / 状态 / 时长
         /// 喂进去之后<b>读得回来</b>"——那几个 getter 是<b>真的去问系统那个对象</b>的，
-        /// 不是记我们自己的变量。但<b>系统界面上到底画没画出来，冒烟验不到</b>，只能人眼看一次
+        /// 不是记我们自己的变量。封面这一版也接上了：验的是"没内嵌图时挑了旁边那张
+        /// <c>cover.jpg</c>、交给系统的图片文件系统那边确实读了（<c>CoverSet</c>）、
+        /// 切到没有封面的那首会清空"。但<b>系统界面上到底画没画出来，冒烟验不到</b>，只能人眼看一次
         /// （README 与 CHANGELOG 里都写着这一条）。
         /// </para>
         /// <para>
@@ -1762,14 +1764,49 @@ namespace SmokeTest
         /// </summary>
         private static bool CheckSystemMediaControls()
         {
-            var first = Path.Combine(AppContext.BaseDirectory, "smtc-a.wav");
-            var second = Path.Combine(AppContext.BaseDirectory, "smtc-b.wav");
+            // 两首各放一个目录：第一首旁边没有封面图，第二首旁边放一张 cover.jpg
+            // （外加一张干扰用的 album.jpg）。这样"封面从哪来"这条断言才有靶子
+            // ——这两首 WAV 都没有内嵌图。
+            var smokeRoot = Path.Combine(AppContext.BaseDirectory, "smoke-smtc");
+            var plainFolder = Path.Combine(smokeRoot, "plain");
+            var artFolder = Path.Combine(smokeRoot, "art");
+
+            TryDeleteDirectory(smokeRoot);
+            Directory.CreateDirectory(plainFolder);
+            Directory.CreateDirectory(artFolder);
+
+            var first = Path.Combine(plainFolder, "smtc-a.wav");
+            var second = Path.Combine(artFolder, "smtc-b.wav");
+            var sidecar = Path.Combine(artFolder, "cover.jpg");
+
+            // 干扰项：按文件名排序 album.jpg 排在 cover.jpg 前面。
+            // 挑封面不能看文件系统的枚举顺序，得按"常见命名"的优先级——cover.jpg 赢。
+            var rival = Path.Combine(artFolder, "album.jpg");
 
             WriteWav(first, seconds: 30, frequency: 440);
             WriteWav(second, seconds: 30, frequency: 480);
+            File.WriteAllBytes(sidecar, BuildJpeg());
+            File.WriteAllBytes(rival, BuildJpeg());
 
             try
             {
+                // 这一段是纯规则（不碰系统媒体控件），所以放在"拿不到接口就跳过"之前：
+                // 老系统上 SMTC 会跳过，但"挑哪张外挂封面"照样得验。
+                var picked = SidecarCover.FindInFolder(artFolder);
+
+                if (!string.Equals(picked, sidecar, StringComparison.OrdinalIgnoreCase))
+                {
+                    Log(6, "挑外挂封面：同一目录里 cover.jpg 与 album.jpg 都在时没有按命名优先级选"
+                            + $"（选中了「{Path.GetFileName(picked ?? "没有")}」，期望 cover.jpg）");
+                    return false;
+                }
+
+                if (SidecarCover.HasInFolder(plainFolder))
+                {
+                    Log(6, "挑外挂封面：没有封面图的目录被判成有封面");
+                    return false;
+                }
+
                 using var form = new 播放器.MainForm(new[] { first, second });
                 form.Show();
                 PumpMessages(500);
@@ -1810,7 +1847,15 @@ namespace SmokeTest
                     return false;
                 }
 
-                // 那四个按钮：开关都必须是开的（否则弹窗上根本不显示按钮）
+                // 第一首旁边没有封面图：封面来源必须是空的
+                if (smtc.CoverPath != null)
+                {
+                    Log(6, "系统媒体控件检查：这首旁边没有封面图，封面来源却不是空的（"
+                            + Path.GetFileName(smtc.CoverPath) + "）");
+                    return false;
+                }
+
+                // 那五个按钮：开关都必须是开的（否则弹窗上根本不显示按钮）
                 if (!smtc.IsPlayEnabled || !smtc.IsPauseEnabled || !smtc.IsStopEnabled ||
                     !smtc.IsNextEnabled || !smtc.IsPreviousEnabled)
                 {
@@ -1889,6 +1934,21 @@ namespace SmokeTest
                     return false;
                 }
 
+                // 第二首没有内嵌图，旁边那张 cover.jpg 就得被当成封面用上
+                if (!PumpUntil(() => string.Equals(smtc.CoverPath, sidecar, StringComparison.OrdinalIgnoreCase), 6000))
+                {
+                    Log(6, "系统媒体控件检查：同目录的 cover.jpg 没被当成封面用上（现在的封面来源是「"
+                            + (smtc.CoverPath ?? "没有") + "」，期望「" + sidecar + "」）");
+                    return false;
+                }
+
+                // 交出去的是一张真的图片文件，系统那边得接下（这一步验到"系统读了这张文件"）
+                if (!PumpUntil(() => smtc.CoverSet, 6000))
+                {
+                    Log(6, "系统媒体控件检查：cover.jpg 交给系统之后没被接受（CoverSet 还是假）");
+                    return false;
+                }
+
                 // 「下一个 / 上一个」：现在在第二首，按「下一个」应当绕回第一首
                 smtc.SimulateButton(播放器.Ui.SmtcButton.Next);
 
@@ -1905,6 +1965,15 @@ namespace SmokeTest
                     return false;
                 }
 
+                // 绕回第一首（旁边没有封面图）：封面也得跟着变空——
+                // 不清的话音量弹窗里会一直挂着上一首那张 cover.jpg
+                if (!PumpUntil(() => smtc.CoverPath == null && !smtc.CoverSet, 6000))
+                {
+                    Log(6, "系统媒体控件检查：切回没有封面那首之后，封面还挂着上一首的"
+                            + $"（来源「{smtc.CoverPath ?? "没有"}」，喂过 {smtc.CoverSet}）");
+                    return false;
+                }
+
                 smtc.SimulateButton(播放器.Ui.SmtcButton.Previous);
 
                 if (!PumpUntil(() => form.Engine.CurrentPath == second, 15000))
@@ -1914,16 +1983,95 @@ namespace SmokeTest
                     return false;
                 }
 
-                Log(6, "系统媒体控件正常：接口接上了、IsEnabled 为真，曲名随歌切换、"
-                        + "播放 / 暂停状态与时长都喂了进去并读得回来，四个按钮的开关都开着、"
-                        + "按钮回调（播放 / 暂停 / 下一个 / 上一个）真的作用在引擎上"
+                // 「上一个」回到第二首（旁边有 cover.jpg）：封面得重新接上那张外挂图
+                if (!PumpUntil(() => string.Equals(smtc.CoverPath, sidecar, StringComparison.OrdinalIgnoreCase)
+                                     && smtc.CoverSet, 6000))
+                {
+                    Log(6, "系统媒体控件检查：按「上一个」回到有封面那首之后，封面没接回来"
+                            + $"（来源「{smtc.CoverPath ?? "没有"}」，喂过 {smtc.CoverSet}）");
+                    return false;
+                }
+
+                // 内嵌图优先于目录里的外挂封面：造一个内嵌 PNG 的 mp3（目录里同时有 cover.jpg），
+                // 直接喂元数据——不必真的播它
+                var embedded = MakePng();
+                var tagged = Path.Combine(artFolder, "smtc-带内嵌封面.mp3");
+
+                File.WriteAllBytes(tagged, BuildId3File(3, new List<byte[]>
+                {
+                    Id3Frame("APIC", PictureBody(3, "image/png", 3, embedded), 3)
+                }));
+
+                var taggedTags = TagReader.Read(tagged);
+
+                if (!taggedTags.HasCoverArt)
+                {
+                    Log(6, "系统媒体控件检查：造出来的内嵌封面素材没读到封面（这一步验不下去）");
+                    return false;
+                }
+
+                form.ApplyMetadata(tagged, taggedTags, LyricsDocument.Empty, allowOnlineLookup: false);
+
+                if (!PumpUntil(() => smtc.CoverPath != null &&
+                                     smtc.CoverPath.EndsWith("smtc-cover.png", StringComparison.OrdinalIgnoreCase) &&
+                                     smtc.CoverSet, 6000))
+                {
+                    Log(6, "系统媒体控件检查：有内嵌图时封面来源不对（现在是「"
+                            + (smtc.CoverPath ?? "没有") + "」，期望数据目录里的 smtc-cover.png，"
+                            + "而不是同目录那张 cover.jpg）");
+                    return false;
+                }
+
+                // 落成临时文件的那份必须就是内嵌图本身，不能是目录里那张
+                byte[] handedOver;
+
+                try
+                {
+                    handedOver = File.ReadAllBytes(smtc.CoverPath!);
+                }
+                catch (Exception ex)
+                {
+                    Log(6, "系统媒体控件检查：封面来源文件读不回来（" + ex.Message + "）");
+                    return false;
+                }
+
+                if (!handedOver.AsSpan().SequenceEqual(embedded))
+                {
+                    Log(6, "系统媒体控件检查：喂给系统的封面不是内嵌那张"
+                            + $"（{handedOver.Length} 字节，内嵌图是 {embedded.Length} 字节）");
+                    return false;
+                }
+
+                // 第五个按钮：停止。放在最后——它会把这一首停掉，前面几条断言都需要它一直在播。
+                // 顺带把 SmtcSession.Clear() 那条路也走一遍（停止时系统那边不许还挂着上一首）。
+                smtc.SimulateButton(播放器.Ui.SmtcButton.Stop);
+                PumpMessages(400);
+
+                if (form.Engine.IsPlaying)
+                {
+                    Log(6, "系统媒体控件检查：按了「停止」之后还在播");
+                    return false;
+                }
+
+                if (!PumpUntil(() => smtc.CoverPath == null && !smtc.CoverSet, 6000))
+                {
+                    Log(6, "系统媒体控件检查：停下来之后系统那边还挂着封面"
+                            + $"（来源「{smtc.CoverPath ?? "没有"}」，喂过 {smtc.CoverSet}）");
+                    return false;
+                }
+
+                Log(6, "系统媒体控件正常：接口接上了、IsEnabled 为真，曲名随歌切换，"
+                        + "播放 / 暂停状态与时长都喂了进去并读得回来，五个按钮的开关都开着、"
+                        + "按钮回调（播放 / 暂停 / 停止 / 下一个 / 上一个）真的作用在引擎上；"
+                        + "封面按「内嵌图 → 同目录外挂封面（cover.jpg 优先于 album.jpg / folder.jpg）」取，"
+                        + "切到没封面的那首会清空、回到有封面的那首会接回来，停下来也会清空，"
+                        + "交给系统的图片文件系统那边确实读了（CoverSet）"
                         + "（⚠ 系统界面上真的画出来了没有、系统有没有把按钮事件送过来，冒烟验不到——只能人眼看）");
                 return true;
             }
             finally
             {
-                TryDelete(first);
-                TryDelete(second);
+                TryDeleteDirectory(smokeRoot);
             }
         }
 

@@ -106,7 +106,7 @@ namespace 播放器
         }
 
         /// <summary>
-        /// 把这一首的曲名 / 歌手推给系统媒体控件（音量弹窗 / 锁屏里那一块）。
+        /// 把这一首的曲名 / 歌手 / 封面推给系统媒体控件（音量弹窗 / 锁屏里那一块）。
         /// <para>没有接上时什么都不做。曲名与界面上的「标题」取同一份兜底（标签 → 文件名）。</para>
         /// </summary>
         private void UpdateSystemMediaControls(string? path, MediaTags? tags)
@@ -117,8 +117,13 @@ namespace 播放器
 
             _smtc.SetTrack(title, tags?.Artist, _engine.HasVideo);
 
-            // 封面：内嵌图（同目录的封面图这一版没喂，如实写在 README 里）
-            _smtc.SetCover(tags?.CoverArt, tags?.CoverMimeType);
+            // 封面：文件里内嵌的那张优先；没有再找同目录的 cover.jpg / folder.jpg 这类外挂封面
+            // （找哪个文件由 Core\SidecarCover 定，和侧栏封面、和"要不要去网上找"是同一份判定）
+            if (tags is { HasCoverArt: true })
+                _smtc.SetCover(tags.CoverArt, tags.CoverMimeType);
+            else
+                _smtc.SetCoverFile(SidecarCover.FindFor(path));
+
             _smtc.SetTimeline(_engine.Length, _engine.Time);
         }
 

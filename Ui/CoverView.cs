@@ -3,7 +3,6 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
-using System.Linq;
 using System.Windows.Forms;
 using 播放器.Core;
 
@@ -13,7 +12,8 @@ namespace 播放器.Ui
     /// 自绘的专辑封面控件：中间是封面图，下面是曲名 / 艺术家 / 专辑。
     /// <para>
     /// 封面来源依次是：文件内嵌图片（ID3 APIC / FLAC PICTURE / MP4 covr）
-    /// → 同目录的 <c>cover.jpg</c> / <c>folder.jpg</c> 等常见命名。
+    /// → 同目录的 <c>cover.jpg</c> / <c>folder.jpg</c> 等常见命名
+    /// （找哪个文件由 <see cref="SidecarCover"/> 定，系统媒体控件那边用的是同一份）。
     /// </para>
     /// <para>
     /// 解码时一律先缩到 <see cref="MaxDecodeSide"/> 像素以内：内嵌封面动辄 1~2 MB、
@@ -24,13 +24,6 @@ namespace 播放器.Ui
     {
         /// <summary>解码后最长边的上限（像素）。</summary>
         private const int MaxDecodeSide = 1024;
-
-        /// <summary>同目录封面文件的常见命名（不含扩展名，大小写不敏感）。</summary>
-        private static readonly string[] SidecarNames =
-            { "cover", "folder", "front", "album", "albumart", "artwork", "cd" };
-
-        private static readonly string[] SidecarExtensions =
-            { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp" };
 
         private Image? _cover;
 
@@ -309,7 +302,7 @@ namespace 播放器.Ui
             var folder = string.IsNullOrEmpty(path) ? null : Path.GetDirectoryName(path);
             if (string.IsNullOrEmpty(folder)) return null;
 
-            var sidecar = FindSidecar(folder);
+            var sidecar = SidecarCover.FindInFolder(folder);
             if (sidecar == null) return null;
 
             try
@@ -326,37 +319,11 @@ namespace 播放器.Ui
         /// 这个目录里有没有 <c>cover.jpg</c> / <c>folder.jpg</c> 这类现成的封面文件。
         /// <para>
         /// 给"要不要去网上找封面"用：目录里已经有封面了就没必要联网。
-        /// 判定规则必须和 <see cref="FindSidecar"/> 一致，所以直接复用它。
+        /// 判定与 <see cref="SidecarCover.FindInFolder"/> 是同一份（连优先序也同一份），
+        /// 所以不会出现"这里说有、那里说没有"。
         /// </para>
         /// </summary>
-        internal static bool HasSidecarCover(string folder) =>
-            !string.IsNullOrEmpty(folder) && FindSidecar(folder) != null;
-
-        /// <summary>
-        /// 在目录里找常见命名的封面文件。
-        /// <para>只枚举一次目录，而不是对着十几种文件名挨个 <c>File.Exists</c>。</para>
-        /// </summary>
-        private static string? FindSidecar(string folder)
-        {
-            try
-            {
-                foreach (var file in Directory.EnumerateFiles(folder))
-                {
-                    var name = Path.GetFileNameWithoutExtension(file);
-                    if (!SidecarNames.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
-
-                    var extension = Path.GetExtension(file);
-                    if (SidecarExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)) return file;
-                }
-            }
-            catch (Exception ex)
-            {
-// 目录不可读就当作没有封面
-                AppLog.Swallowed("目录不可读就当作没有封面", ex);
-            }
-
-            return null;
-        }
+        internal static bool HasSidecarCover(string folder) => SidecarCover.HasInFolder(folder);
 
         private static Image? Decode(byte[] bytes)
         {

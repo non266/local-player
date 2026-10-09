@@ -302,7 +302,11 @@ namespace 播放器
                     AppLog.Info("没接上系统媒体控件：" + smtcNote);
 
                 // 启动那一首的元数据是在构造函数里推的（那时还没有会话），这里补一次
-                if (_smtc != null) SyncSystemMediaControls();
+                if (_smtc != null)
+                {
+                    _smtc.ButtonPressed += OnSystemMediaButtonPressed;
+                    SyncSystemMediaControls();
+                }
             }
 
             // 此时控件尺寸（含 DPI 缩放）已经确定，再做依赖布局的恢复。

@@ -30,7 +30,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root "播放器.csproj"
 $testProject = Join-Path $root "tools\SmokeTest\SmokeTest.csproj"
-$outputDirectory = Join-Path $root "bin\Debug\net8.0-windows"
+$outputDirectory = Join-Path $root "bin\Debug\net8.0-windows10.0.19041.0"
 
 $failures = New-Object System.Collections.Generic.List[string]
 $startedAt = Get-Date

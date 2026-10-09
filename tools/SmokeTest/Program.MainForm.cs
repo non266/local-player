@@ -1804,16 +1804,46 @@ namespace SmokeTest
                     return false;
                 }
 
-                if (smtc.Status != 播放器.Ui.SmtcPlaybackStatus.Playing)
+                if (smtc.Status != Windows.Media.MediaPlaybackStatus.Playing)
                 {
                     Log(6, $"系统媒体控件检查：正在播，系统那边的状态却是 {smtc.Status}（期望 Playing）");
+                    return false;
+                }
+
+                // 那四个按钮：开关都必须是开的（否则弹窗上根本不显示按钮）
+                if (!smtc.IsPlayEnabled || !smtc.IsPauseEnabled || !smtc.IsStopEnabled ||
+                    !smtc.IsNextEnabled || !smtc.IsPreviousEnabled)
+                {
+                    Log(6, "系统媒体控件检查：按钮开关没全开"
+                            + $"（播放 {smtc.IsPlayEnabled} / 暂停 {smtc.IsPauseEnabled} / 停止 {smtc.IsStopEnabled} /"
+                            + $" 上一个 {smtc.IsPreviousEnabled} / 下一个 {smtc.IsNextEnabled}）");
+                    return false;
+                }
+
+                // 按钮按下之后我们要做的事（系统真的有没有把事件送过来，冒烟验不到——如实写在日志里）
+                // 「暂停 / 播放」那一对
+                smtc.SimulateButton(播放器.Ui.SmtcButton.Pause);
+                PumpMessages(200);
+
+                if (form.Engine.IsPlaying)
+                {
+                    Log(6, "系统媒体控件检查：按了「暂停」之后还在播");
+                    return false;
+                }
+
+                smtc.SimulateButton(播放器.Ui.SmtcButton.Play);
+                PumpMessages(200);
+
+                if (!form.Engine.IsPlaying)
+                {
+                    Log(6, "系统媒体控件检查：按了「播放」之后没有继续播");
                     return false;
                 }
 
                 // 暂停：状态要跟着变（这条同时验了"状态是往系统那边写的"）
                 form.Engine.Pause();
 
-                if (!PumpUntil(() => smtc.Status == 播放器.Ui.SmtcPlaybackStatus.Paused, 6000))
+                if (!PumpUntil(() => smtc.Status == Windows.Media.MediaPlaybackStatus.Paused, 6000))
                 {
                     Log(6, $"系统媒体控件检查：暂停之后系统那边的状态还是 {smtc.Status}（期望 Paused）");
                     return false;
@@ -1859,9 +1889,35 @@ namespace SmokeTest
                     return false;
                 }
 
+                // 「下一个 / 上一个」：现在在第二首，按「下一个」应当绕回第一首
+                smtc.SimulateButton(播放器.Ui.SmtcButton.Next);
+
+                if (!PumpUntil(() => form.Engine.CurrentPath == first, 15000))
+                {
+                    Log(6, "系统媒体控件检查：按了「下一个」之后没有绕回第一首（现在在播 "
+                            + $"{Path.GetFileName(form.Engine.CurrentPath ?? string.Empty)}）");
+                    return false;
+                }
+
+                if (!PumpUntil(() => smtc.Title == firstName, 10000))
+                {
+                    Log(6, $"系统媒体控件检查：按「下一个」切歌之后曲名没跟上（现在是「{smtc.Title}」）");
+                    return false;
+                }
+
+                smtc.SimulateButton(播放器.Ui.SmtcButton.Previous);
+
+                if (!PumpUntil(() => form.Engine.CurrentPath == second, 15000))
+                {
+                    Log(6, "系统媒体控件检查：按了「上一个」之后没有回到第二首（现在在播 "
+                            + $"{Path.GetFileName(form.Engine.CurrentPath ?? string.Empty)}）");
+                    return false;
+                }
+
                 Log(6, "系统媒体控件正常：接口接上了、IsEnabled 为真，曲名随歌切换、"
-                        + "播放 / 暂停状态与时长都喂了进去并读得回来"
-                        + "（⚠ 系统界面上真的画出来了没有，冒烟验不到——只能人眼看一次）");
+                        + "播放 / 暂停状态与时长都喂了进去并读得回来，四个按钮的开关都开着、"
+                        + "按钮回调（播放 / 暂停 / 下一个 / 上一个）真的作用在引擎上"
+                        + "（⚠ 系统界面上真的画出来了没有、系统有没有把按钮事件送过来，冒烟验不到——只能人眼看）");
                 return true;
             }
             finally

@@ -1,58 +1,49 @@
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using 播放器.Core;
+using Windows.Media;
+using Windows.Storage;
+using Windows.Storage.Streams;
 
 namespace 播放器.Ui
 {
-    /// <summary>系统媒体控件里的播放状态（<c>Windows.Media.MediaPlaybackStatus</c> 的取值）。</summary>
-    internal enum SmtcPlaybackStatus
+    /// <summary>系统媒体控件上那几个按钮（只映射我们用得到的）。</summary>
+    internal enum SmtcButton
     {
-        Closed = 0,
-        Changing = 1,
-        Stopped = 2,
-        Playing = 3,
-        Paused = 4
-    }
-
-    /// <summary>系统媒体控件里的媒体类型（<c>Windows.Media.MediaPlaybackType</c> 的取值）。</summary>
-    internal enum SmtcPlaybackType
-    {
-        Unknown = 0,
-        Music = 1,
-        Video = 2,
-        Image = 3
+        Play,
+        Pause,
+        Stop,
+        Next,
+        Previous
     }
 
     /// <summary>
-    /// 系统媒体控件（SMTC）：Win10/11 音量弹窗、锁屏界面上那一块"正在播放"。
+    /// 系统媒体控件（SMTC）：Win10/11 音量弹窗、锁屏界面上那一块"正在播放"，
+    /// 以及上面那几个按钮。
     /// <para>
-    /// <b>为什么手写 COM 而不改目标框架</b>：用现成的 WinRT 投影要把 TFM 改成
-    /// <c>net8.0-windows10.0.19041.0</c>，那样老 Win10 就被这一版丢掉了；
-    /// 手写这几个接口（照 <see cref="TaskbarThumbnailButtons"/> 的做法）代价是自己声明 vtable，
-    /// 好处是 <b>TFM 不动</b>。接口的方法顺序与 IID 不是猜的，是从本机 Windows SDK 的
-    /// <c>Windows.winmd</c>（10.0.18362）与 <c>SystemMediaTransportControlsInterop.h</c> 里读出来的，
-    /// 顺序错一个槽就会调到别的方法上，所以下面按原顺序一个不漏地声明。
+    /// <b>这一版走 WinRT 投影</b>（目标框架 <c>net8.0-windows10.0.19041.0</c>）：
+    /// 曲名 / 歌手 / 封面 / 进度 / 按钮事件全都是普通属性与事件，
+    /// 不必再手写 vtable、也不必自己揉 HSTRING。
+    /// 早先那一版"手写 COM"的写法（连同踩到的
+    /// <c>UnmanagedType.IInspectable</c> / <c>UnmanagedType.HString</c> 两个运行时限制）
+    /// 记在 [README 的实现要点] 与 CHANGELOG 里，留作"为什么当初绕了远路"的档案。
     /// </para>
     /// <para>
-    /// ⚠ <b>这一版只做"显示"，不做那几个按钮</b>：按钮要靠 <c>ButtonPressed</c> 事件，
-    /// 而它的参数是一个 <b>WinRT 委托</b>（<c>IInspectable</c> 派生、<c>Invoke</c> 在第 6 个槽）。
-    /// 手写 COM 没法安全地提供一个这样的对象（托管委托包出去的 CCW 是 <c>IDispatch</c> 布局，
-    /// 槽位对不上），硬做的话系统一按按钮就是栈错乱——比"没有按钮"糟得多。
-    /// 所以 <c>IsPlayEnabled</c> 那几个开关<b>一律不开</b>：宁可不显示按钮，也不显示一排按不动的按钮。
-    /// （媒体键仍然好用，那条路是 <c>RegisterHotKey</c>，和这里无关。）
+    /// 只有一处还得手写：<c>GetForWindow</c> 属于**头文件里的互操作接口**
+    /// （<c>SystemMediaTransportControlsInterop.h</c>），投影里没有它，所以照旧自己声明一次，
+    /// 拿到裸指针之后用 <c>MarshalInspectable</c> 换成投影对象。
     /// </para>
     /// <para>
-    /// ⚠ <b>验到哪一层</b>：冒烟能验"接口拿到了、<c>IsEnabled</c> 与曲名 / 歌手 / 状态写进去读得回来"
-    /// ——这些 getter 是<b>真的去问系统那个对象</b>的；但系统界面上到底画没画出来，只能人眼看一次。
+    /// ⚠ <b>验到哪一层</b>：冒烟能验"接口拿到了、<c>IsEnabled</c> 与曲名 / 歌手 / 状态 / 时长
+    /// 写进去读得回来、按钮开关都开了、按钮回调接上了"；
+    /// <b>系统界面上到底画没画出来、按钮按下去系统那边有没有反应，只能人眼看</b>。
     /// </para>
     /// </summary>
     internal sealed class SmtcSession : IDisposable
     {
-        // ---- WinRT 激活（combase.dll） ----------------------------------------
-
         private const int RoInitSingleThreaded = 1;
-
-        /// <summary>已经初始化过（别的模式）——不算错误。</summary>
         private const int ChangedMode = unchecked((int)0x80010106);
 
         [DllImport("combase.dll", ExactSpelling = true)]
@@ -64,11 +55,6 @@ namespace 播放器.Ui
             ref Guid iid,
             [MarshalAs(UnmanagedType.Interface)] out object factory);
 
-        [DllImport("combase.dll", ExactSpelling = true, PreserveSig = true)]
-        private static extern int RoActivateInstance(
-            IntPtr activatableClassId,
-            [MarshalAs(UnmanagedType.Interface)] out object instance);
-
         [DllImport("combase.dll", ExactSpelling = true)]
         private static extern int WindowsCreateString(
             [MarshalAs(UnmanagedType.LPWStr)] string source, int length, out IntPtr hstring);
@@ -76,26 +62,19 @@ namespace 播放器.Ui
         [DllImport("combase.dll", ExactSpelling = true)]
         private static extern int WindowsDeleteString(IntPtr hstring);
 
-        [DllImport("combase.dll", ExactSpelling = true)]
-        private static extern IntPtr WindowsGetStringRawBuffer(IntPtr hstring, out uint length);
-
         private static readonly Guid InteropIid = new Guid("ddb0472d-c911-4a1f-86d9-dc3d71a95f5a");
         private static readonly Guid ControlsIid = new Guid("99fa3ff4-1742-42a6-902e-087d41f965ec");
-        private static readonly Guid TimelineIid = new Guid("5125316a-c3a2-475b-8507-93534dc88f15");
 
-        private const string ControlsClass = "Windows.Media.SystemMediaTransportControls";
-        private const string TimelineClass = "Windows.Media.SystemMediaTransportControlsTimelineProperties";
-
-        // ---- COM 接口（顺序 = ABI 顺序，一个都不能少、不能换） ----------------
-        //
-        // ⚠ 每个接口都要**自己再声明一遍 IInspectable 的那三个方法**（GetIids / GetRuntimeClassName /
-        // GetTrustLevel），InterfaceType 写 InterfaceIsIUnknown：
-        // .NET 运行时不支持 `UnmanagedType.IInspectable` / `ComInterfaceType.InterfaceIsIInspectable`
-        // （实测报 "Marshalling as IInspectable is not supported in the .NET runtime."），
-        // 而 WinRT 接口的 vtable 是 IUnknown(3) + IInspectable(3) + 各自的方法。
-        // 把它们当普通方法声明出来，槽位正好占住第 4~6 个，后面的方法就落在第 7 个及以后 ✓。
-        // 这三个我们**从不调用**，参数一律 IntPtr/int 占位（免得再踩 HSTRING 的坑）。
-
+        /// <summary>
+        /// 那个只在头文件里出现的互操作接口。
+        /// <para>
+        /// 槽位说明见注释末尾：WinRT 接口的 vtable 是 IUnknown(3) + IInspectable(3) + 各自的方法，
+        /// 而 .NET 运行时不支持 <c>UnmanagedType.IInspectable</c>（实测报
+        /// "Marshalling as IInspectable is not supported in the .NET runtime."），
+        /// 所以把 IInspectable 那三个方法当普通方法声明出来占住第 4~6 个槽。
+        /// 这三个我们从不调用，参数用 IntPtr/int 占位。
+        /// </para>
+        /// </summary>
         [ComImport]
         [Guid("ddb0472d-c911-4a1f-86d9-dc3d71a95f5a")]
         [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -105,149 +84,14 @@ namespace 播放器.Ui
             [PreserveSig] int GetRuntimeClassName(out IntPtr name);
             [PreserveSig] int GetTrustLevel(out int level);
 
-            [PreserveSig]
-            int GetForWindow(
-                IntPtr appWindow,
-                ref Guid riid,
-                [MarshalAs(UnmanagedType.Interface)] out ISystemMediaTransportControls controls);
+            [PreserveSig] int GetForWindow(IntPtr appWindow, ref Guid riid, out IntPtr controls);
         }
 
-        [ComImport]
-        [Guid("99fa3ff4-1742-42a6-902e-087d41f965ec")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface ISystemMediaTransportControls
-        {
-            [PreserveSig] int GetIids(out int iidCount, out IntPtr iids);
-            [PreserveSig] int GetRuntimeClassName(out IntPtr name);
-            [PreserveSig] int GetTrustLevel(out int level);
-
-            [PreserveSig] int get_PlaybackStatus(out SmtcPlaybackStatus value);
-            [PreserveSig] int put_PlaybackStatus(SmtcPlaybackStatus value);
-            [PreserveSig] int get_DisplayUpdater(
-                [MarshalAs(UnmanagedType.Interface)] out ISystemMediaTransportControlsDisplayUpdater value);
-            [PreserveSig] int get_SoundLevel(out int value);
-            [PreserveSig] int get_IsEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsPlayEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsPlayEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsStopEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsStopEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsPauseEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsPauseEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsRecordEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsRecordEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsFastForwardEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsFastForwardEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsRewindEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsRewindEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsPreviousEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsPreviousEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsNextEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsNextEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsChannelUpEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsChannelUpEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_IsChannelDownEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_IsChannelDownEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-
-            // 事件（add_ / remove_）在 ABI 里排在这里。这一版不订阅，
-            // 但槽位必须留着——少了它们后面就没有别的成员了，留着是为了让上面的顺序不会
-            // "看起来像是对的"：这两个方法一在，谁改错了顺序都会被编译期/审查挡一下。
-            [PreserveSig] int add_ButtonPressed(IntPtr handler, out long token);
-            [PreserveSig] int remove_ButtonPressed(long token);
-            [PreserveSig] int add_PropertyChanged(IntPtr handler, out long token);
-            [PreserveSig] int remove_PropertyChanged(long token);
-        }
-
-        [ComImport]
-        [Guid("ea98d2f6-7f3c-4af2-a586-72889808efb1")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface ISystemMediaTransportControls2
-        {
-            [PreserveSig] int GetIids(out int iidCount, out IntPtr iids);
-            [PreserveSig] int GetRuntimeClassName(out IntPtr name);
-            [PreserveSig] int GetTrustLevel(out int level);
-
-            [PreserveSig] int get_AutoRepeatMode(out int value);
-            [PreserveSig] int put_AutoRepeatMode(int value);
-            [PreserveSig] int get_ShuffleEnabled([MarshalAs(UnmanagedType.Bool)] out bool value);
-            [PreserveSig] int put_ShuffleEnabled([MarshalAs(UnmanagedType.Bool)] bool value);
-            [PreserveSig] int get_PlaybackRate(out double value);
-            [PreserveSig] int put_PlaybackRate(double value);
-            [PreserveSig] int UpdateTimelineProperties([MarshalAs(UnmanagedType.Interface)] object timeline);
-        }
-
-        [ComImport]
-        [Guid("8abbc53e-fa55-4ecf-ad8e-c984e5dd1550")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface ISystemMediaTransportControlsDisplayUpdater
-        {
-            [PreserveSig] int GetIids(out int iidCount, out IntPtr iids);
-            [PreserveSig] int GetRuntimeClassName(out IntPtr name);
-            [PreserveSig] int GetTrustLevel(out int level);
-
-            [PreserveSig] int get_Type(out SmtcPlaybackType value);
-            [PreserveSig] int put_Type(SmtcPlaybackType value);
-            [PreserveSig] int get_AppMediaId(out IntPtr value);
-            [PreserveSig] int put_AppMediaId(IntPtr value);
-            [PreserveSig] int get_Thumbnail([MarshalAs(UnmanagedType.Interface)] out object value);
-            [PreserveSig] int put_Thumbnail([MarshalAs(UnmanagedType.Interface)] object value);
-            [PreserveSig] int get_MusicProperties([MarshalAs(UnmanagedType.Interface)] out IMusicDisplayProperties value);
-            [PreserveSig] int get_VideoProperties([MarshalAs(UnmanagedType.Interface)] out object value);
-            [PreserveSig] int get_ImageProperties([MarshalAs(UnmanagedType.Interface)] out object value);
-            [PreserveSig] int CopyFromFileAsync(SmtcPlaybackType type, IntPtr file, out IntPtr operation);
-            [PreserveSig] int ClearAll();
-            [PreserveSig] int Update();
-        }
-
-        [ComImport]
-        [Guid("6bbf0c59-d0a0-4d26-92a0-f978e1d18e7b")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface IMusicDisplayProperties
-        {
-            [PreserveSig] int GetIids(out int iidCount, out IntPtr iids);
-            [PreserveSig] int GetRuntimeClassName(out IntPtr name);
-            [PreserveSig] int GetTrustLevel(out int level);
-
-            // ⚠ 字符串是 HSTRING，而 .NET 的 `UnmanagedType.HString` 在运行时里同样**不支持**
-            // （实测 "Cannot marshal 'parameter #1'"），所以这里一律用 IntPtr + 自己调
-            // WindowsCreateString / WindowsGetStringRawBuffer（见 SetMusicString / ReadMusic）。
-            [PreserveSig] int get_Title(out IntPtr value);
-            [PreserveSig] int put_Title(IntPtr value);
-            [PreserveSig] int get_AlbumArtist(out IntPtr value);
-            [PreserveSig] int put_AlbumArtist(IntPtr value);
-            [PreserveSig] int get_Artist(out IntPtr value);
-            [PreserveSig] int put_Artist(IntPtr value);
-        }
-
-        [ComImport]
-        [Guid("5125316a-c3a2-475b-8507-93534dc88f15")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface ISystemMediaTransportControlsTimelineProperties
-        {
-            [PreserveSig] int GetIids(out int iidCount, out IntPtr iids);
-            [PreserveSig] int GetRuntimeClassName(out IntPtr name);
-            [PreserveSig] int GetTrustLevel(out int level);
-
-            [PreserveSig] int get_StartTime(out long value);
-            [PreserveSig] int put_StartTime(long value);
-            [PreserveSig] int get_EndTime(out long value);
-            [PreserveSig] int put_EndTime(long value);
-            [PreserveSig] int get_MinSeekTime(out long value);
-            [PreserveSig] int put_MinSeekTime(long value);
-            [PreserveSig] int get_MaxSeekTime(out long value);
-            [PreserveSig] int put_MaxSeekTime(long value);
-            [PreserveSig] int get_Position(out long value);
-            [PreserveSig] int put_Position(long value);
-        }
-
-        // ---- 实例 -------------------------------------------------------------
-
-        private ISystemMediaTransportControls? _controls;
-        private ISystemMediaTransportControls2? _more;
-        private ISystemMediaTransportControlsDisplayUpdater? _updater;
-        private IMusicDisplayProperties? _music;
-        private ISystemMediaTransportControlsTimelineProperties? _timeline;
+        private SystemMediaTransportControls? _controls;
         private bool _disposed;
+
+        /// <summary>音量弹窗 / 锁屏上那几个按钮被按下了（在 WinRT 的线程上触发）。</summary>
+        internal event Action<SmtcButton>? ButtonPressed;
 
         /// <summary>拿不到接口时的理由（只在创建那一次问出来，日志里记一次，不打扰用户）。</summary>
         internal static string? UnavailableReason { get; private set; }
@@ -257,119 +101,39 @@ namespace 播放器.Ui
 
         internal long PositionMilliseconds { get; private set; }
 
-        /// <summary>时间轴有没有喂过（<c>UpdateTimelineProperties</c> 没有返回值，只能记"喂过"）。</summary>
+        /// <summary>时间轴有没有喂过。</summary>
         internal bool TimelineUpdated { get; private set; }
 
-        private SmtcSession()
-        {
-        }
+        /// <summary>封面有没有喂过（内嵌图落成临时文件之后异步设上去的）。</summary>
+        internal bool CoverSet { get; private set; }
 
-        /// <summary>系统那边的 <c>IsEnabled</c>（读回来问系统那个对象，不是记我们自己的）。</summary>
-        internal bool IsEnabled
-        {
-            get
-            {
-                if (_disposed || _controls == null) return false;
+        /// <summary>系统那边的 IsEnabled（读回来问系统那个对象）。</summary>
+        internal bool IsEnabled => _controls?.IsEnabled ?? false;
 
-                try
-                {
-                    return _controls.get_IsEnabled(out var value) >= 0 && value;
-                }
-                catch (Exception)
-                {
-                    return false;
-                }
-            }
-        }
+        /// <summary>那五个按钮开关（读回来；弹窗上显示不显示这些按钮就看它）。</summary>
+        internal bool IsPlayEnabled => _controls?.IsPlayEnabled ?? false;
+
+        internal bool IsPauseEnabled => _controls?.IsPauseEnabled ?? false;
+
+        internal bool IsStopEnabled => _controls?.IsStopEnabled ?? false;
+
+        internal bool IsNextEnabled => _controls?.IsNextEnabled ?? false;
+
+        internal bool IsPreviousEnabled => _controls?.IsPreviousEnabled ?? false;
 
         /// <summary>系统那边的播放状态（读回来）。</summary>
-        internal SmtcPlaybackStatus Status
-        {
-            get
-            {
-                if (_disposed || _controls == null) return SmtcPlaybackStatus.Closed;
-
-                try
-                {
-                    return _controls.get_PlaybackStatus(out var value) >= 0 ? value : SmtcPlaybackStatus.Closed;
-                }
-                catch (Exception)
-                {
-                    return SmtcPlaybackStatus.Closed;
-                }
-            }
-        }
+        internal MediaPlaybackStatus Status => _controls?.PlaybackStatus ?? MediaPlaybackStatus.Closed;
 
         /// <summary>系统那边的曲名（读回来）。</summary>
-        internal string Title => ReadMusic(title: true);
+        internal string Title => ReadTitle();
 
         /// <summary>系统那边的艺术家（读回来）。</summary>
-        internal string Artist => ReadMusic(title: false);
+        internal string Artist => ReadArtist();
 
-        private string ReadMusic(bool title)
-        {
-            if (_disposed || _music == null) return string.Empty;
-
-            IntPtr hstring;
-
-            try
-            {
-                var hr = title ? _music.get_Title(out hstring) : _music.get_Artist(out hstring);
-
-                if (hr < 0)
-                {
-                    AppLog.Info($"读系统媒体控件的{(title ? "曲名" : "艺术家")}失败：0x{hr:X8}");
-                    return string.Empty;
-                }
-
-                if (hstring == IntPtr.Zero) return string.Empty;
-            }
-            catch (Exception)
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                var raw = WindowsGetStringRawBuffer(hstring, out var length);
-
-                return raw == IntPtr.Zero || length == 0
-                    ? string.Empty
-                    : Marshal.PtrToStringUni(raw, (int)length) ?? string.Empty;
-            }
-            finally
-            {
-                WindowsDeleteString(hstring);
-            }
-        }
-
-        private delegate int StringSetter(IntPtr value);
-
-        /// <summary>把一串 .NET 字符串作为 HSTRING 交给系统（自己建、自己删）。</summary>
-        private static void SetMusicString(StringSetter setter, string? value)
-        {
-            var text = value ?? string.Empty;
-
-            if (WindowsCreateString(text, text.Length, out var hstring) < 0) return;
-
-            try
-            {
-                var result = setter(hstring);
-
-                if (result < 0) AppLog.Info($"给系统媒体控件写字符串失败：0x{result:X8}");
-            }
-            catch (Exception ex)
-            {
-                AppLog.Swallowed("把曲名推给系统媒体控件失败。", ex);
-            }
-            finally
-            {
-                WindowsDeleteString(hstring);
-            }
-        }
+        private SmtcSession(SystemMediaTransportControls controls) => _controls = controls;
 
         /// <summary>
-        /// 给窗口建一个系统媒体控件会话。拿不到（系统太老 / 被策略禁掉 / 这个窗口不行）时返回 <c>null</c>，
+        /// 给窗口建一个系统媒体控件会话。拿不到（系统太老 / 被策略禁掉）时返回 <c>null</c>，
         /// 并把理由写进 <paramref name="note"/> 与 <see cref="UnavailableReason"/>。
         /// </summary>
         internal static SmtcSession? TryCreate(IntPtr windowHandle, out string note)
@@ -393,52 +157,26 @@ namespace 播放器.Ui
                     return null;
                 }
 
-                var factory = ActivationFactory(ControlsClass, InteropIid, out var factoryError);
-                if (factory == null)
+                if (!TryGetForWindow(windowHandle, out var controls, out var error))
                 {
-                    note = factoryError;
+                    note = error;
                     UnavailableReason = note;
                     return null;
                 }
 
-                var interop = (ISystemMediaTransportControlsInterop)factory;
-                var iid = ControlsIid;
+                var session = new SmtcSession(controls);
 
-                if (interop.GetForWindow(windowHandle, ref iid, out var controls) != 0 || controls == null)
-                {
-                    note = "GetForWindow 没给出系统媒体控件（这个窗口可能不被支持）";
-                    UnavailableReason = note;
-                    return null;
-                }
+                controls.DisplayUpdater.Type = MediaPlaybackType.Music;
 
-                var session = new SmtcSession { _controls = controls };
+                // 按钮：开哪几个，弹窗 / 锁屏上就显示哪几个
+                controls.IsPlayEnabled = true;
+                controls.IsPauseEnabled = true;
+                controls.IsStopEnabled = true;
+                controls.IsNextEnabled = true;
+                controls.IsPreviousEnabled = true;
+                controls.IsEnabled = true;
 
-                controls.get_DisplayUpdater(out var updater);
-                session._updater = updater;
-
-                if (updater != null)
-                {
-                    // 音乐（曲名 / 歌手），并把它挂上
-                    var typeResult = updater.put_Type(SmtcPlaybackType.Music);
-                    var musicResult = updater.get_MusicProperties(out var music);
-                    session._music = music;
-
-                    if (typeResult < 0 || musicResult < 0 || music == null)
-                    {
-                        AppLog.Info($"系统媒体控件：显示那块没接上"
-                                    + $"（put_Type=0x{typeResult:X8}、get_MusicProperties=0x{musicResult:X8}）");
-                    }
-                }
-
-                // 时间轴要另一个接口（ISystemMediaTransportControls2）+ 一个系统那边的时间轴对象
-                session._more = controls as ISystemMediaTransportControls2;
-
-                if (ActivateInstance(TimelineClass, out var instance) && instance != null)
-                    session._timeline = instance as ISystemMediaTransportControlsTimelineProperties;
-
-                controls.put_IsEnabled(true);
-
-                if (!session.IsEnabled)
+                if (!controls.IsEnabled)
                 {
                     note = "系统媒体控件没接受 IsEnabled";
                     UnavailableReason = note;
@@ -446,8 +184,10 @@ namespace 播放器.Ui
                     return null;
                 }
 
+                controls.ButtonPressed += (sender, args) => session.Raise(args.Button);
+
                 UnavailableReason = null;
-                AppLog.Info("系统媒体控件已接上（音量弹窗 / 锁屏里的「正在播放」）。");
+                AppLog.Info("系统媒体控件已接上（音量弹窗 / 锁屏里的「正在播放」，含那四个按钮）。");
                 return session;
             }
             catch (Exception ex)
@@ -458,33 +198,86 @@ namespace 播放器.Ui
             }
         }
 
-        /// <summary>把这一首的曲名 / 歌手推给系统（换歌时调用）。空值会推空串，不会残留上一首。</summary>
-        internal void SetTrack(string? title, string? artist)
+        /// <summary>
+        /// 供冒烟测试驱动"按钮按下去之后我们做了什么"。
+        /// <para>
+        /// ⚠ 它<b>验不到</b>"系统真的把事件送过来了"（那要人去点一下音量弹窗上的按钮），
+        /// 验的是<b>我们自己这一侧</b>：事件 → 映射 → 主窗体那五个动作。
+        /// </para>
+        /// </summary>
+        internal void SimulateButton(SmtcButton button) => Raise(button switch
         {
-            if (_disposed || _music == null) return;
+            SmtcButton.Play => SystemMediaTransportControlsButton.Play,
+            SmtcButton.Pause => SystemMediaTransportControlsButton.Pause,
+            SmtcButton.Stop => SystemMediaTransportControlsButton.Stop,
+            SmtcButton.Next => SystemMediaTransportControlsButton.Next,
+            _ => SystemMediaTransportControlsButton.Previous
+        });
 
-            SetMusicString(_music.put_Title, title);
-            SetMusicString(_music.put_Artist, artist);
-            SetMusicString(_music.put_AlbumArtist, artist);
+        private void Raise(SystemMediaTransportControlsButton button)
+        {
+            if (_disposed) return;
+
+            var mapped = button switch
+            {
+                SystemMediaTransportControlsButton.Play => SmtcButton.Play,
+                SystemMediaTransportControlsButton.Pause => SmtcButton.Pause,
+                SystemMediaTransportControlsButton.Stop => SmtcButton.Stop,
+                SystemMediaTransportControlsButton.Next => SmtcButton.Next,
+                SystemMediaTransportControlsButton.Previous => SmtcButton.Previous,
+                _ => (SmtcButton?)null
+            };
+
+            if (mapped == null) return;
 
             try
             {
-                _updater?.Update();
+                ButtonPressed?.Invoke(mapped.Value);
             }
             catch (Exception ex)
             {
-                AppLog.Swallowed("让系统媒体控件刷新显示失败。", ex);
+                AppLog.Swallowed("处理系统媒体控件的按钮失败。", ex);
             }
         }
 
-        /// <summary>把播放状态推给系统。</summary>
-        internal void SetStatus(SmtcPlaybackStatus status)
+        /// <summary>把这一首的曲名 / 歌手推给系统（换歌时调用）。空值会推空串，不会残留上一首。</summary>
+        internal void SetTrack(string? title, string? artist, bool isVideo)
         {
             if (_disposed || _controls == null) return;
 
             try
             {
-                _controls.put_PlaybackStatus(status);
+                var updater = _controls.DisplayUpdater;
+                updater.Type = isVideo ? MediaPlaybackType.Video : MediaPlaybackType.Music;
+
+                if (isVideo)
+                {
+                    updater.VideoProperties.Title = title ?? string.Empty;
+                    updater.VideoProperties.Subtitle = artist ?? string.Empty;
+                }
+                else
+                {
+                    updater.MusicProperties.Title = title ?? string.Empty;
+                    updater.MusicProperties.Artist = artist ?? string.Empty;
+                    updater.MusicProperties.AlbumArtist = artist ?? string.Empty;
+                }
+
+                updater.Update();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Swallowed("把曲名推给系统媒体控件失败。", ex);
+            }
+        }
+
+        /// <summary>把播放状态推给系统。</summary>
+        internal void SetStatus(MediaPlaybackStatus status)
+        {
+            if (_disposed || _controls == null) return;
+
+            try
+            {
+                _controls.PlaybackStatus = status;
             }
             catch (Exception ex)
             {
@@ -498,18 +291,20 @@ namespace 播放器.Ui
             DurationMilliseconds = Math.Max(0, durationMilliseconds);
             PositionMilliseconds = Math.Max(0, positionMilliseconds);
 
-            if (_disposed || _more == null || _timeline == null) return;
+            if (_disposed || _controls == null) return;
 
             try
             {
-                // WinRT 的 TimeSpan 就是 100 纳秒的整数（= .NET 的 TimeSpan.Ticks）
-                _timeline.put_StartTime(0);
-                _timeline.put_EndTime(TimeSpan.FromMilliseconds(DurationMilliseconds).Ticks);
-                _timeline.put_MinSeekTime(0);
-                _timeline.put_MaxSeekTime(TimeSpan.FromMilliseconds(DurationMilliseconds).Ticks);
-                _timeline.put_Position(TimeSpan.FromMilliseconds(PositionMilliseconds).Ticks);
+                var end = TimeSpan.FromMilliseconds(DurationMilliseconds);
 
-                if (_more.UpdateTimelineProperties(_timeline) != 0) return;
+                _controls.UpdateTimelineProperties(new SystemMediaTransportControlsTimelineProperties
+                {
+                    StartTime = TimeSpan.Zero,
+                    EndTime = end,
+                    MinSeekTime = TimeSpan.Zero,
+                    MaxSeekTime = end,
+                    Position = TimeSpan.FromMilliseconds(PositionMilliseconds)
+                });
 
                 TimelineUpdated = true;
             }
@@ -519,18 +314,75 @@ namespace 播放器.Ui
             }
         }
 
-        /// <summary>清掉系统那边显示的曲目（没有在播的时候）。</summary>
-        internal void Clear()
+        /// <summary>
+        /// 把封面推给系统：内嵌图先落到数据目录里一个临时文件，再让系统自己去读
+        /// （<c>RandomAccessStreamReference.CreateFromFile</c> 只认 <c>StorageFile</c>，而它只能异步拿）。
+        /// </summary>
+        internal void SetCover(byte[]? data, string? mimeType)
         {
-            if (_disposed) return;
+            if (_disposed || _controls == null) return;
+
+            if (data is not { Length: > 0 })
+            {
+                CoverSet = false;
+                return;
+            }
+
+            string path;
 
             try
             {
-                _updater?.ClearAll();
-                _controls?.put_PlaybackStatus(SmtcPlaybackStatus.Closed);
+                var extension = mimeType switch
+                {
+                    "image/png" => ".png",
+                    "image/gif" => ".gif",
+                    "image/bmp" => ".bmp",
+                    _ => ".jpg"
+                };
+
+                path = Path.Combine(AppSettings.SettingsDirectory, "smtc-cover" + extension);
+                File.WriteAllBytes(path, data);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Swallowed("把封面落成临时文件失败。", ex);
+                return;
+            }
+
+            _ = SetCoverAsync(path);
+        }
+
+        private async Task SetCoverAsync(string path)
+        {
+            try
+            {
+                var file = await StorageFile.GetFileFromPathAsync(path);
+                if (_disposed || _controls == null) return;
+
+                _controls.DisplayUpdater.Thumbnail = RandomAccessStreamReference.CreateFromFile(file);
+                CoverSet = true;
+            }
+            catch (Exception ex)
+            {
+                AppLog.Swallowed("把封面推给系统媒体控件失败。", ex);
+            }
+        }
+
+        /// <summary>清掉系统那边显示的曲目（没有在播的时候）。</summary>
+        internal void Clear()
+        {
+            if (_disposed || _controls == null) return;
+
+            try
+            {
+                _controls.DisplayUpdater.ClearAll();
+                _controls.PlaybackStatus = MediaPlaybackStatus.Closed;
+                _controls.DisplayUpdater.Thumbnail = null;
+
                 DurationMilliseconds = 0;
                 PositionMilliseconds = 0;
                 TimelineUpdated = false;
+                CoverSet = false;
             }
             catch (Exception ex)
             {
@@ -546,43 +398,67 @@ namespace 播放器.Ui
             // 关掉 IsEnabled：不走这一步的话，音量弹窗里会一直挂着"上一首"。
             try
             {
-                _controls?.put_IsEnabled(false);
+                if (_controls != null)
+                {
+                    _controls.IsEnabled = false;
+                    _controls.ButtonPressed -= (sender, args) => { };
+                }
             }
             catch (Exception)
             {
                 // 退出路径上失败无所谓
             }
 
-            _timeline = null;
-            _music = null;
-            _updater = null;
-            _more = null;
             _controls = null;
         }
 
-        // ---- 激活小工具 -------------------------------------------------------
-
-        private static object? ActivationFactory(string className, Guid iid, out string error)
+        private static bool TryGetForWindow(IntPtr windowHandle, out SystemMediaTransportControls controls, out string error)
         {
+            controls = null!;
             error = string.Empty;
+
+            const string className = "Windows.Media.SystemMediaTransportControls";
 
             if (WindowsCreateString(className, className.Length, out var hstring) != 0)
             {
                 error = "建不了类名的 HSTRING";
-                return null;
+                return false;
             }
 
             try
             {
-                var hr = RoGetActivationFactory(hstring, ref iid, out var factory);
+                var iid = InteropIid;
 
-                if (hr < 0 || factory == null)
+                if (RoGetActivationFactory(hstring, ref iid, out var factory) < 0 || factory == null)
                 {
-                    error = $"拿不到 {className} 的激活工厂（0x{hr:X8}）";
-                    return null;
+                    error = $"拿不到 {className} 的互操作工厂（要 Win10 1809+）";
+                    return false;
                 }
 
-                return factory;
+                var interop = (ISystemMediaTransportControlsInterop)factory;
+                var controlsIid = ControlsIid;
+
+                if (interop.GetForWindow(windowHandle, ref controlsIid, out var raw) < 0 || raw == IntPtr.Zero)
+                {
+                    error = "GetForWindow 没给出系统媒体控件（这个窗口可能不被支持）";
+                    return false;
+                }
+
+                try
+                {
+                    controls = WinRT.MarshalInspectable<SystemMediaTransportControls>.FromAbi(raw);
+                }
+                finally
+                {
+                    Marshal.Release(raw);
+                }
+
+                return controls != null;
+            }
+            catch (Exception ex)
+            {
+                error = "拿系统媒体控件出错：" + ex.Message;
+                return false;
             }
             finally
             {
@@ -590,19 +466,39 @@ namespace 播放器.Ui
             }
         }
 
-        private static bool ActivateInstance(string className, out object? instance)
+        private string ReadTitle()
         {
-            instance = null;
-
-            if (WindowsCreateString(className, className.Length, out var hstring) != 0) return false;
+            if (_disposed || _controls == null) return string.Empty;
 
             try
             {
-                return RoActivateInstance(hstring, out instance) >= 0 && instance != null;
+                var updater = _controls.DisplayUpdater;
+
+                return updater.Type == MediaPlaybackType.Video
+                    ? updater.VideoProperties.Title ?? string.Empty
+                    : updater.MusicProperties.Title ?? string.Empty;
             }
-            finally
+            catch (Exception)
             {
-                WindowsDeleteString(hstring);
+                return string.Empty;
+            }
+        }
+
+        private string ReadArtist()
+        {
+            if (_disposed || _controls == null) return string.Empty;
+
+            try
+            {
+                var updater = _controls.DisplayUpdater;
+
+                return updater.Type == MediaPlaybackType.Video
+                    ? updater.VideoProperties.Subtitle ?? string.Empty
+                    : updater.MusicProperties.Artist ?? string.Empty;
+            }
+            catch (Exception)
+            {
+                return string.Empty;
             }
         }
     }

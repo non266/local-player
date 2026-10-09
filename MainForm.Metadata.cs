@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using LibVLCSharp.Shared;
+using Windows.Media;
 using 播放器.Core;
 using 播放器.Ui;
 
@@ -114,7 +115,10 @@ namespace 播放器
 
             var title = FirstNonEmpty(tags?.Title, path == null ? null : Path.GetFileNameWithoutExtension(path));
 
-            _smtc.SetTrack(title, tags?.Artist);
+            _smtc.SetTrack(title, tags?.Artist, _engine.HasVideo);
+
+            // 封面：内嵌图（同目录的封面图这一版没喂，如实写在 README 里）
+            _smtc.SetCover(tags?.CoverArt, tags?.CoverMimeType);
             _smtc.SetTimeline(_engine.Length, _engine.Time);
         }
 
@@ -141,10 +145,10 @@ namespace 播放器
 
             _smtc.SetStatus(_engine.State switch
             {
-                PlayerState.Playing => SmtcPlaybackStatus.Playing,
-                PlayerState.Paused => SmtcPlaybackStatus.Paused,
-                PlayerState.Error => SmtcPlaybackStatus.Closed,
-                _ => SmtcPlaybackStatus.Stopped
+                PlayerState.Playing => MediaPlaybackStatus.Playing,
+                PlayerState.Paused => MediaPlaybackStatus.Paused,
+                PlayerState.Error => MediaPlaybackStatus.Closed,
+                _ => MediaPlaybackStatus.Stopped
             });
         }
 

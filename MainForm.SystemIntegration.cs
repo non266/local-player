@@ -15,6 +15,56 @@ namespace 播放器
         // =====================================================================
         // 系统集成：主题跟随、全局媒体键、任务栏缩略图按钮
         // =====================================================================
+
+        /// <summary>
+        /// 音量弹窗 / 锁屏上那几个按钮被按下了。
+        /// <para>
+        /// ⚠ 事件是在 <b>WinRT 的线程</b>上来的，不能直接碰控件与引擎，一律弹回 UI 线程再做事。
+        /// </para>
+        /// </summary>
+        private void OnSystemMediaButtonPressed(SmtcButton button)
+        {
+            if (IsDisposed || Disposing) return;
+
+            if (InvokeRequired)
+            {
+                try
+                {
+                    BeginInvoke(new Action(() => OnSystemMediaButtonPressed(button)));
+                }
+                catch (InvalidOperationException)
+                {
+                    // 句柄正在销毁：丢掉这一次
+                }
+
+                return;
+            }
+
+            switch (button)
+            {
+                case SmtcButton.Play:
+                    if (_engine.HasMedia) _engine.Play();
+                    else PlayCurrentOrFirst();
+                    break;
+
+                case SmtcButton.Pause:
+                    _engine.Pause();
+                    break;
+
+                case SmtcButton.Stop:
+                    StopPlayback();
+                    break;
+
+                case SmtcButton.Next:
+                    PlayNext(userInitiated: true);
+                    break;
+
+                case SmtcButton.Previous:
+                    PlayPrevious();
+                    break;
+            }
+        }
+
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);

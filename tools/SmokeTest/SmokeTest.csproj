@@ -1,8 +1,8 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <!-- 只开"注解"上下文：测试里本来就在用 string? / T?，但不开可空性分析（那会给主工程之外
          平添几百条与本测试无关的警告）。留 disable 会为每一处注解报 CS8632。 -->
@@ -12,19 +12,19 @@
     <RootNamespace>SmokeTest</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
     <!-- 直接输出到主程序目录，这样 libvlc 原生库和被引用的程序集就在旁边 -->
-    <OutputPath>..\..\bin\Debug\net8.0-windows\</OutputPath>
+    <OutputPath>..\..\bin\Debug\net8.0-windows10.0.19041.0\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
     <Reference Include="播放器">
-      <HintPath>..\..\bin\Debug\net8.0-windows\播放器.dll</HintPath>
+      <HintPath>..\..\bin\Debug\net8.0-windows10.0.19041.0\播放器.dll</HintPath>
     </Reference>
     <Reference Include="LibVLCSharp">
-      <HintPath>..\..\bin\Debug\net8.0-windows\LibVLCSharp.dll</HintPath>
+      <HintPath>..\..\bin\Debug\net8.0-windows10.0.19041.0\LibVLCSharp.dll</HintPath>
     </Reference>
     <Reference Include="LibVLCSharp.WinForms">
-      <HintPath>..\..\bin\Debug\net8.0-windows\LibVLCSharp.WinForms.dll</HintPath>
+      <HintPath>..\..\bin\Debug\net8.0-windows10.0.19041.0\LibVLCSharp.WinForms.dll</HintPath>
     </Reference>
   </ItemGroup>
 

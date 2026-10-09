@@ -242,6 +242,10 @@
   卸载器不认它们（不是它的载荷），**要先清掉再验卸载**（这条 1.2.1 那轮就记过）。
 - **没有代码签名**：安装包与便携版都是未签名的，SmartScreen 会提示"未知发布者"
   （要点"更多信息 → 仍要运行"）；要动它得先有一张证书，见 [docs/维护手册.md](docs/维护手册.md) 的 M5。
+- **已发布**：[v1.3.0](https://github.com/non266/local-player/releases/tag/v1.3.0)（Latest），
+  两个资产走 ASCII 名（`local-player-1.3.0-setup.exe` / `local-player-1.3.0-portable.zip`）——
+  服务端 `digest` 与上面两个本地 SHA256 **一致**，匿名 `Range` 请求都是 **206**
+  （`Content-Range: bytes 0-2047/70980709` 与 `/107091428`，和本地文件大小分毫不差）。
 
 ## [1.2.1] - 2026-10-09
 

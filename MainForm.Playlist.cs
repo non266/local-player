@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -23,6 +24,14 @@ namespace 播放器
         /// <summary>播放列表索引 → 界面行。每次重建列表时一起重建，供 FindRow 做 O(1) 查找。</summary>
         private readonly Dictionary<int, ListViewItem> _rowByPlaylistIndex =
             new Dictionary<int, ListViewItem>();
+
+        /// <summary>
+        /// 现在挂着"正在播"标记（加粗 + 在播色）的那一行。
+        /// <para>
+        /// 换歌时只改这一行和新的一行，不重建整个列表（见 <see cref="UpdateNowPlayingRow"/>）。
+        /// </para>
+        /// </summary>
+        private ListViewItem? _nowPlayingRow;
 
         /// <summary>标题里的总时长需要重算（由后台时长扫描逐条置位，界面计时器统一处理）。</summary>
         private bool _playlistSummaryDirty;
@@ -69,6 +78,9 @@ namespace 播放器
                 // 都要用它，列表大了以后这些操作会一起变慢。
                 _rowByPlaylistIndex.Clear();
 
+                // 行是刚造出来的，旧的"在播"那一行已经不在了
+                _nowPlayingRow = null;
+
                 for (var i = 0; i < _playlist.Count; i++)
                 {
                     var source = _playlist.Items[i];
@@ -95,6 +107,7 @@ namespace 播放器
                     {
                         row.Font = _playingItemFont;
                         row.ForeColor = _palette.PlayingFore;
+                        _nowPlayingRow = row;
                     }
 
                     listViewPlaylist.Items.Add(row);
@@ -155,6 +168,45 @@ namespace 播放器
                 row.Selected = true;
                 row.Focused = true;
             }
+        }
+
+        /// <summary>
+        /// 把"正在播"那一行的加粗 / 在播色挪到新的那一行（<b>不重建整个列表</b>）。
+        /// <para>
+        /// 为什么非要有这一步：<see cref="RefreshPlaylistView"/> 里的顺序是
+        /// "列表模型变了就重建"，而在 <c>PlayIndex</c> 里那次模型变化
+        /// （<c>_playlist.SetCurrent</c> → <c>Changed</c>）发生在 <c>_engine.Open()</c> <b>之前</b>，
+        /// 于是重建时引擎的路径<b>还是上一首</b>，加粗就画在上一首上——表现就是
+        /// 列表里"选中的是正在播那首、加粗的却是上一首"（所有者的截图正是这样）。
+        /// 引擎路径换成新的之后，由这里只挪那两行，不必再来一次整体重建。
+        /// </para>
+        /// <para>没有在播的东西（停下来了、或者这一项被筛选隐藏 / 打不开）时只负责把旧标记清掉。</para>
+        /// </summary>
+        private void UpdateNowPlayingRow()
+        {
+            // 旧的那一行恢复默认：Font = null / ForeColor = Empty 就是"跟着列表走"，与刚造出来的行一样。
+            // ⚠ 这两处必须一起还原，否则会留下"加粗但没颜色"这种半截状态。
+            if (_nowPlayingRow != null)
+            {
+                _nowPlayingRow.Font = null;
+                _nowPlayingRow.ForeColor = Color.Empty;
+                _nowPlayingRow = null;
+            }
+
+            if (_playlist.Count == 0) return;
+
+            var index = PlayingPlaylistIndex();
+            if (index < 0 || index >= _playlist.Count) return;
+
+            // 打不开的条目按错误色画，不参与"在播"标记（与重建时的分支保持一致）
+            if (_playlist.Items[index].HasError) return;
+
+            var row = FindRow(index);
+            if (row == null) return;
+
+            row.Font = _playingItemFont;
+            row.ForeColor = _palette.PlayingFore;
+            _nowPlayingRow = row;
         }
 
         /// <summary>按播放列表索引找到对应的界面行；被筛选隐藏时返回 <c>null</c>。O(1)。</summary>

@@ -119,6 +119,11 @@ namespace 播放器
                     UpdateWindowTitle();
                     HighlightPlayingItem();
 
+                    // 加粗那一行要单独挪一次：上面 SetCurrent 触发的整体重建发生在 Open 之前，
+                    // 那会儿引擎路径还是上一首，加粗就画在上一首上（"选中的是在播那首、
+                    // 加粗的是上一首"，看着就是列表对不上）。
+                    UpdateNowPlayingRow();
+
                     // 上面的循环可能已经改过若干行的错误标记，这里统一刷一次。
                     if (marked || wasMarked) RefreshPlaylistView();
 

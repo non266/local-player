@@ -87,6 +87,9 @@ namespace SmokeTest
                 // 1.3.0：只 Dispose 没 Close 的表单必须把计时器停掉（僵尸会写旧历史）
                 if (!CheckDisposedFormStopsTimers()) return false;
 
+                // 1.3.0 C-1：系统媒体控件（音量弹窗里那一块）——喂进去的曲名 / 状态读得回来
+                if (!CheckSystemMediaControls()) return false;
+
                 // 启动是否恢复上次的播放列表：默认关（打开就是空列表），开关打开才恢复
                 if (!CheckStartupPlaylistPreference()) return false;
 
@@ -1741,6 +1744,130 @@ namespace SmokeTest
             finally
             {
                 TryDelete(wav);
+            }
+        }
+
+        /// <summary>
+        /// C-1（1.3.0）：系统媒体控件（SMTC，音量弹窗 / 锁屏里那一块"正在播放"）。
+        /// <para>
+        /// <b>验到哪一层</b>：这里验的是"接口拿到了、<c>IsEnabled</c> 为真、曲名 / 歌手 / 状态 / 时长
+        /// 喂进去之后<b>读得回来</b>"——那几个 getter 是<b>真的去问系统那个对象</b>的，
+        /// 不是记我们自己的变量。但<b>系统界面上到底画没画出来，冒烟验不到</b>，只能人眼看一次
+        /// （README 与 CHANGELOG 里都写着这一条）。
+        /// </para>
+        /// <para>
+        /// 拿不到接口（老系统 / 被策略禁掉）时<b>打印原因后跳过</b>——照 <c>播放器_TEST_VIDEO</c> 的先例，
+        /// 跳过必须出声。
+        /// </para>
+        /// </summary>
+        private static bool CheckSystemMediaControls()
+        {
+            var first = Path.Combine(AppContext.BaseDirectory, "smtc-a.wav");
+            var second = Path.Combine(AppContext.BaseDirectory, "smtc-b.wav");
+
+            WriteWav(first, seconds: 30, frequency: 440);
+            WriteWav(second, seconds: 30, frequency: 480);
+
+            try
+            {
+                using var form = new 播放器.MainForm(new[] { first, second });
+                form.Show();
+                PumpMessages(500);
+
+                var smtc = form.SystemMediaControls;
+
+                if (smtc == null)
+                {
+                    Log(6, "系统媒体控件检查：跳过（这台机器没接上："
+                            + (播放器.Ui.SmtcSession.UnavailableReason ?? "没给理由") + "）");
+                    return true;
+                }
+
+                if (!smtc.IsEnabled)
+                {
+                    Log(6, "系统媒体控件检查：接口接上了，但系统那边 IsEnabled 是假");
+                    return false;
+                }
+
+                if (!PumpUntil(() => form.Engine.IsPlaying, 10000))
+                {
+                    Log(6, "系统媒体控件检查：WAV 没播起来");
+                    return false;
+                }
+
+                // 素材没有标签，所以曲名走的是"文件名兜底"，和界面上「标题」那一行同源
+                var firstName = Path.GetFileNameWithoutExtension(first);
+
+                if (!PumpUntil(() => smtc.Title == firstName, 6000))
+                {
+                    Log(6, $"系统媒体控件检查：曲名没喂进去（现在是「{smtc.Title}」，期望「{firstName}」）");
+                    return false;
+                }
+
+                if (smtc.Status != 播放器.Ui.SmtcPlaybackStatus.Playing)
+                {
+                    Log(6, $"系统媒体控件检查：正在播，系统那边的状态却是 {smtc.Status}（期望 Playing）");
+                    return false;
+                }
+
+                // 暂停：状态要跟着变（这条同时验了"状态是往系统那边写的"）
+                form.Engine.Pause();
+
+                if (!PumpUntil(() => smtc.Status == 播放器.Ui.SmtcPlaybackStatus.Paused, 6000))
+                {
+                    Log(6, $"系统媒体控件检查：暂停之后系统那边的状态还是 {smtc.Status}（期望 Paused）");
+                    return false;
+                }
+
+                form.Engine.Play();
+                PumpMessages(200);
+
+                // 时长与进度：系统那侧没有读回来的接口，验"我们喂过、值合理"
+                if (!PumpUntil(() => smtc.TimelineUpdated && smtc.DurationMilliseconds > 0, 6000))
+                {
+                    Log(6, $"系统媒体控件检查：时间轴没喂进去（喂过 {smtc.TimelineUpdated}，"
+                            + $"时长 {smtc.DurationMilliseconds} ms）");
+                    return false;
+                }
+
+                if (smtc.DurationMilliseconds < 25000 || smtc.DurationMilliseconds > 35000)
+                {
+                    Log(6, "系统媒体控件检查：喂给系统媒体控件的时长不对"
+                            + $"（{smtc.DurationMilliseconds} ms，素材是 30 秒）");
+                    return false;
+                }
+
+                // 切歌：曲名要换成新的（这一条就是那个变异的靶子）
+                var play = FindTopMenuItem(form, "播放");
+                var next = play == null ? null : FindMenuItem(play.DropDownItems, "下一个");
+
+                if (next == null)
+                {
+                    Log(6, "系统媒体控件检查：找不到「播放 → 下一个」");
+                    return false;
+                }
+
+                next.PerformClick();
+                PumpMessages(300);
+
+                var secondName = Path.GetFileNameWithoutExtension(second);
+
+                if (!PumpUntil(() => smtc.Title == secondName, 10000))
+                {
+                    Log(6, $"系统媒体控件检查：切歌之后系统那边的曲名还是「{smtc.Title}」，"
+                            + $"期望「{secondName}」");
+                    return false;
+                }
+
+                Log(6, "系统媒体控件正常：接口接上了、IsEnabled 为真，曲名随歌切换、"
+                        + "播放 / 暂停状态与时长都喂了进去并读得回来"
+                        + "（⚠ 系统界面上真的画出来了没有，冒烟验不到——只能人眼看一次）");
+                return true;
+            }
+            finally
+            {
+                TryDelete(first);
+                TryDelete(second);
             }
         }
 

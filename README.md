@@ -290,6 +290,11 @@ MP3 / FLAC / APE / WAV / AAC / M4A / OGG / Opus / WMA…… 以及外挂字幕�
   （`全局媒体键有 1 个没注册上：下一首（可能已被其它播放器占用；这几个键只在前台有效）`），
   以前只报"成功几个"，那一个键按下去没反应却完全看不出来
 - **任务栏缩略图按钮**：鼠标悬停任务栏图标，预览面板上直接有上一个 / 播放暂停 / 下一个
+- **系统媒体控件（SMTC）**：`Win` 键调出的音量弹窗与锁屏界面上显示当前这一首的**曲名 / 歌手**、
+  播放状态与进度条。**这一版只做"显示"**：那几个播放按钮**没有**（要订阅 `ButtonPressed` 事件，
+  它的参数是 WinRT 委托，手写 COM 没法安全实现，详见下文「实现要点 · 系统媒体控件的 COM 互操作」），
+  封面也没有（要 `StorageFile` + 异步 WinRT）；媒体键那条路不受影响，照旧好用。
+  老系统或策略禁掉时**安静降级**（记一条日志，界面上什么都不说）
 
 **字幕与音轨**
 - 自动加载同名字幕，也可手动加载 srt / ass / ssa / sub / idx / vtt / smi 等
@@ -864,7 +869,13 @@ LRC 那边还验**同一时间戳的分组**（原文 / 译文算同一句、`Co
 还验了"按文件记住"（另一首不受影响、切回来自己回来）。
 变异：永不换内核 → 以 `画面旋转检查：「顺时针 90°」的四个象限没有按预期搬家（观测 左上红 右上绿 左下蓝 右下黄；期望 左上蓝 右上红 左下黄 右下绿）` 失败。
 第 6 步还多了一段**只 `Dispose` 没 `Close` 的表单必须停掉界面计时器**（它是那个"每 20 秒把旧历史
-写回磁盘"的僵尸，第 18 步偶发红的真凶，见 [docs/维护手册.md](docs/维护手册.md) 的 M1′）。
+写回磁盘"的僵尸，第 18 步偶发红的真凶，见 [docs/维护手册.md](docs/维护手册.md) 的 M1′），
+以及**系统媒体控件**（1.3.0 批次 C）：起播一首 → 断言接口接上了、`IsEnabled` 为真、曲名喂进去
+**读得回来**（那几个 getter 是真的去问系统那个对象的）、状态 Playing / Paused 跟着变、
+时间轴喂过且时长合理、切歌之后曲名换成新的；拿不到接口时打印原因后跳过。
+变异：只在系统那边还是空的时候喂一次标题 → 以
+`系统媒体控件检查：切歌之后系统那边的曲名还是「smtc-a」，期望「smtc-b」` 失败。
+⚠ 这一段的边界如实写在日志里：**系统界面上画没画出来验不到**，只能人眼看一次。
 第 12 步如果检试到使用者正开着播放器就自动跳过，不会去打扰那个窗口。
 
 第 16 步是**在线歌词与封面**。它不依赖外网：试试里自己起了一个"假 LrcAPI"
@@ -2108,6 +2119,37 @@ catch (InvalidOperationException) { /* 句柄还没建好：先排队 */ }
 `ITaskbarList` / `ITaskbarList2` / `ITaskbarList3` 的全部方法按原顺序声明齐了，
 **后续维护时不要删改顺序**。所有调用都包了容错，系统不支持时自动降级为没有这组按钮。
 
+#### 系统媒体控件的 COM 互操作（`Ui/SmtcSession.cs`）
+
+同样是"手写 vtable"，但比 `ITaskbarList3` 麻烦一档，因为走的是 **WinRT** 那条路。
+三件值得记下来的事：
+
+1. **接口顺序与 IID 是查出来的，不是猜的**：本机 Windows SDK 的
+   `C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.18362.0\Windows.winmd`
+   里有每个接口的**方法顺序**（拿一个几十行的 `System.Reflection.Metadata` 小程序就能读出来），
+   `SystemMediaTransportControlsInterop.h` 里有那个只在头文件里出现的
+   `ISystemMediaTransportControlsInterop`（`ddb0472d-…`，`GetForWindow(hwnd, iid, out)`）。
+   ⚠ **维护时不要删改方法顺序**：错一个槽会调到别的方法上，而表现是"界面上什么都不显示"。
+   另外 `UpdateTimelineProperties` 在 18362 的 ABI 里属于 **`ISystemMediaTransportControls2`**，
+   不在主接口上；时间轴对象要 `RoActivateInstance("…TimelineProperties")` 现建。
+2. **.NET 运行时不支持两个 WinRT 编组方式**（都是实测报错挣来的）：
+   `UnmanagedType.IInspectable` / `ComInterfaceType.InterfaceIsIInspectable`
+   → `Marshalling as IInspectable is not supported in the .NET runtime.`；
+   `UnmanagedType.HString` → `Cannot marshal 'parameter #1'`。
+   于是把 `IInspectable` 的 `GetIids` / `GetRuntimeClassName` / `GetTrustLevel`
+   **当普通方法声明出来占住第 4~6 个槽**（`InterfaceIsIUnknown` + 这 3 个占位，
+   后面的方法就落在第 7 个及以后 ✓），字符串一律用 `IntPtr` 自己调
+   `WindowsCreateString` / `WindowsGetStringRawBuffer` / `WindowsDeleteString`。
+3. **没做按钮，是"安全"而不是"偷懒"**：按钮要 `add_ButtonPressed` 一个 **WinRT 委托**，
+   它也是 `IInspectable` 派生、`Invoke` 在第 6 个槽；托管委托包出去的 CCW 是 `IDispatch` 布局，
+   槽位对不上——系统一按按钮就是栈错乱。所以那几个 `IsXxxEnabled` 开关一律不开：
+   宁可不显示按钮，也不显示一排按不动的按钮。要做就得手写一整套 WinRT 委托 + 异步
+   （`IAsyncOperation`）的互操作，代价和 `CsWinRT` 的活差不多。
+4. **验到哪一层**：冒烟读的是**系统那个对象本身**（`IsEnabled` / `PlaybackStatus` /
+   `Title` / `Artist` 的 getter 都真的去问系统），但**系统界面上画没画出来只能人眼看**。
+   另外有一个坑就是靠这条断言当场抓出来的：会话在 `OnLoad` 里建，而启动那一首的元数据在
+   **构造函数**里已经推过（那时还没有会话）→ 第一首永远是空的；现在建好后补推一次。
+
 ### 数据与文件
 
 原子写、备份、歌单文件的位置与"不自动写回"。
@@ -2247,9 +2289,12 @@ x64 进程**根本无法加载**另外两个，LibVLCSharp 也是按进程架构
   它只挑一条最像的，同名不同版本时可能挑错，界面上会标出来源歌名 / 歌手供你判断。）
 - 均衡器的滑块是整数 dB，预置曲线的小数部分只有在不碰该频段时才会原样保留。
 - 筛选状态下不支持拖动换位（会提示先清空搜索框）。
-- 没有接 SMTC（Win10/11 音量弹窗里的媒体控件）。那需要把目标框架改成
-  `net8.0-windows10.0.19041.0` 引入 WinRT，改动面较大；目前用全局媒体键 +
-  任务栏缩略图按钮替代，日常够用。
+- **系统媒体控件（音量弹窗）只接了"显示"那一半**：曲名 / 歌手 / 播放状态 / 进度会出现在
+  音量弹窗与锁屏上，但**那几个按钮没有**——订阅 `ButtonPressed` 要一个 WinRT 委托，
+  手写 COM 没法安全实现（详见上文「实现要点 · 系统媒体控件的 COM 互操作」），
+  所以 `IsPlayEnabled` 那几个开关一律不开（宁可不显示，也不显示一排按不动的按钮）；
+  封面也没做（要 `StorageFile` + 异步 WinRT）。系统媒体键那条路是另一套（`RegisterHotKey`），
+  不受影响。**系统界面上真的画出来了没有，冒烟验不到，只能人眼看**。
 - **A-B 循环的几个边界**（1.3.0 批次 A）：A/B 两点取的是"按下菜单那一刻引擎报的时间"，
   所以和你想设的那一刻差个几百毫秒是正常的；换歌或停止会清掉这两点（同一首重新起播不清）；
   没给快捷键（现有单键快捷键已经很挤，避免撞车）。

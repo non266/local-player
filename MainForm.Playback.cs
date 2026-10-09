@@ -222,6 +222,9 @@ namespace 播放器
             // 侧栏却还挂着上一首的歌词、专辑封面和媒体信息，自相矛盾。
             LoadTrackMetadata(null);
 
+            // 系统媒体控件那边也不再挂着上一首（音量弹窗里那一块清空）
+            _smtc?.Clear();
+
             UpdateWindowTitle();
             RefreshPlaylistView();
             UpdateTransportState();

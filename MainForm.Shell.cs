@@ -352,6 +352,10 @@ namespace 播放器
             _taskbarButtons?.Dispose();
             _taskbarButtons = null;
 
+            // 系统媒体控件：关掉 IsEnabled 再放接口（音量弹窗里立刻不再挂着这一首）
+            _smtc?.Dispose();
+            _smtc = null;
+
             _engine.Dispose();
             DisposeThemeResources();
 

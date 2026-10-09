@@ -138,6 +138,12 @@ namespace 播放器
         /// </summary>
         internal bool UiTimerRunning => _uiTimer.Enabled;
 
+        /// <summary>
+        /// 系统媒体控件（音量弹窗 / 锁屏里的「正在播放」）。
+        /// <para>拿不到时为 <c>null</c>（老系统 / 被禁）——那是安静降级，界面上什么都不说。</para>
+        /// </summary>
+        internal SmtcSession? SystemMediaControls => _smtc;
+
         /// <summary>桌面歌词解锁热键（Ctrl+Alt+D）是否注册上了。</summary>
         private bool _desktopLyricsHotKeyRegistered;
 
@@ -155,6 +161,12 @@ namespace 播放器
 
         /// <summary>收尾是否已经跑过（关窗与 Dispose 都会来，只能收一次）。</summary>
         private bool _shutdown;
+
+        /// <summary>系统媒体控件会话；拿不到时为 <c>null</c>。</summary>
+        private SmtcSession? _smtc;
+
+        /// <summary>界面计时器的计数：每 5 拍（1 秒）把播放进度推给系统媒体控件一次。</summary>
+        private int _smtcTick;
 
         private int _consecutiveErrors;
 

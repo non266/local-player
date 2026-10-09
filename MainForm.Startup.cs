@@ -292,6 +292,19 @@ namespace 播放器
         {
             base.OnLoad(e);
 
+            // 系统媒体控件要有窗口句柄才建得起来（OnLoad 时一定有了）。
+            // 拿不到就安静降级：记一条日志，界面上什么都不说。
+            if (_smtc == null)
+            {
+                _smtc = SmtcSession.TryCreate(Handle, out var smtcNote);
+
+                if (_smtc == null && !string.IsNullOrEmpty(smtcNote))
+                    AppLog.Info("没接上系统媒体控件：" + smtcNote);
+
+                // 启动那一首的元数据是在构造函数里推的（那时还没有会话），这里补一次
+                if (_smtc != null) SyncSystemMediaControls();
+            }
+
             // 此时控件尺寸（含 DPI 缩放）已经确定，再做依赖布局的恢复。
             RestoreWindowPlacement();
             ClampToWorkingArea();

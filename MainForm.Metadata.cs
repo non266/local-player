@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using LibVLCSharp.Shared;
 using 播放器.Core;
+using 播放器.Ui;
 
 // 曲目元数据：切歌后异步读标签 / 歌词，回填侧栏与桌面歌词，组装「媒体信息」页。
 
@@ -90,6 +91,9 @@ namespace 播放器
             // 换歌先把这个文件自己的歌词偏移接上：下面推给界面时才是对的那一份
             RestoreLyricsOffsetForCurrentMedia(path);
 
+            // 系统媒体控件（音量弹窗里那一块）跟着换歌
+            UpdateSystemMediaControls(path, tags);
+
             sidebarPanel.ShowTrack(path, tags, _track.ShiftedLyrics, BuildInfoRows(path, tags));
             UpdateLyricsPosition();
             UpdateTrayText();
@@ -98,6 +102,50 @@ namespace 播放器
             RefreshDesktopLyricsContent();
 
             if (allowOnlineLookup) QueueOnlineLookup(path, tags, lyrics);
+        }
+
+        /// <summary>
+        /// 把这一首的曲名 / 歌手推给系统媒体控件（音量弹窗 / 锁屏里那一块）。
+        /// <para>没有接上时什么都不做。曲名与界面上的「标题」取同一份兜底（标签 → 文件名）。</para>
+        /// </summary>
+        private void UpdateSystemMediaControls(string? path, MediaTags? tags)
+        {
+            if (_smtc == null) return;
+
+            var title = FirstNonEmpty(tags?.Title, path == null ? null : Path.GetFileNameWithoutExtension(path));
+
+            _smtc.SetTrack(title, tags?.Artist);
+            _smtc.SetTimeline(_engine.Length, _engine.Time);
+        }
+
+        /// <summary>推一次进度（界面计时器每 5 拍调一次，够音量弹窗里那条进度用了）。</summary>
+        private void UpdateSystemMediaControlsPosition()
+        {
+            if (_smtc == null) return;
+
+            _smtc.SetTimeline(_engine.Length, _engine.Time);
+        }
+
+        /// <summary>
+        /// 把"现在这一首 + 现在的状态"整体补推一次。
+        /// <para>
+        /// 会话是在 <c>OnLoad</c> 里建的，而启动那一首的元数据在<b>构造函数</b>里就已经推过了
+        /// （那时候还没有会话）——不补这一次，音量弹窗里第一首永远是空的。
+        /// </para>
+        /// </summary>
+        private void SyncSystemMediaControls()
+        {
+            if (_smtc == null) return;
+
+            UpdateSystemMediaControls(_track.Path, _track.Tags);
+
+            _smtc.SetStatus(_engine.State switch
+            {
+                PlayerState.Playing => SmtcPlaybackStatus.Playing,
+                PlayerState.Paused => SmtcPlaybackStatus.Paused,
+                PlayerState.Error => SmtcPlaybackStatus.Closed,
+                _ => SmtcPlaybackStatus.Stopped
+            });
         }
 
         /// <summary>
@@ -121,6 +169,14 @@ namespace 播放器
             // 顺手把"在不在播"推过去：控制条第一个按钮画播放还是暂停靠它。
             // 属性 setter 里有相等判断，没变的时候不会重画。
             SyncDesktopLyricsPlayingState();
+
+            // 系统媒体控件那条进度也顺手推一下：每 5 拍（1 秒）一次就够，
+            // 每次都推的话 COM 调用比这一整段还贵。
+            if (_smtc != null && ++_smtcTick >= 5)
+            {
+                _smtcTick = 0;
+                UpdateSystemMediaControlsPosition();
+            }
         }
 
         /// <summary>组装「媒体信息」页的内容。</summary>

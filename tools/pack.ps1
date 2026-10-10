@@ -1,4 +1,10 @@
-# 打包：自包含发布 → 便携 zip → Inno Setup 安装程序
+﻿# 打包：自包含发布 → 便携 zip → Inno Setup 安装程序
+#
+# ⚠ 这个文件必须以 UTF-8 **带 BOM** 保存（release-check.ps1 同理）。
+#   Windows PowerShell 5.1 对**没有 BOM** 的 .ps1 按 ANSI(GBK) 解，
+#   中文注释会直接变成语法错误——实测把 BOM 弄丢之后报的是
+#   `Missing closing ')' in expression` / `Unexpected token`，一行都跑不动。
+#   用编辑器改文件时要留意它会不会顺手把 BOM 去掉（本项目踩过一次：1.4.0 打包前）。
 #
 # 用法（在仓库根目录或任何地方都行）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\pack.ps1

@@ -8,8 +8,45 @@ namespace SmokeTest
         // 辅助
         // -----------------------------------------------------------------
 
-        private static void Log(int step, string message) =>
+        private static void Log(int step, string message)
+        {
             Console.WriteLine($"[{step}/{StepCount}] {message}");
+
+            // 每条检查也进崩溃日志：它是带时间戳的，于是这份日志天然就是一条**时间线**——
+            // 崩了不但能看出崩在哪一步，还能看出崩之前每一步各花了多久（想优化套件就靠它）。
+            // 长消息（那些一大段的"正常"总结）截断，日志才读得下去。
+            Journal($"[{step}/{StepCount}] " + (message.Length > 160 ? message[..160] + "…" : message));
+        }
+
+        /// <summary>
+        /// 崩溃日志（每步开始 / 结束、以及压测的每一轮都写一行，<b>写完立刻关文件</b>）。
+        /// <para>
+        /// 为什么要这个：这个套件跑在一个进程里，<b>原生崩</b>（M8 那种 `0xC0000005`）会把
+        /// `Console` 里还没刷出去的东西一起带走——1.4.0 验收时只能靠"产品日志最后一行 + 现场留下的素材"
+        /// 反推崩在哪一步。有了它，崩完直接看最后一行就知道当时在做什么。
+        /// </para>
+        /// <para>
+        /// 用 <see cref="File.AppendAllText(string,string)"/>（每次开关文件）而不是攒着写：
+        /// 崩溃时进程直接没，攒着的缓冲等于没写。
+        /// </para>
+        /// </summary>
+        private static void Journal(string text)
+        {
+            try
+            {
+                File.AppendAllText(JournalPath,
+                    DateTime.Now.ToString("HH:mm:ss.fff") + "  " + text + Environment.NewLine);
+            }
+            catch (Exception)
+            {
+                // 记不进就算了：这是诊断用的，不能让它把冒烟本身弄红
+            }
+        }
+
+        private static void ResetJournal() => TryDelete(JournalPath);
+
+        /// <summary>崩溃日志落在输出目录（和冒烟的其他夹具一样，不入库、跑完即弃）。</summary>
+        private static string JournalPath => Path.Combine(AppContext.BaseDirectory, "smoke-journal.txt");
 
         private static Control Find(Control root, string name) =>
             root.Controls.Find(name, searchAllChildren: true).FirstOrDefault();

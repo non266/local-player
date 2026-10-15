@@ -87,12 +87,17 @@ namespace 播放器
         /// </summary>
         private void OnEngineCoreRebuilt()
         {
+            // 这一段和 PlayerEngine.EnsureCore 是一对：两边都留了细一点的日志，
+            // 就是为了让"换内核偶发硬崩"（M8）下次崩的时候能落在**某一行**上（见那边的注释）。
+            AppLog.Info("换内核（界面）：把画面窗口改挂到新播放器");
             videoView.MediaPlayer = _engine.Player;
 
+            AppLog.Info("换内核（界面）：重建时长扫描器");
             _scanner.DurationFound -= OnDurationFound;
             _scanner.Dispose();
             RebuildScanner();
 
+            AppLog.Info("换内核（界面）：铺回音量 / 静音 / 速率 / 均衡器");
             _engine.Volume = _settings.Volume;
             _engine.Muted = _settings.Muted;
             _engine.Rate = _settings.Rate <= 0 ? 1.0f : _settings.Rate;

@@ -53,6 +53,7 @@ namespace SmokeTest
             TryDeleteDirectory(dataDir);
             Directory.CreateDirectory(dataDir);
             Environment.SetEnvironmentVariable("播放器_DATA_DIR", dataDir);
+            ResetJournal();
 
             // 默认关掉"在线歌词与封面"：那会在切歌时真的去联网，
             // 既让测试依赖网络、又会给每一步平白加上几秒。
@@ -96,14 +97,18 @@ namespace SmokeTest
 
             if (selected.Count == 0)
             {
-                Console.WriteLine($"没有名字含「{filter}」的检查。可用："
+                Console.WriteLine($"没有名字含「{filter}」的检查（多个关键字用逗号分隔；"
+                                  + "也可以按**声明顺序的第几个**写，如 9 或 1-6）。可用："
                                   + string.Join(" / ", steps.Select(s => s.Name)));
                 return 2;
             }
 
             if (filter != null)
             {
-                Console.WriteLine($"只跑 {selected.Count} 项：{string.Join(" / ", selected.Select(s => s.Name))}");
+                // 把"第几个"一起印出来：数字筛选（1-6 这种）说的就是它，
+                // 而日志行里的 [13/20] 是各检查自己写的编号，两者不是一个东西。
+                Console.WriteLine($"只跑 {selected.Count} 项："
+                                  + string.Join(" / ", selected.Select(s => (Array.IndexOf(steps, s) + 1) + "." + s.Name)));
                 Console.WriteLine();
             }
 
@@ -118,11 +123,31 @@ namespace SmokeTest
                 return 1;
             }
 
+            var timings = new List<(string Name, long Milliseconds)>();
+            var stepIndex = 0;
+
             foreach (var step in selected)
             {
-                if (!step.Run()) return 1;
+                stepIndex++;
+                Journal($"开始 第 {stepIndex}/{selected.Count} 步：{step.Name}");
+
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                var passed = step.Run();
+                watch.Stop();
+
+                timings.Add((step.Name, watch.ElapsedMilliseconds));
+                Journal((passed ? "完成" : "失败") + $" 第 {stepIndex}/{selected.Count} 步：{step.Name}"
+                        + $"（{watch.ElapsedMilliseconds} ms）");
+
+                if (!passed)
+                {
+                    PrintTimings(timings);
+                    return 1;
+                }
             }
 
+            PrintTimings(timings);
+            Journal("全部完成");
 
             TryDeleteDirectory(dataDir);
 
@@ -131,10 +156,54 @@ namespace SmokeTest
             return 0;
         }
 
-        /// <summary>按关键字挑出要跑的检查，并把它们依赖的前置检查一并带上。</summary>
+        /// <summary>
+        /// 每步耗时（"先量再改"：想优化这个套件，先得知道时间花在哪一步）。
+        /// <para>
+        /// 同时写进崩溃日志：崩了的时候这一份也在日志里，能看到崩之前各步用了多久。
+        /// </para>
+        /// </summary>
+        private static void PrintTimings(IReadOnlyList<(string Name, long Milliseconds)> timings)
+        {
+            if (timings.Count == 0) return;
+
+            Console.WriteLine();
+            Console.WriteLine("=== 每步耗时 ===");
+
+            long total = 0;
+
+            foreach (var (name, milliseconds) in timings)
+            {
+                total += milliseconds;
+                Console.WriteLine($"  {name,-12} {milliseconds,7} ms");
+                Journal($"耗时 {name}：{milliseconds} ms");
+            }
+
+            Console.WriteLine($"  {"合计",-12} {total,7} ms");
+            Journal($"耗时合计：{total} ms");
+        }
+
+        /// <summary>
+        /// 按关键字挑出要跑的检查，并把它们依赖的前置检查一并带上。
+        /// <para>
+        /// 一个筛选串里可以混着三种写法（用 <c>,</c> 分隔，任一命中即选中）：
+        /// 名字片段（<c>视频</c>）、**声明顺序里的第几个**（<c>9</c>）、**第几个到第几个**（<c>1-6</c>）。
+        /// 后两种是查"偶发红 / 偶发崩"用的：那种问题常常要"前面若干步跑过之后"才出现，
+        /// 于是需要在一个进程里拼出"某几步 + 出问题那一步"的组合来二分，比反复跑全量便宜得多。
+        /// ⚠ 这里的数字是**步骤在清单里的位置**（筛选时会连名字一起印出来），
+        /// 不是日志行里那个 <c>[13/20]</c>——那是各检查自己写的编号。
+        /// </para>
+        /// </summary>
         private static List<SmokeStep> SelectSteps(IReadOnlyList<SmokeStep> steps, string filter)
         {
             if (string.IsNullOrEmpty(filter)) return new List<SmokeStep>(steps);
+
+            var keywords = filter
+                .Split(new[] { ',', '，', '|', '+' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(k => k.Trim())
+                .Where(k => k.Length > 0)
+                .ToArray();
+
+            if (keywords.Length == 0) return new List<SmokeStep>(steps);
 
             var wanted = new List<SmokeStep>();
 
@@ -151,9 +220,28 @@ namespace SmokeTest
                 wanted.Add(step);
             }
 
-            foreach (var step in steps)
+            foreach (var keyword in keywords)
             {
-                if (step.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)) Require(step);
+                // 1-8 / 9：按**第几步**选（1 起数，按声明顺序）
+                var range = System.Text.RegularExpressions.Regex.Match(keyword, @"^(\d+)(?:-(\d+))?$");
+
+                if (range.Success)
+                {
+                    var from = int.Parse(range.Groups[1].Value);
+                    var to = range.Groups[2].Success ? int.Parse(range.Groups[2].Value) : from;
+
+                    for (var index = from; index <= to && index <= steps.Count; index++)
+                    {
+                        if (index >= 1) Require(steps[index - 1]);
+                    }
+
+                    continue;
+                }
+
+                foreach (var step in steps)
+                {
+                    if (step.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase)) Require(step);
+                }
             }
 
             // 按声明顺序跑，前置检查自然在前

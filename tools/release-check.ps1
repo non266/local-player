@@ -193,6 +193,21 @@ if (-not $SkipSmoke -and $failures.Count -eq 0)
         $smokeLines | Set-Content -LiteralPath $logPath -Encoding UTF8
 
         Write-Failure ("冒烟测试没通过（退出码 " + $smokeExit + "），完整输出：" + $logPath)
+
+        # 原生崩（M8 那种 0xC0000005）会把 Console 里没刷出去的东西一起带走，
+        # 所以冒烟自己每一步都往这个日志里写一行（写完立刻落盘）。
+        # 崩了就把最后几行打出来：一眼能看出"当时在做什么"。
+        $journalPath = Join-Path $outputDirectory "smoke-journal.txt"
+
+        if (Test-Path -LiteralPath $journalPath)
+        {
+            Write-Host "  --- smoke-journal.txt 最后 12 行（崩在哪一步看这里） ---" -ForegroundColor Yellow
+            Get-Content -LiteralPath $journalPath -Encoding UTF8 -Tail 12 | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Yellow }
+        }
+        else
+        {
+            Write-Host "  （没有 smoke-journal.txt：可能是构建阶段就失败了）" -ForegroundColor Yellow
+        }
     }
     else
     {

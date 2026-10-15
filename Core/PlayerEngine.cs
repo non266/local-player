@@ -159,7 +159,21 @@ namespace 播放器.Core
         {
             if (rotation == _coreRotation) return;
 
-            if (!_cores.TryGetValue(rotation, out var core)) core = CreateCore(rotation);
+            var reused = _cores.TryGetValue(rotation, out var cached);
+            var core = reused ? cached! : CreateCore(rotation);
+
+            // 换内核这一段**偶发原生崩**（M8：`0xC0000005`，整个进程直接没）。
+            // 崩的时候产品日志就是唯一的现场，所以这里每一步都留一行——
+            // 日志停在哪一行，就说明崩在它后面那一步（旋转是用户偶尔才做一次的动作，
+            // 一次多七八行日志不碍事；平时也只有这一段会打这么多）。
+            //
+            // 2026-10-15 靠这几行定到的位置：**`old.Stop()`**（日志写到"② 停旧播放器"就没了），
+            // 而且崩的那一次永远是"切到另一首 / 第一次**复用**缓存里的内核"。
+            // 顺手试过"停之前先让界面把窗口摘下来"（当时为此加过一个 `CoreRebuilding` 事件）——
+            // **没用，照崩**，所以那一步撤了；顺序仍然是"先建新播放器 → 通知界面挂过去 → 再放旧的"。
+            AppLog.Info($"换内核：目标「{ScreenRotations.Describe(rotation)}」，"
+                        + (reused ? "复用缓存里的内核" : "新建一个内核")
+                        + $"（缓存里现在有 {_cores.Count} 个）");
 
             var old = _mediaPlayer;
 
@@ -167,13 +181,22 @@ namespace 播放器.Core
 
             try
             {
+                // ⚠ 这里两步的顺序**试过两种，都照崩**（两次实验的经过见 CHANGELOG 的 M8 那一节）：
+                // ① 先 DisposeCurrentMedia 再 Stop（1.3.0 起的老写法）；
+                // ② 先 Stop 再 DisposeCurrentMedia（2026-10-15 试的候选修法，全量连跑 4 次全绿之后第 5 次又崩，
+                //    崩点还是 `old.Stop()`）。
+                // 所以顺序本身不是根因，最终保留原来的写法（行为与 1.3.0/1.4.0 一致，少一处无据的改动）。
+                AppLog.Info("换内核：① 放掉当前媒体");
                 DisposeCurrentMedia();
 
+                AppLog.Info("换内核：② 停旧播放器");
                 try { old.Stop(); }
                 catch (Exception ex) { AppLog.Swallowed("换内核之前停旧播放器失败。", ex); }
 
                 _libVlc = core;
                 _coreRotation = rotation;
+
+                AppLog.Info("换内核：③ 在新内核上建播放器并铺回状态");
                 _mediaPlayer = CreatePlayer(core);
 
                 ApplyPlayerState(_mediaPlayer);
@@ -184,10 +207,14 @@ namespace 播放器.Core
             }
 
             // 界面必须在这里把 VideoView 改挂到新的 Player 上（旧的那个紧接着就被释放）
+            AppLog.Info("换内核：④ 通知界面把窗口改挂过去");
             CoreRebuilt?.Invoke(this, EventArgs.Empty);
 
+            AppLog.Info("换内核：⑤ 释放旧播放器");
             try { old.Dispose(); }
             catch (Exception ex) { AppLog.Swallowed("释放旧播放器失败。", ex); }
+
+            AppLog.Info("换内核：完成");
         }
 
         /// <summary>把"用户那一套"铺到一个（可能是全新的）播放器上。</summary>

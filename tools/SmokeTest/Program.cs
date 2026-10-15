@@ -139,6 +139,15 @@ namespace SmokeTest
                 Journal((passed ? "完成" : "失败") + $" 第 {stepIndex}/{selected.Count} 步：{step.Name}"
                         + $"（{watch.ElapsedMilliseconds} ms）");
 
+                // 每步之后把进程的资源量记一笔：M8 那个原生崩有一半是"资源累积"的味道
+                // （换内核压测里每换一次泄漏约 150 个句柄 / 35 个线程），
+                // 有了这条曲线就能看出"哪一步把它们攒起来的"。
+                using (var current = System.Diagnostics.Process.GetCurrentProcess())
+                {
+                    Journal($"资源（第 {stepIndex} 步「{step.Name}」之后）：句柄 {current.HandleCount}、"
+                            + $"线程 {current.Threads.Count}、托管内存 {GC.GetTotalMemory(false) / 1024} KB");
+                }
+
                 if (!passed)
                 {
                     PrintTimings(timings);

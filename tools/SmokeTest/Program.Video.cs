@@ -572,8 +572,12 @@ namespace SmokeTest
                 {
                     if (!CheckRotationOnMainForm(clip, second)) return false;
 
-                    // M8 的两个复现探针：只在设了对应环境变量时才跑（默认不跑，行为一字不变）
+                    // M8 的三个复现探针：只在设了对应环境变量时才跑（默认不跑，行为一字不变）
                     if (!RunRotationStressIfRequested(clip, second)) return false;
+
+                    if (!RunChurnStressIfRequested(clip, second)) return false;
+
+                    if (!RunTightStressIfRequested(clip, second)) return false;
 
                     return RunSnapshotStressIfRequested(clip, second);
                 }
@@ -731,6 +735,50 @@ namespace SmokeTest
             {
                 Log(13, "画面旋转检查：几种旋转截出来的画面几乎一样（"
                         + string.Join(" / ", observed.Select(pair => pair.Key + "=" + pair.Value)) + "）");
+                return false;
+            }
+
+            // ---- 换内核**不该漏原生线程**（M8 的根因，1.4.1）----
+            // `MediaPlayer.Stop()` 会漏掉一整套输入 / 解码 / 视频输出线程（这台机器上实测 ~35 个），
+            // 换到 240 次左右进程就以 `0xC0000005` 崩掉。这里**再切一遍六个取值**：
+            // 这一遍六套内核与播放器都已经建好，不存在"新建播放器"的正常增长，
+            // 所以线程数必须基本不动（实测第二遍 ~0，用 Stop 的话是 +200 上下）。
+            // ⚠ 每次都要新取一个 Process 对象：`Process.Threads` 是**取过一次就缓存**的，
+            // 同一个对象上前后读两次会拿到同一份快照（第一版就是这么假绿的）。
+            static int CurrentThreadCount()
+            {
+                using var current = System.Diagnostics.Process.GetCurrentProcess();
+                return current.Threads.Count;
+            }
+
+            var threadsBefore = CurrentThreadCount();
+
+            foreach (var (label, value) in ScreenRotations.All)
+            {
+                if (!ClickRotationMenuItem(menu, value, engine, out var againWhy))
+                {
+                    Log(13, $"画面旋转检查：第二遍切「{label}」没生效（{againWhy}）");
+                    return false;
+                }
+
+                // 和真的切换一样等到重新播起来：泄漏出来的那批原生线程是**播放时**起来的，
+                // 只泵 200 毫秒的话它们还没到位，这一遍就量不出差别（第一版就栽在这儿）。
+                if (!PumpUntil(() => engine.HasMedia && engine.IsPlaying, 15000))
+                {
+                    Log(13, $"画面旋转检查：第二遍切「{label}」之后没有重新播起来");
+                    return false;
+                }
+
+                PumpMessages(300);
+            }
+
+            var threadsAfter = CurrentThreadCount();
+
+            if (threadsAfter - threadsBefore > 60)
+            {
+                Log(13, $"画面旋转检查：换内核在漏原生线程（第二遍六次切换之后线程从 {threadsBefore} "
+                        + $"涨到 {threadsAfter}）：`Stop()` 一个播放器会漏掉一整套输入 / 解码 / 视频输出"
+                        + "线程，攒到上千就会以 0xC0000005 崩掉（M8）");
                 return false;
             }
 
@@ -918,6 +966,128 @@ namespace SmokeTest
         }
 
         /// <summary>
+        /// M8 的第四个探针：**不给喘气的连续换内核**（环境变量 <c>播放器_TEST_STRESS_TIGHT</c>，
+        /// 值 = 次数，默认 200）。
+        /// <para>
+        /// 前两个探针每次切换都要等"重新播起来 / 位置回来 / 截一张图"，一次 ~1 秒；
+        /// 这个探针点完旋转菜单只泵 60 毫秒就点下一项（每 6 次顺带换一首），
+        /// 把换内核的频率拉到每秒好几次，专冲"上一次换内核还没收尾、下一次就来了"这种竞态。
+        /// </para>
+        /// </summary>
+        private static bool RunTightStressIfRequested(string clip, string second)
+        {
+            var setting = Environment.GetEnvironmentVariable("播放器_TEST_STRESS_TIGHT");
+
+            if (string.IsNullOrWhiteSpace(setting)) return true;
+
+            var rounds = int.TryParse(setting, out var parsed) && parsed > 0 ? parsed : 200;
+
+            Log(13, $"连续换内核压测：开跑（{rounds} 次旋转点击，每次只泵 60 毫秒）");
+
+            using var form = new 播放器.MainForm(new[] { clip, second });
+            form.Show();
+            PumpMessages(400);
+
+            var engine = form.Engine;
+            var menu = form.MenuRotation;
+            var play = FindTopMenuItem(form, "播放");
+            var nextItem = play == null ? null : FindMenuItem(play.DropDownItems, "下一个");
+
+            if (menu == null || nextItem == null)
+            {
+                Log(13, "连续换内核压测：找不到「视图 → 画面旋转」或「播放 → 下一个」");
+                return false;
+            }
+
+            if (!PumpUntil(() => engine.HasMedia && engine.HasVideo, 15000))
+            {
+                Log(13, $"连续换内核压测：短片没播起来（有媒体 {engine.HasMedia}，有画面 {engine.HasVideo}）");
+                return false;
+            }
+
+            var values = ScreenRotations.All.Select(pair => pair.Value).ToArray();
+
+            for (var i = 0; i < rounds; i++)
+            {
+                var value = values[i % values.Length];
+
+                if (i % 10 == 0) Journal($"连续换内核压测：第 {i + 1}/{rounds} 次，目标「{value}」");
+
+                // 每次换内核都会新建一个播放器、放掉旧的，还要重建时长扫描器——
+                // "崩在第 240 多次"这种位置很像**资源累积**（句柄 / 原生对象泄漏），
+                // 所以每隔一段把进程的资源量也记进崩溃日志：句柄数一路涨上去就是泄漏。
+                if (i % 25 == 0)
+                {
+                    using var current = System.Diagnostics.Process.GetCurrentProcess();
+
+                    Journal($"连续换内核压测：第 {i + 1}/{rounds} 次的资源——句柄 {current.HandleCount}、"
+                            + $"线程 {current.Threads.Count}、托管内存 {GC.GetTotalMemory(false) / 1024} KB");
+                }
+
+                var item = RotationMenuItem(menu, value);
+                // 这里**故意**不等菜单可用：真实用户连点时也不会等。
+                // 菜单被禁用时 PerformClick 是空操作——那正好也是"连续点击"的一种真实情形。
+                if (item != null) item.PerformClick();
+
+                PumpMessages(60);
+
+                if (i % 6 == 5)
+                {
+                    Journal($"连续换内核压测：第 {i + 1}/{rounds} 次之后换一首");
+                    nextItem.PerformClick();
+                    PumpMessages(60);
+                }
+            }
+
+            Log(13, $"连续换内核压测通过：{rounds} 次连续切换都跑完，进程没有崩");
+            return true;
+        }
+
+        /// <summary>
+        /// M8 的第三个探针：**先"折腾"出若干套主窗体 / 引擎（建了又放），再跑旋转循环**。
+        /// <para>
+        /// 为什么这么试：M8 只在**全量**里出现过（单跑第 13 步 11 次全绿、各种"前几步 + 第 13 步"
+        /// 的组合也几乎全绿），而全量与"只跑第 13 步"最大的差别是——进程里**已经建过、又放过**
+        /// 好几套窗体 / 引擎 / libvlc 实例。这个探针把这个差别单独搬出来：
+        /// 先造若干套窗体（各自起播、泵一会儿、**按冒烟平时的写法只 Dispose 不 Close**），
+        /// 再跑"六种旋转 + 换一首"。
+        /// </para>
+        /// <para>环境变量 <c>播放器_TEST_STRESS_CHURN</c>（值 = 套数，默认 3）。</para>
+        /// </summary>
+        private static bool RunChurnStressIfRequested(string clip, string second)
+        {
+            var setting = Environment.GetEnvironmentVariable("播放器_TEST_STRESS_CHURN");
+
+            if (string.IsNullOrWhiteSpace(setting)) return true;
+
+            var forms = int.TryParse(setting, out var parsed) && parsed > 0 ? parsed : 3;
+
+            Log(13, $"先折腾压测：先建 / 放 {forms} 套主窗体，再跑旋转循环");
+
+            for (var i = 1; i <= forms; i++)
+            {
+                using var form = new 播放器.MainForm(new[] { clip, second });
+                form.Show();
+                PumpMessages(300);
+
+                if (!PumpUntil(() => form.Engine.HasMedia && form.Engine.HasVideo, 15000))
+                {
+                    Log(13, $"先折腾压测：第 {i}/{forms} 套窗体没播起来");
+                    return false;
+                }
+
+                // 动它一下（seek），别只是"开着"——真实使用里这些窗体是播过东西的
+                form.Engine.SeekTo(500);
+                PumpMessages(200);
+
+                Journal($"先折腾压测：放掉第 {i}/{forms} 套窗体");
+            }
+
+            Journal("先折腾压测：折腾完了，开始旋转循环");
+            return CheckRotationStress(clip, second, rounds: 6);
+        }
+
+        /// <summary>
         /// M8 的复现探针：**只在设了 <c>播放器_TEST_STRESS_ROTATION</c> 时才跑**
         /// （默认不跑，所以正常全量冒烟的行为一字不变、步数仍是 20）。
         /// <para>
@@ -1034,6 +1204,12 @@ namespace SmokeTest
 
                 Log(13, $"画面旋转压测：第 {round}/{rounds} 轮跑完"
                         + (round == 1 ? "（这一轮六个取值都是新建内核）" : "（这一轮全是复用缓存里的内核）"));
+
+                using (var current = System.Diagnostics.Process.GetCurrentProcess())
+                {
+                    Journal($"画面旋转压测：第 {round}/{rounds} 轮之后资源——句柄 {current.HandleCount}、"
+                            + $"线程 {current.Threads.Count}");
+                }
             }
 
             Log(13, $"画面旋转压测通过：{rounds} 轮「六种旋转 + 换一首」都跑完，进程没有崩");

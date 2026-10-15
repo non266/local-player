@@ -31,8 +31,31 @@ namespace 播放器.Core
 
         private MediaPlayer _mediaPlayer;
 
-        /// <summary>按旋转值缓存的内核：一个旋转值一个，惰性创建，最多 6 个。</summary>
-        private readonly Dictionary<ScreenRotation, LibVLC> _cores = new Dictionary<ScreenRotation, LibVLC>();
+        /// <summary>
+        /// 一个旋转值一套：**内核 + 挂在它上面的那个播放器**（惰性创建，最多 6 套）。
+        /// <para>
+        /// 为什么播放器也要按内核缓存（1.4.1 改的，M8）：以前每换一次内核就新建一个播放器、
+        /// 随手把旧的释放掉。实测那样**每换一次泄漏约 170 个句柄 / 35 个 OS 线程**
+        /// （正好是一个 libvlc 播放器的解码线程数），而且过多久都不还回来——
+        /// 换到 240 次左右进程直接原生崩（`0xC0000005`，崩在 `old.Stop()` 里，就是 M8）。
+        /// 现在"一个旋转值一套、切回去就复用"，换内核不再新建播放器，泄漏的源头就没了。
+        /// </para>
+        /// </summary>
+        private sealed class CoreSlot
+        {
+            public CoreSlot(LibVLC core, MediaPlayer player)
+            {
+                Core = core;
+                Player = player;
+            }
+
+            public LibVLC Core { get; }
+
+            public MediaPlayer Player { get; }
+        }
+
+        /// <summary>按旋转值缓存的那几套（内核 + 播放器）：一个旋转值一套，惰性创建，最多 6 套。</summary>
+        private readonly Dictionary<ScreenRotation, CoreSlot> _cores = new Dictionary<ScreenRotation, CoreSlot>();
 
         /// <summary>当前这个内核上带着哪种画面旋转。</summary>
         private ScreenRotation _coreRotation;
@@ -69,9 +92,10 @@ namespace 播放器.Core
         {
             _ui = ui ?? throw new ArgumentNullException(nameof(ui));
 
-            _libVlc = CreateCore(ScreenRotation.None);
+            var slot = CreateSlot(ScreenRotation.None);
+            _libVlc = slot.Core;
             _coreRotation = ScreenRotation.None;
-            _mediaPlayer = CreatePlayer(_libVlc);
+            _mediaPlayer = slot.Player;
         }
 
         /// <summary>
@@ -106,12 +130,13 @@ namespace 播放器.Core
             return args.ToArray();
         }
 
-        /// <summary>建一个内核并记进缓存（同一个旋转值只建一次）。</summary>
-        private LibVLC CreateCore(ScreenRotation rotation)
+        /// <summary>建一套（内核 + 它自己的播放器）并记进缓存（同一个旋转值只建一次）。</summary>
+        private CoreSlot CreateSlot(ScreenRotation rotation)
         {
             var core = new LibVLC(CoreArguments(rotation));
-            _cores[rotation] = core;
-            return core;
+            var slot = new CoreSlot(core, CreatePlayer(core));
+            _cores[rotation] = slot;
+            return slot;
         }
 
         /// <summary>在新内核上建一个播放器，作为交换前的准备（状态由 <see cref="EnsureCore"/> 铺回去）。</summary>
@@ -145,35 +170,37 @@ namespace 播放器.Core
         }
 
         /// <summary>
-        /// 把内核换成带 <paramref name="rotation"/> 的那个（同一个就什么都不做）。
+        /// 把内核换成带 <paramref name="rotation"/> 的那一套（同一个就什么都不做）。
         /// <para>
-        /// 顺序要紧：<b>先建新播放器 → 通知界面把窗口改挂过去 → 再放掉旧播放器</b>。
-        /// 反过来的话窗口上会留着一个已经释放的播放器。
+        /// 1.4.1 起：每个旋转值缓存的是**一套**（内核 + 它自己的播放器），换内核就是把
+        /// <see cref="_mediaPlayer"/> 指到那一套的播放器上，**不再每次新建 / 释放播放器**——
+        /// 那是 M8 那个原生崩的根：实测每换一次泄漏约 170 个句柄 / 35 个线程（一个 libvlc
+        /// 播放器的解码线程数），换到 240 次左右进程就崩。
         /// </para>
         /// <para>
-        /// 旧<b>内核</b>不释放，留在 <see cref="_cores"/> 里（同一个旋转值下次还要用：
-        /// 关掉程序时统一释放）。
+        /// 旧播放器（上一个内核那一套的）只 <c>Stop()</c>，**不释放**：它下次切回去还要用。
+        /// 释放统一放在 <see cref="Dispose"/> 里（先播放器、后内核）。
         /// </para>
         /// </summary>
         private void EnsureCore(ScreenRotation rotation)
         {
             if (rotation == _coreRotation) return;
 
-            var reused = _cores.TryGetValue(rotation, out var cached);
-            var core = reused ? cached! : CreateCore(rotation);
+            var reused = _cores.TryGetValue(rotation, out var slot);
+
+            if (!reused) slot = CreateSlot(rotation);
 
             // 换内核这一段**偶发原生崩**（M8：`0xC0000005`，整个进程直接没）。
             // 崩的时候产品日志就是唯一的现场，所以这里每一步都留一行——
             // 日志停在哪一行，就说明崩在它后面那一步（旋转是用户偶尔才做一次的动作，
             // 一次多七八行日志不碍事；平时也只有这一段会打这么多）。
             //
-            // 2026-10-15 靠这几行定到的位置：**`old.Stop()`**（日志写到"② 停旧播放器"就没了），
-            // 而且崩的那一次永远是"切到另一首 / 第一次**复用**缓存里的内核"。
-            // 顺手试过"停之前先让界面把窗口摘下来"（当时为此加过一个 `CoreRebuilding` 事件）——
-            // **没用，照崩**，所以那一步撤了；顺序仍然是"先建新播放器 → 通知界面挂过去 → 再放旧的"。
+            // 2026-10-15 靠这几行定到的位置：**`old.Stop()`**，而且崩的那一次永远是
+            // "切到另一首 / 第一次**复用**缓存里的内核"；后来用"连续换内核"压测（60 ms 一次）
+            // 量出真正的机制是**每次换内核泄漏一个播放器的原生线程与句柄**（见 CoreSlot 的注释）。
             AppLog.Info($"换内核：目标「{ScreenRotations.Describe(rotation)}」，"
-                        + (reused ? "复用缓存里的内核" : "新建一个内核")
-                        + $"（缓存里现在有 {_cores.Count} 个）");
+                        + (reused ? "复用缓存里的那一套" : "新建一套（内核 + 播放器）")
+                        + $"（缓存里现在有 {_cores.Count} 套）");
 
             var old = _mediaPlayer;
 
@@ -181,23 +208,43 @@ namespace 播放器.Core
 
             try
             {
-                // ⚠ 这里两步的顺序**试过两种，都照崩**（两次实验的经过见 CHANGELOG 的 M8 那一节）：
-                // ① 先 DisposeCurrentMedia 再 Stop（1.3.0 起的老写法）；
-                // ② 先 Stop 再 DisposeCurrentMedia（2026-10-15 试的候选修法，全量连跑 4 次全绿之后第 5 次又崩，
-                //    崩点还是 `old.Stop()`）。
-                // 所以顺序本身不是根因，最终保留原来的写法（行为与 1.3.0/1.4.0 一致，少一处无据的改动）。
                 AppLog.Info("换内核：① 放掉当前媒体");
                 DisposeCurrentMedia();
 
-                AppLog.Info("换内核：② 停旧播放器");
-                try { old.Stop(); }
-                catch (Exception ex) { AppLog.Swallowed("换内核之前停旧播放器失败。", ex); }
+                // ⚠ 这里**故意不是 Stop()**（1.4.1 改的，M8 的根因）：
+                // 实测（"连续换内核"探针 + 每轮记资源）每次 `MediaPlayer.Stop()` 都会漏掉
+                // 约 150 个句柄 / 35 个 OS 线程——正好是一个 libvlc 输入 + 解码 + 视频输出的
+                // 线程组，而且过多久都不还回来；`SetPause(true)` **一个都不漏**
+                // （换 42 次之后线程数还是平的：537 → 533）。
+                // 攒到上千线程之后，某次 libvlc 调用就变成 `0xC0000005`——那就是 M8。
+                // 旧播放器本来也不用真停：它属于它那个内核，下次切回去还要接着用（见 CoreSlot）。
+                AppLog.Info("换内核：② 暂停旧播放器（不 Stop：Stop 会漏一整套原生线程；也不释放，它属于它那个内核）");
 
-                _libVlc = core;
+                var paused = false;
+
+                try
+                {
+                    if (old.CanPause)
+                    {
+                        old.SetPause(true);
+                        paused = true;
+                    }
+                }
+                catch (Exception ex) { AppLog.Swallowed("换内核之前暂停旧播放器失败。", ex); }
+
+                // 还在打开（CanPause 还是假）这种少见情况退回 Stop：宁可漏一次，也不能让
+                // 两个播放器同时出声。
+                if (!paused)
+                {
+                    try { old.Stop(); }
+                    catch (Exception ex) { AppLog.Swallowed("换内核之前停旧播放器失败。", ex); }
+                }
+
+                _libVlc = slot!.Core;
                 _coreRotation = rotation;
 
-                AppLog.Info("换内核：③ 在新内核上建播放器并铺回状态");
-                _mediaPlayer = CreatePlayer(core);
+                AppLog.Info("换内核：③ 切到那一套自己的播放器并铺回状态");
+                _mediaPlayer = slot.Player;
 
                 ApplyPlayerState(_mediaPlayer);
             }
@@ -206,15 +253,11 @@ namespace 播放器.Core
                 _switchingCore = false;
             }
 
-            // 界面必须在这里把 VideoView 改挂到新的 Player 上（旧的那个紧接着就被释放）
+            // 界面必须在这里把 VideoView 改挂到新的 Player 上
             AppLog.Info("换内核：④ 通知界面把窗口改挂过去");
             CoreRebuilt?.Invoke(this, EventArgs.Empty);
 
-            AppLog.Info("换内核：⑤ 释放旧播放器");
-            try { old.Dispose(); }
-            catch (Exception ex) { AppLog.Swallowed("释放旧播放器失败。", ex); }
-
-            AppLog.Info("换内核：完成");
+            AppLog.Info("换内核：完成（旧播放器留着，切回去时复用）");
         }
 
         /// <summary>把"用户那一套"铺到一个（可能是全新的）播放器上。</summary>
@@ -1084,18 +1127,32 @@ namespace 播放器.Core
 
             DisposeCurrentMedia();
 
-            try
+            // 缓存着的那几套（每个旋转值一套：播放器 + 内核）一起放掉。
+            // ⚠ 顺序：**先播放器、后内核**——播放器挂在那个内核上，反过来就是把内核
+            // 从播放器脚下抽走。
+            // 这里也不再单独 Dispose 当前那个播放器：它就在下面这份清单里
+            // （LibVLCSharp 的 Dispose 是幂等的，重复放也不会出事）。
+            foreach (var slot in _cores.Values)
             {
-                _mediaPlayer.Dispose();
-            }
-            catch (Exception) { }
-
-            // 缓存着的那几个内核（每个旋转值一个）也一起放掉
-            foreach (var core in _cores.Values)
-            {
+                // ⚠ 先 Stop 再 Dispose：实测（1.4.1 查 M8 时）**直接释放一个"暂停着、媒体还挂着"的
+                // 播放器偶发原生崩**（`0xC0000005`，大约 9 次里 1 次，日志停在"放一个播放器"那一行）。
+                // 按 libvlc 的文档顺序先停后放就不会走到那条路上。
+                // 这儿是收尾，Stop 漏多少线程都无所谓（进程马上退）。
                 try
                 {
-                    core.Dispose();
+                    slot.Player.Stop();
+                }
+                catch (Exception) { }
+
+                try
+                {
+                    slot.Player.Dispose();
+                }
+                catch (Exception) { }
+
+                try
+                {
+                    slot.Core.Dispose();
                 }
                 catch (Exception) { }
             }

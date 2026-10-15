@@ -81,6 +81,11 @@ function Invoke-Build([string]$path, [string]$configuration, [string]$label)
 
     $lines | Select-Object -Last 6 | ForEach-Object { Write-Host ("  " + $_) }
 
+    if ($lines -match "NETSDK1112")
+    {
+        Write-Host "  ! obj\project.assets.json 可能是别的 SDK 留下的：先跑一次 dotnet restore。" -ForegroundColor Yellow
+    }
+
     if ($lines -match "NETSDK1127")
     {
         Write-Host "  ! 目标包缺失：这台机器默认的 SDK 需要 net8.0 的 8.0.31 引用包。" -ForegroundColor Yellow
@@ -123,9 +128,12 @@ if (-not (Test-Path -LiteralPath $project))
     Write-Failure ("找不到 " + $project + "（这个脚本要放在 tools\ 目录下）")
 }
 
-if ((dotnet --version) -like "8.*")
+# 构建基线是 SDK 8（语言版本在 csproj 里钉成 C# 12）；装了更高的 SDK 也能构建，
+# 所以这里不再按版本挑刺，只在明显低于 8 时提醒一句。
+$sdkVersion = (dotnet --version)
+if ($sdkVersion -notmatch '^(8|9|10|11|12)\.')
 {
-    Write-Host "  ! 当前是 8.x SDK。这个工程用了 C# 14 语法（例如 `?.` 赋值），要用 SDK 10 构建。" -ForegroundColor Yellow
+    Write-Host ("  ! 当前 SDK 是 " + $sdkVersion + "，本工程要 .NET 8 或更高的 SDK。") -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------- 构建

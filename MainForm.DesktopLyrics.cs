@@ -389,7 +389,11 @@ namespace 播放器
         private void ApplyLyricsFont()
         {
             sidebarPanel.ApplyLyricsFont(_settings.LyricsFontFamily);
-            _desktopLyrics?.FontFamilyName = _settings.LyricsFontFamily;
+
+            // 桌面歌词窗口可能还没建（或已经关掉），所以要先问一句。
+            // 以前这里写的是 C# 14 的 null 条件赋值（`_desktopLyrics?.FontFamilyName = …`）——
+            // 那要求 SDK 10 的编译器，而本机的构建基线是 SDK 8（见 csproj 里 LangVersion 那段注释）。
+            if (_desktopLyrics != null) _desktopLyrics.FontFamilyName = _settings.LyricsFontFamily;
         }
 
         private ToolStripMenuItem BuildDesktopLyricsColorMenu()

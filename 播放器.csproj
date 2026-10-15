@@ -6,7 +6,15 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <LangVersion>latest</LangVersion>
+    <!--
+      语言版本钉在 C# 12（= .NET 8 SDK 的编译器），**不用 latest**：
+      这台机器的构建基线是 SDK 8.0.202（没有装 SDK 10），而 `latest` 会跟着本机 SDK 变——
+      改动里一旦用了 C# 13 / 14 的写法，在装 SDK 10 的机器上编得过、在 SDK 8 上编不过
+      （1.4.0 那轮就踩到：`MainForm.DesktopLyrics.cs` 用了 C# 14 的 null 条件赋值，
+      SDK 8 报 `CS0131 赋值号左边必须是变量、属性或索引器`）。
+      钉住之后两种 SDK 都按同一套语法规则编译，构建能不能过不再取决于谁装了哪个 SDK。
+    -->
+    <LangVersion>12.0</LangVersion>
     <RootNamespace>播放器</RootNamespace>
     <AssemblyName>播放器</AssemblyName>
     <PlatformTarget>x64</PlatformTarget>

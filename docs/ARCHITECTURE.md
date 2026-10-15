@@ -740,12 +740,23 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 做这一轮时踩到的两件事，都跟代码无关，但下次会再遇到，记在这里：
 
-1. **默认 SDK 是 10.0.401，而它要 net8.0 的引用包 8.0.31；本机 `packs\` 里只有 8.0.3**
-   （那是另一个 SDK **8.0.202** 的版本）。于是 `dotnet build` 直接报
-   `NETSDK1127: 未安装目标包 Microsoft.NETCore.App`，而外网恰好不通（SSL 认证失败）。
-   把 SDK 钉回 8.0.202 能绕过包的问题，但**会撞上语言版本**：
-   `MainForm.DesktopLyrics.cs` 用了 C# 14 的 `_desktopLyrics?.FontFamilyName = …`（null 条件赋值），
-   SDK 8 的编译器只认到 C# 12。**结论：这个工程要用 SDK 10 构建，别去钉 8.0.202。**
+1. **SDK 的坑：这一条的结论 1.4.1 之前重测过一遍，**下面是新的结论（旧的"必须用 SDK 10"是错的）**：
+   - 用 **SDK 10.0.401** 时，它会要 net8.0 的引用包 8.0.31，而本机 `packs\` 里只有 8.0.3
+     （那是另一个 SDK **8.0.202** 的版本）。于是 `dotnet build` 报
+     `NETSDK1127: 未安装目标包 Microsoft.NETCore.App`，而外网恰好不通（SSL 认证失败）时更没辙。
+   - **本机的构建基线是 SDK 8.0.202**（10.x 的 SDK 后来不在了，只剩 10.0.10 运行时；
+     `dotnet --list-sdks` 能看出来）。用 SDK 8 构建要记住两件事：
+     - **`dotnet build --no-restore` 之前先 `dotnet restore`**：`obj/project.assets.json`
+       如果是别的 SDK 留下的，`--no-restore` 会以
+       `NETSDK1112：未下载 Microsoft.Windows.SDK.NET.Ref 的运行时包` 秒红——
+       看着像"缺包"，其实是资产文件过期（`dotnet restore` 之后就正常了）。
+     - **语言版本钉在 C# 12**（csproj 里的 `LangVersion`，原来是 `latest`）：1.4.0 那轮
+       在 `MainForm.DesktopLyrics.cs` 写了 C# 14 的 null 条件赋值
+       （`_desktopLyrics?.FontFamilyName = …`），SDK 8 的编译器只认到 C# 12，报
+       `CS0131 赋值号左边必须是变量、属性或索引器`。那一行已改成等价的
+       `if (_desktopLyrics != null) …`，并**把 `LangVersion` 钉住**——
+       于是"装了哪个 SDK"不再决定能不能编过。**别再改回 `latest`**：
+       改回去就会重新变成"有 SDK 10 的机器能编、基线机器编不过"这种最难查的差异。
 2. **离线还原的正确姿势**：所需包都在 NuGet 的 HTTP 缓存里
    （`%LocalAppData%\NuGet\v3-cache\**\nupkg_<id>.<version>.dat`，本体就是 nupkg）。
    把它们复制成一个本地文件夹源，再指定它还原即可：

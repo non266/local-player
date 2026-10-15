@@ -601,6 +601,24 @@ namespace SmokeTest
             var engine = form.Engine;
             var menu = form.MenuRotation;
 
+            // M8 的心跳实验（只在设了 播放器_TEST_HEARTBEAT 时跑）：每次换内核之后多泵 2 秒、
+            // 每 250 ms 往崩溃日志写一行心跳。崩的时候最后一行**是心跳**就说明那次不是崩在
+            // `old.Stop()` 这一句里，而是上一次 `old.Dispose()` 留下的原生线程晚了一步炸
+            // （两次都停在 `停旧播放器` 那一行，但换内核本来就 1 秒一次，"晚一秒炸"也会落在
+            // 下一句 `Stop` 上——所以要专门在"没人动它"的空档里等一等）。
+            var heartbeat = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("播放器_TEST_HEARTBEAT"));
+
+            void SettleAfterSwap(string where)
+            {
+                if (!heartbeat) return;
+
+                for (var tick = 1; tick <= 8; tick++)
+                {
+                    Journal($"心跳（{where} 之后）{tick * 250} ms");
+                    PumpMessages(250);
+                }
+            }
+
             if (menu == null)
             {
                 Log(13, "画面旋转检查：找不到「视图 → 画面旋转」");
@@ -676,6 +694,8 @@ namespace SmokeTest
                                 + $"（切之前在 {before} ms，现在 {engine.Time} ms）");
                         return false;
                     }
+
+                    SettleAfterSwap($"切到「{label}」");
                 }
 
                 first = false;
@@ -744,6 +764,9 @@ namespace SmokeTest
                 return false;
             }
 
+            // M8 就是崩在这一步之后的换内核上（第一次复用缓存内核），空档里等一等看它会不会晚一步炸
+            SettleAfterSwap("换到另一首");
+
             if (engine.Rotation != ScreenRotation.None)
             {
                 Log(13, $"画面旋转检查：另一首（从没转过）却带着旋转 {engine.Rotation}");
@@ -782,6 +805,8 @@ namespace SmokeTest
                         + $"{Path.GetFileName(engine.CurrentPath ?? string.Empty)}）");
                 return false;
             }
+
+            SettleAfterSwap("切回第一首");
 
             if (engine.Rotation != remembered)
             {

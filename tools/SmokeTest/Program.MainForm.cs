@@ -1359,22 +1359,27 @@ namespace SmokeTest
                     return false;
                 }
 
-                var minAfterOn = engine.Time;
-
-                for (var i = 0; i < 20; i++)
-                {
-                    PumpMessages(100);
-                    if (engine.Time < minAfterOn) minAfterOn = engine.Time;
-                }
-
-                if (minAfterOn > before - 2000)
+                // 判据是"重载过的话位置会掉回开头附近"：**等到就停**，不用固定采 20 次 ×100 ms
+                // （采到的"最小位置"一旦满足判据，再采也不可能变差——判据强度不变；
+                // 固定采样是第 6 步最费时的几处之一，见"每步耗时"时间线）。
+                if (!PumpUntil(() => engine.Time <= before - 2000, 3000))
                 {
                     Log(6, $"音量均衡：开了均衡之后没有重载媒体（切换前 {before} ms，"
-                            + $"切换后采样到的最近位置 {minAfterOn} ms；重载过的话会经过 0 秒附近）");
+                            + $"等了 3 秒还停在 {engine.Time} ms；重载过的话会经过 0 秒附近）");
                     return false;
                 }
 
                 // ---- ③ 再点一下（关）----
+                // 先让播放重新走到 2 秒以上：这一段是真播放，和"开"那一侧的 3.9 秒同性质——
+                // 位置本来就在开头附近时，"有没有重载回开头"根本无从判断。
+                if (!PumpUntil(() => engine.Time >= 2000, 8000))
+                {
+                    Log(6, $"音量均衡：点关之前播放没有推进到 2 秒（现在 {engine.Time} ms）");
+                    return false;
+                }
+
+                var beforeOff = engine.Time;
+
                 menu.PerformClick();
 
                 var statusAfterOff = form.StatusText;
@@ -1392,19 +1397,14 @@ namespace SmokeTest
                     return false;
                 }
 
-                var beforeOff = engine.Time;
-                var minAfterOff = beforeOff;
-
-                for (var i = 0; i < 20; i++)
+                // ⚠ 这一段原来是**永远不可能红**的：`minAfterOff` 一开始就等于 `beforeOff`，
+                // 而判据是 `minAfterOff > beforeOff + 100`——最小值只会更小，所以它永远成立，
+                // 白等 2 秒（2026-10-15 看"每步耗时"时间线时发现的：一条死断言）。
+                // 现在改成和"开"那一侧同性质的真判据：等到位置真的掉回 1.5 秒以内。
+                if (!PumpUntil(() => engine.Time <= beforeOff - 1500, 3000))
                 {
-                    PumpMessages(100);
-                    if (engine.Time < minAfterOff) minAfterOff = engine.Time;
-                }
-
-                if (minAfterOff > beforeOff + 100)
-                {
-                    Log(6, $"音量均衡：关掉均衡之后没有重载媒体（切换后采样到的最近位置 {minAfterOff} ms，"
-                            + $"切换前 {beforeOff} ms）");
+                    Log(6, $"音量均衡：关掉均衡之后没有重载媒体（切换前 {beforeOff} ms，"
+                            + $"等了 3 秒还停在 {engine.Time} ms）");
                     return false;
                 }
 

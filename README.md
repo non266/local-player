@@ -736,6 +736,11 @@ dotnet SmokeTest.dll 逐帧
 # 另一个探针：截完图**立刻**换一首（崩点 `old.Stop()` 的前一个动作永远是"刚截过图"）
 $env:播放器_TEST_STRESS_SNAPSHOT = 30
 dotnet SmokeTest.dll 逐帧
+
+# 心跳实验：每次换完内核多泵 2 秒、每 250 ms 往崩溃日志写一行心跳
+# （用来分辨"崩在 Stop() 这一句里"还是"上一次操作的背景线程晚一步炸"）
+$env:播放器_TEST_HEARTBEAT = 1
+dotnet SmokeTest.dll
 ```
 
 > **筛选可以混着写三种**（逗号分隔，任一命中即选中）：名字片段、**声明顺序里的第几个**、

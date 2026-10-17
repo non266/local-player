@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# WFO1000：属性"没有为其属性内容配置代码序列化"（WinForms 设计器分析器，.NET 9 起默认按错误报）
+#
+# 本项目只有 MainForm 一个窗体有设计器（MainForm.Designer.cs）。下面这 5 个文件里的控件
+# 全部由代码创建（new ... / Controls.Add），属性也全部由代码设置，没有配套的 .resx，
+# 设计器永远不会去持久化它们——WFO1000 对这些属性判的是"假如有设计器"。
+#
+# 处理方式：只在这 5 个文件里把它关掉，MainForm 那边保持开启（将来谁给 MainForm 加
+# 需要序列化的属性，这条规则仍然会拦住）。
+#
+# 想换成"逐属性标注"（[DesignerSerializationVisibility(Hidden)]）也可以，
+# 那要改 16 处生产代码 + 4 个文件补 using，效果与这里等价，噪音更大。
+# ---------------------------------------------------------------------------
+[Ui/FlatSlider.cs]
+dotnet_diagnostic.WFO1000.severity = none
+
+[Ui/SidebarPanel.cs]
+dotnet_diagnostic.WFO1000.severity = none
+
+[Ui/SidebarTabs.cs]
+dotnet_diagnostic.WFO1000.severity = none
+
+[Ui/DesktopLyricsWindow.cs]
+dotnet_diagnostic.WFO1000.severity = none
+
+[Ui/DesktopLyricsWindow.Controls.cs]
+dotnet_diagnostic.WFO1000.severity = none
+
+# 冒烟测试里的接收端窗口：public 属性只是把 SingleInstance 转进去，没有设计器、也不会被序列化
+[tools/SmokeTest/Program.SingleInstance.cs]
+dotnet_diagnostic.WFO1000.severity = none

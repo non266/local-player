@@ -66,6 +66,10 @@ namespace 播放器
             menuRepeatNone.Click += (s, e) => SetRepeatMode(RepeatMode.None);
             menuRepeatOne.Click += (s, e) => SetRepeatMode(RepeatMode.One);
             menuRepeatAll.Click += (s, e) => SetRepeatMode(RepeatMode.All);
+            // ⚠ CheckOnClick 必须在这里补上：设计器里那一项**没有** CheckOnClick，也没有 Click 处理器，
+            // 于是"点一下随机播放"什么都不会发生（勾不上、设置也不变）——1.5.0 写洗牌袋时，
+            // 冒烟里"点一下它应该打开"的断言当场把它抓了出来。
+            menuShuffle.CheckOnClick = true;
             menuShuffle.CheckedChanged += OnShuffleChanged;
 
             // ---- 播放记忆与系统集成 ----

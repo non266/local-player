@@ -70,10 +70,17 @@ namespace 播放器
                     SetStatus("播放出错");
                     break;
             }
+
+            // 睡眠定时器到点那句话压过上面的通用文案（"已暂停 / 已停止"）——不然用户只看到
+            // "已暂停"，不知道是谁让他停的。只说一次。
+            ApplySleepTimerMessageToStatus();
         }
 
         private void OnEnginePlaybackEnded(object? sender, EventArgs e)
         {
+            // 「听完这一首就停」优先于循环与插播：用户要的就是"这一首放完就别再响了"。
+            if (ApplySleepTimerAtTrackEnd()) return;
+
             if (_settings.RepeatMode == RepeatMode.One)
             {
                 _engine.Replay();

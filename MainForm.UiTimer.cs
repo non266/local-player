@@ -21,6 +21,9 @@ namespace 播放器
             }
 
             UpdateProgress();
+
+            // 睡眠定时器到点就在这里停：用现成的 200 ms 计时器，不另起一个（见 MainForm.SleepTimer.cs）。
+            CheckSleepTimer();
         }
 
         private void UpdateProgress()

@@ -182,18 +182,22 @@ namespace 播放器
             PlayIndex(next);
         }
 
+        /// <summary>
+        /// 随机播放用"洗牌袋"：把列表洗一遍、一个一个拿出来，**一轮之内每首恰好播一次**；
+        /// 袋子空了重新洗，而且不会立刻重复刚播过的那一首。
+        /// <para>
+        /// 1.5.0 换掉了"纯随机"（在全部下标里均匀取一个、只要不等于当前这个）：那样同一首
+        /// 可能在别的歌还没轮到之前先播第二遍，列表越长越明显——那就是"随机播放老是重复"。
+        /// </para>
+        /// </summary>
         private int NextRandomIndex()
         {
             if (_playlist.Count <= 1) return 0;
 
-            int index;
-            do
-            {
-                index = _random.Next(_playlist.Count);
-            }
-            while (index == _playlist.CurrentIndex);
+            // 列表条目数变了（载入歌单 / 增删 / 清空）就按新的池子重洗。
+            if (_shuffleBag.Count != _playlist.Count) _shuffleBag.Reset(_playlist.Count);
 
-            return index;
+            return _shuffleBag.Next(_playlist.CurrentIndex);
         }
 
         private void PlayPrevious()

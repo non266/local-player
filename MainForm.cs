@@ -86,7 +86,11 @@ namespace 播放器
 
         private readonly System.Windows.Forms.Timer _skipTimer;
 
-        private readonly Random _random = new Random();
+        /// <summary>
+        /// 随机播放的"洗牌袋"（1.5.0 起）：一轮之内每首恰好一次，一轮完了重洗。
+        /// <para>以前是纯随机（可以连着播同一首），见 <see cref="NextRandomIndex"/>。</para>
+        /// </summary>
+        private readonly ShuffleBag _shuffleBag = new ShuffleBag();
 
         private readonly Font _playingItemFont;
 

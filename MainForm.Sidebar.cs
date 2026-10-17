@@ -57,6 +57,7 @@ namespace 播放器
             ConfigureVideoMenus();
             ConfigureAbLoopMenu();
             ConfigureNormalizeMenu();
+            ConfigureSleepTimerMenu();
             ConfigureQueueMenu();
             ConfigurePlaylistLibraryMenu();
             ConfigureLogMenu();

@@ -4,6 +4,66 @@
 [语义化版本](https://semver.org/lang/zh-CN/)。
 维护期的规矩（什么算"必修"、发版要做哪三步）写在 [docs/维护手册.md](docs/维护手册.md)。
 
+## [未发布]
+
+### 重构（拆大类：9 个文件，行为零变化）
+
+**做了什么**：把产品代码里最大的 8 个类文件、以及冒烟测试最大的那个文件按职责拆开。
+**纯搬家**：公开 API、事件、线程约定、落盘格式、所有断言与判据一个都没动；冒烟仍是 **20 步**。
+`tools/SmokeTest` 里除 `Program.MainForm.cs` 这一个被拆的文件外**一行没改**——
+它能原样编译，就是"内部 API 没动"的证明。
+
+| 文件 | 拆前 | 拆后 |
+| --- | --- | --- |
+| `Core/PlayerEngine.cs` | 1,156 行 | **8 份** partial，最大 241 |
+| `Core/TagReader.cs` | 1,037 行 | **7 个类**（门面 + ID3v2 / FLAC / MP4 / ID3v1 + 文本 / 字节帮手），最大 356 |
+| `Core/LrcApi.cs` | 1,052 行 | **5 份** partial，最大 400 |
+| `Core/PlaylistLibrary.cs` | 720 行 | **4 份** partial，最大 310 |
+| `Ui/UiFonts.cs` | 608 行 | **3 份** partial，最大 370 |
+| `Ui/LyricsView.cs` | 664 行 | **5 份** partial，最大 284 |
+| `Ui/DesktopLyricsWindow.cs` | 1,217 行 | **7 份**（含已有的 `.Controls.cs`），最大 355 |
+| `Ui/PlaylistLibraryDialog.cs` | 966 行 | **7 份** partial，最大 207 |
+| `tools/SmokeTest/Program.MainForm.cs` | 3,492 行 | **8 份** partial，最大 609 |
+
+**做法**：`TagReader` 的四种格式零状态、互不相干，抽成 6 个 `internal` 静态类
+（跨类调用加前缀，被跨类调用的 `private` 改 `internal`）；其余类共享状态或有公开嵌套类型，
+用 `partial` 分文件（`private` 成员在 partial 之间天然可见，**一个可见性都没改**）。
+**字段一律留在主文件、顺序不变**——躲开 partial 静态/实例初始化器顺序的坑
+（`LrcApi.Client = CreateClient()` 读 `Timeout` 就是这种依赖）。
+`PlaylistLibrary` 比计划多切了一份（计划的 3 份会让主文件超过 400 行）。
+
+**验证（每个文件一次）**：
+① 搬家脚本按行区间切片，搬完**读回每个文件、与原区间逐行比对**——9 次全对，合计 **10,603 行**成员；
+② `tools/release-check.ps1` 全绿（Debug / Release 0 警告 0 错误 + 全量 20/20），9 次实测
+133 / 145 / 137 / 137 / 141 / 136 / 159 / 136 / 137 秒；
+③ 每次在搬走的文件里做一处变异，确认仍以一句具体的话变红：
+
+- `PlayerEngine`：去掉 `--transform-type` → `画面旋转检查：顺时针 90° 的内核参数不对（…）`
+- `TagReader`：不读 MP4 的 `©lyr` → `MP4 ©lyr 歌词没有读到：`
+- `LrcApi`：`NormalizeToken` 不去空白 → `在线歌词检查：密钥两边的空白没有被去掉（现在   secret-key  ）`
+- `PlaylistLibrary`：`ApplyOrder` 不读顺序文件 → `歌单顺序检查：拖完之后 List() 的顺序不对（…）`
+- `UiFonts`：`TryCreate` 不看导入表 → `私有字体检查：GDI 认不出导入的字体族「Zzqzzzzz」…`
+- `LyricsView`：`SetOffsetHint` 不存提示 → `歌词偏移检查：歌词页角落没有写出当前偏移（空）`
+- `DesktopLyricsWindow`：宽度不按工作区钳 → `桌面歌词检查：超长句没有把宽度钳住（2582 > 工作区宽度的 90%）`
+- `PlaylistLibraryDialog`：`TargetIndex` 差一位 → `歌单顺序检查：拖放的插位换算不对（…）`
+- 冒烟 `Program.MainForm`：去掉 `menuShuffle.CheckOnClick` → 搬过去的检查仍以
+  `洗牌袋：点了「随机播放」却没打开（菜单项没有 CheckOnClick，点了什么也不会发生）` 变红
+
+**如实记录**：拆的过程中全量**两次**撞上已知的进度条拖动偶发红
+（`右键点进度条把播放位置拽回去了（40691 → 550 ms）`、
+`按住拖到进度条外面之后不跟手了（500 → 离开后 0 → 再移动 0）`）——
+**复跑即绿，判据一个字没动**。这是这条偶发红的第二、第三次出现，机制仍没解释
+（见 [docs/维护手册.md](docs/维护手册.md) 的 B5 与 M1）。
+
+**规模变化**（量出来的）：主程序 **32,541 行 / 138 个文件**（拆前行数不变、文件数约 90）；
+`Core/` 61 个文件、`Ui/` 45 个、`MainForm*` 31 个、`tools/SmokeTest/` 30 个。
+产品代码最大的非生成文件从 1,156 行（`PlayerEngine.cs`）降到 849 行（`MainForm.DesktopLyrics.cs`），
+冒烟从 3,492 行降到 1,998 行（`Program.DesktopLyrics.cs`）。
+
+**不升版本**：这不是用户可见变化，版本仍是 **1.5.0**；要发版时按补丁号 **1.5.1** 走完整仪式。
+剩下 17 个 >500 行的文件没动（冒烟 7 个、产品 10 个），清单见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 17 节。
+
 ## [1.5.0] - 2026-10-17
 
 **这一版装了三件事**：① 修掉 1.4.0 那条偶发原生崩（M8——换画面旋转内核时整个进程直接没），

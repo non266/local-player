@@ -11,14 +11,15 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 约 26,000 行 / 90 个文件 |
-| `Core/` | 约 8,700 行 / 34 个文件 |
-| `Ui/` | 约 7,700 行 / 26 个文件 |
-| `MainForm*` 这一族 partial | 约 9,500 行 / **29 个文件**、81 个实例字段（P1 之前是 14 个文件 / 90 个字段） |
-| `tools/SmokeTest/` | 约 10,300 行 / 23 个文件（拆之前是 8,900 行、**单个文件**） |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 32,541 行 / **138 个文件** |
+| `Core/` | 10,979 行 / 61 个文件 |
+| `Ui/` | 9,772 行 / 45 个文件 |
+| `MainForm*` 这一族 partial | 11,713 行 / **31 个文件**、81 个实例字段（P1 之前是 14 个文件 / 90 个字段） |
+| `tools/SmokeTest/` | 16,024 行 / 30 个文件（拆之前是 8,900 行、**单个文件**） |
 
-> 数字最后一次量是在第 16 节那次"设置方案"之后；`Core/` 与 `Ui/` 的文件数比初稿多，
-> 是 P1 那四刀把东西从 `MainForm` 挪进了它们里面（后来那次功能又添了几个）。
+> 数字最后一次量是在 **2026-10-17 那轮"拆大类"之后**（见第 17 节）：那一轮只搬家、
+> 行数几乎不变，文件数从约 90 涨到 138。`Core/` 与 `Ui/` 的文件数比初稿多，
+> 一半是 P1 那四刀把东西从 `MainForm` 挪进去的，另一半就是那轮拆出来的。
 
 分层名义上清楚（`Core` 与界面无关、`Ui` 是可复用零件、`MainForm*` 是装配），
 但**真正的耦合点是 `MainForm` 这个 god class**：
@@ -180,8 +181,10 @@ D9 | 冒烟测试里两个真实输入检查依赖桌面环境（真鼠标拖动
 - 搬家是脚本按"成员块"整体搬的，并当场自查：178 个成员块**逐行文本**与原文一一对上、
   没有内容被改写或丢失（对不上就不写文件）。
 - 文件头写明这份装的是哪个检查点，`Program.cs` 里注明"具体检查在 `Program.*.cs`"。
-- 剩下最大的两份是 `Program.DesktopLyrics.cs`（1,588 行）和 `Program.Fonts.cs`（1,123 行）。
-  如果以后还要动这两块，可以再按"窗口检查 / 合成鼠标拖动"和"两条字体引擎 / 字体界面"往下切。
+- 剩下最大的几份是 `Program.DesktopLyrics.cs`（1,998 行）、`Program.PlaylistLibrary.cs`（1,735 行）、
+  `Program.Video.cs`（1,468 行）、`Program.OnlineLyrics.cs`（1,084 行）与 `Program.Fonts.cs`（1,074 行）。
+  `Program.MainForm.cs` 已经在 2026-10-17 那轮拆成 8 份（见第 17 节）；剩下这几份如果以后还要动，
+  照同一个做法按"一个检查点一个文件"往下切。
 
 拆完之后的验证（三项都过才算）：
 
@@ -567,7 +570,8 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 | `MainForm.EngineEvents.cs` | 108 | 引擎状态 / 结束 / 错误 / 轨道变化 |
 | `MainForm.UiTimer.cs` | 93 | 界面计时：进度条与音量条同步 |
 
-`MainForm*` 从 18 个文件变成 28 个，最大的还是 `MainForm.DesktopLyrics.cs`（747 行）。
+`MainForm*` 从 18 个文件变成 28 个，最大的是 `MainForm.DesktopLyrics.cs`
+（当时 747 行；**2026-10-17 复核为 849 行**，它一个文件就是一个功能，那一轮没有动它）。
 
 ### 12.2 测试里的反射：171 处 → 1 处
 
@@ -767,3 +771,74 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 3. 顺带一提：**别把临时的构建输出目录放在工程目录里**。
    它会被默认的 `**/*.cs` 通配符当成源码（连它自己生成的 `AssemblyInfo.cs` 一起），
    报一堆 `CS0579: 特性重复`——排查了半天才发现是自己留下的临时目录。
+
+---
+
+## 17. 拆大类（2026-10-17，一次"行为零变化"的结构整理）
+
+### 17.1 为什么动、动了哪 9 个文件
+
+功能面早就冻结了，但有几个文件长到"说不清装什么"：`PlayerEngine.cs` 1,156 行、
+冒烟的 `Program.MainForm.cs` 3,492 行。这一轮只做**文件级拆分**：
+
+| 文件 | 拆前 | 拆后 | 每份最大 |
+| --- | --- | --- | --- |
+| `Core/PlayerEngine.cs` | 1,156 | 8 份 partial（主文件：字段/构造/事件/属性；内核 / 播放与媒体 / 轨道字幕 / 音频输出 / 章节截图 / 逐帧 / 事件与收尾） | 241 |
+| `Core/TagReader.cs` | 1,037 | 7 个类：门面 + `Id3v2TagReader` / `FlacTagReader` / `Mp4TagReader` / `Id3v1TagReader` + `TagText` / `TagBytes` | 356 |
+| `Core/LrcApi.cs` | 1,052 | 5 份 partial（主文件 / 数据形状 / 端点与纯函数 / JSON / 网络） | 400 |
+| `Core/PlaylistLibrary.cs` | 720 | 4 份 partial（主文件 / 顺序 / 目录与名字 / 增删改） | 310 |
+| `Ui/UiFonts.cs` | 608 | 3 份 partial（主文件 / 字体库登记表 / 导入与卸载） | 370 |
+| `Ui/LyricsView.cs` | 664 | 5 份 partial（主文件 / 绘制 / 布局 / 滚动 / 交互） | 284 |
+| `Ui/DesktopLyricsWindow.cs` | 1,217 | 7 份（主文件 / 原生互操作 / 行为 / 文字 / 摆位 / 绘制 + 已有的 `.Controls.cs`） | 355 |
+| `Ui/PlaylistLibraryDialog.cs` | 966 | 7 份 partial（主文件 / 布局 / 列表 / 单份操作 / 拖动换位 / 批量重命名 / 拖入导入） | 207 |
+| `tools/SmokeTest/Program.MainForm.cs` | 3,492 | 8 份 partial（主文件 / 列表 / 拖动与 A-B / 队列 / 洗牌与睡眠 / 系统集成 / 会话 / 历史） | 609 |
+
+结果：产品代码最大的非生成文件降到 `MainForm.DesktopLyrics.cs` 的 **849 行**，
+冒烟最大的降到 `Program.DesktopLyrics.cs` 的 **1,998 行**（下一节是剩下的欠账）。
+
+### 17.2 五条规矩（下次照抄）
+
+1. **一次只搬一个文件、一个提交**；成员块连同它上面的 `///` 与横幅注释**整块**走，
+   块内一个字、一个空行、一处缩进都不动。只允许三类差异：新文件头、`partial` 关键字、
+   **跨类**调用的前缀（只有 `TagReader` 那一轮有）。
+2. **字段不搬**：实例 / 静态字段留在主文件、顺序不变。理由见第 16.1 节那类坑——
+   partial 之间**静态/实例字段初始化器的执行顺序**依赖编译顺序，而
+   `LrcApi.Client = CreateClient()` 会读 `Timeout`、`UiFonts` 的几张字典会互相引用。
+   唯一的例外是编译期常量与自包含的 `static readonly`（如 `HwndTopMost = new IntPtr(-1)`）。
+3. **抽新类还是 partial，看状态**：零状态且互不相干（`TagReader` 的四种格式）→ 抽
+   `internal` 静态类，跨类调用的 `private` 改 `internal`；有公开嵌套类型（`LrcApi.Endpoint`）
+   或共享状态（窗体、控件、引擎）→ `partial` 分文件——`private` 成员在 partial 之间天然可见，
+   **一个可见性都不用改**。
+4. **文件口径**：UTF-8 **无 BOM**、LF、末尾一个换行（与仓库一致）。
+   写文件用 `[IO.File]::WriteAllText(…, UTF8Encoding($false))`；**不要**用 Windows PowerShell 5.1
+   的 `Set-Content -Encoding UTF8`（会写 BOM）。
+5. **搬完当场读回自查**：把每个新文件读回来、去掉外壳、与原文对应区间**逐行比对**，
+   对不上就不写文件；再跑全量 20/20，并在**搬走的文件里**做一次变异（证明检查没被搬空）。
+
+### 17.3 验证记录（9 次，每次都是三件套）
+
+逐字自查合计 **10,603 行**成员对齐；9 次 `tools/release-check.ps1` 全绿
+（Debug / Release 0 警告 0 错误 + 20/20），耗时 133 / 145 / 137 / 137 / 141 / 136 / 159 / 136 / 137 秒；
+9 条变异各自以一句具体的话变红（原话见 [CHANGELOG.md](../CHANGELOG.md) 的「未发布」节）。
+
+**如实记录**：期间全量**两次**撞上已知的进度条拖动偶发红
+（`右键点进度条把播放位置拽回去了（40691 → 550 ms）` /
+`按住拖到进度条外面之后不跟手了（500 → 离开后 0 → 再移动 0）`），复跑即绿、判据一个字没动；
+这是它第二、第三次出现，机制仍未解释（第 3 节的 B5 / M1 继续挂着）。
+
+**边界**：这一轮**不是** P1 那类"把职责搬进新服务"的改动——只动了文件划分与一个真正的类拆分
+（`TagReader`）。`MainForm*` 那 31 个 partial 没动：它们本来就是"一个文件一个功能"，
+单纯按行数再切属于"为拆而拆"。
+
+### 17.4 第二波（没做，等点名）
+
+拆到"非生成文件 ≤ 500 行"还剩 **17** 个：
+
+| 类别 | 文件（行数） |
+| --- | --- |
+| 冒烟（7） | `Program.DesktopLyrics` 1,998 / `Program.PlaylistLibrary` 1,735 / `Program.Video` 1,468 / `Program.OnlineLyrics` 1,084 / `Program.Fonts` 1,074 / `Program.SettingsProfiles` 738 / `Program.LyricsOffset` 569 |
+| 产品·独立类（3） | `AppSettings` 579 / `SmtcSession` 557 / `PlaybackHistory` 510 |
+| 产品·MainForm 族（7） | `MainForm.DesktopLyrics` 849 / `MainForm.Playlists` 763 / `MainForm.Playlist` 736 / `MainForm.Floating` 721 / `MainForm.Playback` 656 / `MainForm.SettingsProfiles` 543 / `MainForm.Startup` 524 |
+
+照 17.2 的五条规矩做即可；先做冒烟那 7 个最划算（它们只影响测试，风险最低）。
+

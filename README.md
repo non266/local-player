@@ -474,13 +474,14 @@ app.manifest           应用清单（长路径支持、受支持的 OS 版本�
 Program.cs             入口：高 DPI 设置、libvlc 初始化、未处理异常兜底
 
 Core/                  与界面无关的核心逻辑
-  PlayerEngine.cs        对 LibVLC / MediaPlayer 的托管封装，事件统一派发回 UI 线程
+  PlayerEngine*.cs       对 LibVLC / MediaPlayer 的托管封装，事件统一派发回 UI 线程
+                         （主文件 + 7 份：内核 / 播放与媒体 / 轨道字幕 / 音频输出 / 章节截图 / 逐帧 / 事件收尾）
   PlayerState.cs         PlayerState 与 RepeatMode 枚举
   Playlist.cs            播放列表模型（增删、移动、排序、当前项维护）
   PlaylistItem.cs        单个条目（路径、标题、时长、错误状态、加入顺序）
   DurationScanner.cs     后台单线程扫描媒体时长，逐条回填
   PlaylistFile.cs        m3u / m3u8 读写（原子写；另有"读出全部条目、不过滤不存在的文件"）
-  PlaylistLibrary.cs     歌单库：命名保存 / 列出（自然排序）/ 载入 / 改名 / 删除 / 导入
+  PlaylistLibrary*.cs    歌单库：命名保存 / 列出（自然排序）/ 载入 / 改名 / 删除 / 导入（4 份：主文件 / 顺序 / 目录与名字 / 增删改）
   PlaylistLibraryController.cs 当前歌单名 / 未保存标记 / 替换前该问哪一句（对话框由窗体提供）
   SettingsProfile.cs     设置的分组（7 组，60 项各有归属）+ 按组把一份方案并进当前设置
   SettingsLibrary.cs     设置方案库：命名保存 / 列出（自然排序）/ 载入 / 改名 / 删除 / 导入 / 导出
@@ -492,8 +493,10 @@ Core/                  与界面无关的核心逻辑
   PerFileAdjustments.cs  按文件记住的调整：三样各记各的，改一次就落盘（存储仍在 history.json）
   TimeFormatter.cs       时间格式化与时间码解析
   MediaTags.cs           标签数据模型（标题、内嵌歌词、内嵌封面、文件头规格）
-  TagReader.cs           自己解析 ID3v2 / FLAC / MP4 / ID3v1 的标签、歌词与封面
-  LrcApi.cs              LrcAPI 客户端：在线歌词与封面（两代接口、鉴权、挑最像的一条）
+  TagReader*.cs          自己解析 ID3v2 / FLAC / MP4 / ID3v1 的标签、歌词与封面
+                         （门面 + 6 个帮手类：四种格式 + 文本解码 / 字节读写）
+  LrcApi*.cs             LrcAPI 客户端：在线歌词与封面（两代接口、鉴权、挑最像的一条）
+                         （5 份：主文件 / 数据形状 / 端点与纯函数 / JSON / 网络）
   OnlineLyricsService.cs 在线歌词与封面：会话缓存、缺什么才联网、取消、请求编排、失败只说一次
   Lyrics.cs               LRC 解析 + 按优先级从多来源装载歌词（含整条时间轴的平移）
   TrackLyricsSession.cs  「当前这一首」的会话：路径 / 标签 / 歌词 / 歌词偏移 / 版本号
@@ -521,18 +524,22 @@ Ui/                    可复用的界面零件
   AppHotKeys.cs          播放器自己的全局热键（桌面歌词解锁 Ctrl+Alt+D）
   TaskbarThumbnailButtons.cs  ITaskbarList3 互操作：任务栏缩略图控制按钮
   InputDialog.cs         文本输入对话框
-  UiFonts.cs             新增部件用的字体（不动主窗体字体）+ 字体族列表、导入与移除
+  UiFonts*.cs            新增部件用的字体（不动主窗体字体）+ 字体族列表、导入与移除
+                         （3 份：主文件 / 字体库登记表 / 导入与卸载）
   SidebarPanel.cs        右侧侧栏容器：标签条 + 四页切换 + 滚轮转发
   SidebarTabs.cs         自绘的侧栏标签条（含折叠按钮，支持键盘）
-  LyricsView.cs          自绘歌词控件：换行布局、平滑滚动、点击跳转、悬停显示时间
+  LyricsView*.cs         自绘歌词控件：换行布局、平滑滚动、点击跳转、悬停显示时间
+                         （5 份：绘制 / 布局 / 滚动 / 交互 + 主文件）
   CoverView.cs           自绘封面控件：解码、缩放、圆角裁剪、文字
   InfoView.cs            媒体信息两列清单
   EqualizerDialog.cs     均衡器调节对话框（按 DPI 缩放布局）
   VideoToolsView.cs      侧栏「视频」页：去隔行、音画/字幕延迟、逐帧
-  DesktopLyricsWindow.cs 桌面歌词：无边框置顶小窗，自动宽高、可拖动、可锁定穿透
+  DesktopLyricsWindow*.cs 桌面歌词：无边框置顶小窗，自动宽高、可拖动、可锁定穿透
+                         （7 份：主文件 / 原生互操作 / 行为 / 文字 / 摆位 / 绘制 + 控制条）
   DesktopLyricsAppearanceDialog.cs 桌面歌词外观（字号 / 浓度滑块 + 实时预览）
   FontManagerDialog.cs   已导入字体的管理（自绘预览列表 + 删除 + 导入）
-  PlaylistLibraryDialog.cs 歌单窗口：列出全部歌单 + 载入 / 追加 / 新建 / 重命名 / 删除 / 拖入导入
+  PlaylistLibraryDialog*.cs 歌单窗口：列出全部歌单 + 载入 / 追加 / 新建 / 重命名 / 删除 / 拖入导入
+                         （7 份：主文件 / 布局 / 列表 / 单份操作 / 拖动换位 / 批量重命名 / 拖入导入）
   SettingsLoadDialog.cs  载入设置方案时挑分组：每行写明这一组和当前有几项不一样
   LogViewDialog.cs       诊断日志查看（复制全文 / 打开日志文件）
   MenuSection.cs         一套菜单项挂在多个宿主上（视图 / 右键 / 托盘）后一起刷
@@ -565,6 +572,7 @@ tools/SmokeTest/       独立冒烟试试工程，不参与主程序编译
      Program.Native.cs     Win32 互操作、鼠标键盘合成、截图比对
      Program.Fixtures.cs   合成样本（WAV / PNG / JPEG / FLAC / ID3 / MP4）
      Program.<区域>.cs     一份装一块检查（Playback / MainForm / Tags / DesktopLyrics / Fonts / …）
+     Program.MainForm.*.cs 主窗体那一组再按检查点细分（列表 / 拖动与 A-B / 队列 / 洗牌与睡眠 / 系统 / 会话 / 历史）
      FakeLrcApiServer.cs   本地假 LrcApi，端到端检查不依赖外网
 tools/IconGen/         生成 app.ico 的一次性工具，平时不用跑
 ```

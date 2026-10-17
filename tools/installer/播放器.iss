@@ -1,4 +1,4 @@
-; 全能本地播放器 —— Inno Setup 6 脚本
+﻿; 全能本地播放器 —— Inno Setup 6 脚本
 ;
 ; 由 tools\pack.ps1 编译（别手工双击这个文件）：脚本会被复制到临时目录再编译，
 ; 所以这里除了同目录的 ChineseSimplified.isl，其它路径一律通过 /D 传进来。
@@ -84,6 +84,14 @@ Name: "fileassoc"; Description: "把「{#AppName}」加进常见音视频格式�
 [Files]
 ; 整个发布目录原样落盘（含 libvlc\win-x64 的插件树）
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; ⚠ 原地升级时**上一版独有的文件不会自动消失**（安装器只覆盖/新增它自己那份清单里的文件，
+;   旧清单被新清单替换之后，谁也不再记得它）。1.5.0 的验收就撞到过：.NET 运行时的补丁号变了，
+;   `mscordaccore_amd64_amd64_8.0.3126.42015.dll` 被 `…8.0.324.11423.dll` 取代，
+;   升级完多留了 3126 那个，连卸载都不会删它。
+;   这里在装文件**之前**把旧的那几个清掉（通配符同时命中新旧，所以新文件随后照样会写进来）。
+Type: files; Name: "{app}\mscordaccore_amd64_amd64_8.0.*.dll"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

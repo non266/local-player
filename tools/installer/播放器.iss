@@ -92,6 +92,12 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 ;   升级完多留了 3126 那个，连卸载都不会删它。
 ;   这里在装文件**之前**把旧的那几个清掉（通配符同时命中新旧，所以新文件随后照样会写进来）。
 Type: files; Name: "{app}\mscordaccore_amd64_amd64_8.0.*.dll"
+; 播放内核升级（1.6.0：libvlc 3.0.23 → 3.0.24）是**换掉整棵插件树**：上游这一版删掉了
+;   `libschroedinger_plugin.dll`、`libsdl_image_plugin.dll`、`youtube.luac`、1.4.0 的两个
+;   `libbluray-j2se` jar，也不再打包 RealRTSP 插件。只覆盖不删除的话，这些旧插件会留在
+;   新内核的 `plugins\` 里（libvlc 会去扫这个目录），而且卸载清单里也没有它们、删不掉。
+;   实测：不删 → 升级完 675 个文件（多 5 个旧插件）；整棵树先删再写 → 与载荷逐文件一致。
+Type: filesandordirs; Name: "{app}\libvlc"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

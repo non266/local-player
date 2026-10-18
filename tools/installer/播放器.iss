@@ -92,6 +92,11 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 ;   升级完多留了 3126 那个，连卸载都不会删它。
 ;   这里在装文件**之前**把旧的那几个清掉（通配符同时命中新旧，所以新文件随后照样会写进来）。
 Type: files; Name: "{app}\mscordaccore_amd64_amd64_8.0.*.dll"
+; 目标框架换代（1.6.1：net8 → net10）会改变**载荷里的文件集合**：.NET 10 的 WinForms 自包含
+;   不再带 WPF 那一套（PresentationFramework / System.Xaml / UIAutomation… 共 31 个），
+;   而 Inno 只覆盖/新增。实测：只有 libvlc 那条时，从 1.6.0 升上来是 677 个文件（多 31 个 .NET 8 的 WPF 程序集）。
+;   这里把顶层 dll 全删一遍再写：载荷是完整应用，删掉的都会随后写回来；libvlc 那棵子树由下面那条整棵删。
+Type: files; Name: "{app}\*.dll"
 ; 播放内核升级（1.6.0：libvlc 3.0.23 → 3.0.24）是**换掉整棵插件树**：上游这一版删掉了
 ;   `libschroedinger_plugin.dll`、`libsdl_image_plugin.dll`、`youtube.luac`、1.4.0 的两个
 ;   `libbluray-j2se` jar，也不再打包 RealRTSP 插件。只覆盖不删除的话，这些旧插件会留在

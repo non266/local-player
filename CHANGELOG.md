@@ -77,6 +77,9 @@ net8.0 的 8.0.31 引用包（`NETSDK1127`）；以及 `LangVersion` 跟着 `lat
 - **M6**：dotnet list package --vulnerable --include-transitive（源 nuget.org）→
   **没有易受攻击的包**。
 - **没有代码签名**：安装包与便携版都是未签名的，SmartScreen 会提示"未知发布者"。
+- **已发布**：[v1.6.1](https://github.com/non266/local-player/releases/tag/v1.6.1)（**Latest**），
+  两个资产走 ASCII 名（local-player-1.6.1-setup.exe / local-player-1.6.1-portable.zip）；
+  服务端 digest 与本地 Get-FileHash **一致**，两个下载首部 2 KB 探测都是 206。
 
 ## [1.6.0] - 2026-10-18
 

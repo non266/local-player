@@ -2,17 +2,16 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <!--
-      语言版本钉在 C# 12（= .NET 8 SDK 的编译器），**不用 latest**：
-      这台机器的构建基线是 SDK 8.0.202（没有装 SDK 10），而 `latest` 会跟着本机 SDK 变——
-      改动里一旦用了 C# 13 / 14 的写法，在装 SDK 10 的机器上编得过、在 SDK 8 上编不过
-      （1.4.0 那轮就踩到：`MainForm.DesktopLyrics.cs` 用了 C# 14 的 null 条件赋值，
-      SDK 8 报 `CS0131 赋值号左边必须是变量、属性或索引器`）。
-      钉住之后两种 SDK 都按同一套语法规则编译，构建能不能过不再取决于谁装了哪个 SDK。
+      语言版本仍钉在 C# 12（**不用 latest**）：这一支是 net10 的试验分支，但语法规则故意保持
+      和 main 一样，这样"同源对比"只剩 SDK 与目标框架两个变量（1.4.0 那轮踩过：用了 C# 14 的
+      null 条件赋值，SDK 8 的编译器报 `CS0131 赋值号左边必须是变量、属性或索引器`，
+      构建能不能过变成了"谁装了哪个 SDK"）。
+      SDK 由仓库根目录的 global.json 钉在 10.0.402；main 分支仍是 SDK 8.0.202 + net8.0 目标框架。
     -->
     <LangVersion>12.0</LangVersion>
     <RootNamespace>播放器</RootNamespace>

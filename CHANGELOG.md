@@ -75,6 +75,9 @@
   **「在给定当前源的情况下，给定项目"播放器"没有易受攻击的包。」**
 - **没有代码签名**：安装包与便携版都是未签名的，SmartScreen 会提示"未知发布者"；
   要动它得先有一张证书，见 [docs/维护手册.md](docs/维护手册.md) 的 M5。
+- **已发布**：[v1.6.0](https://github.com/non266/local-player/releases/tag/v1.6.0)（**Latest**），
+  两个资产走 ASCII 名（`local-player-1.6.0-setup.exe` / `local-player-1.6.0-portable.zip`）；
+  服务端 `digest` 与本地 `Get-FileHash` **一致**，两个下载首部 2 KB 探测都是 `206`。
 
 ## [1.5.1] - 2026-10-17
 

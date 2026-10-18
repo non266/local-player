@@ -1,6 +1,7 @@
 # 全能本地播放器
 
-基于 **.NET 8 + Windows Forms + LibVLCSharp** 的本地音视频播放器，经典 Windows 窗体界面。
+基于 **.NET + Windows Forms + LibVLCSharp** 的本地音视频播放器，经典 Windows 窗体界面。
+（开发主线已切到 **.NET 10**；当前发布版 1.6.0 仍是 .NET 8 构建，下一版 1.6.1 起同步。）
 
 播放内核使用 VLC（libvlc 3.0.24），因此格式支持范围与 VLC 基本一致：MP4 / MKV / AVI / MOV / FLV / WebM / TS / RMVB……
 MP3 / FLAC / APE / WAV / AAC / M4A / OGG / Opus / WMA…… 以及外挂字幕、多音轨和网络串流。

@@ -88,7 +88,7 @@ function Invoke-Build([string]$path, [string]$configuration, [string]$label)
 
     if ($lines -match "NETSDK1127")
     {
-        Write-Host "  ! 目标包缺失：这台机器默认的 SDK 需要 net8.0 的 8.0.31 引用包。" -ForegroundColor Yellow
+        Write-Host "  ! 目标包缺失：当前 SDK 找不到目标框架对应的引用包。换过 SDK 或目标框架之后先跑一次 dotnet restore。" -ForegroundColor Yellow
         Write-Host "    离线补齐的办法见 docs/ARCHITECTURE.md 第 16.1 节。" -ForegroundColor Yellow
     }
 
@@ -128,8 +128,8 @@ if (-not (Test-Path -LiteralPath $project))
     Write-Failure ("找不到 " + $project + "（这个脚本要放在 tools\ 目录下）")
 }
 
-# 构建基线是 SDK 8（语言版本在 csproj 里钉成 C# 12）；装了更高的 SDK 也能构建，
-# 所以这里不再按版本挑刺，只在明显低于 8 时提醒一句。
+# 构建基线由仓库根目录的 global.json 钉在 SDK 10.0.402（目标框架 net10.0-windows）；
+# 装了更高的 SDK 也能构建，所以这里不按版本挑刺，只在明显低于 8 时提醒一句。
 $sdkVersion = (dotnet --version)
 if ($sdkVersion -notmatch '^(8|9|10|11|12)\.')
 {

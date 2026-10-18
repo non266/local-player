@@ -7,11 +7,12 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <!--
-      语言版本仍钉在 C# 12（**不用 latest**）：这一支是 net10 的试验分支，但语法规则故意保持
-      和 main 一样，这样"同源对比"只剩 SDK 与目标框架两个变量（1.4.0 那轮踩过：用了 C# 14 的
-      null 条件赋值，SDK 8 的编译器报 `CS0131 赋值号左边必须是变量、属性或索引器`，
-      构建能不能过变成了"谁装了哪个 SDK"）。
-      SDK 由仓库根目录的 global.json 钉在 10.0.402；main 分支仍是 SDK 8.0.202 + net8.0 目标框架。
+      语言版本钉在 C# 12（**不用 latest**）。目标框架已经是 net10（构建需要 SDK 10），
+      但**语法规则故意不跟 SDK 走**：1.4.0 那轮踩过——用了 C# 14 的 null 条件赋值，
+      换到 SDK 8 的机器上报 `CS0131 赋值号左边必须是变量、属性或索引器`，
+      "这次改动能不能编过"变成了"谁装了哪个 SDK"这种最难查的差异。
+      SDK 由仓库根目录的 global.json 钉在 10.0.402；要升到 C# 14 就单独做一轮，
+      并在文档里写清"从此必须 SDK 10+"。
     -->
     <LangVersion>12.0</LangVersion>
     <RootNamespace>播放器</RootNamespace>

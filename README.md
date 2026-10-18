@@ -401,7 +401,7 @@ dotnet restore 播放器.csproj
 dotnet build 播放器.csproj -c Release
 
 # 运行
-.\bin\Release\net8.0-windows10.0.19041.0\播放器.exe
+.\bin\Release\net10.0-windows10.0.19041.0\播放器.exe
 ```
 
 也可以直接用 Visual Studio 打开 `播放器.csproj` 后按 F5。
@@ -469,7 +469,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\pack.ps1
 ## 目录结构
 
 ```
-播放器.csproj          工程文件（net8.0-windows10.0.19041.0 / WinForms / x64）
+播放器.csproj          工程文件（net10.0-windows10.0.19041.0 / WinForms / x64）
 app.manifest           应用清单（长路径支持、受支持的 OS 版本）
 Program.cs             入口：高 DPI 设置、libvlc 初始化、未处理异常兜底
 
@@ -727,7 +727,7 @@ $env:播放器_DATA_DIR = "$PSScriptRoot\data"
 ```powershell
 dotnet build 播放器.csproj -c Debug
 dotnet build tools/SmokeTest/SmokeTest.csproj -c Debug
-cd bin/Debug/net8.0-windows10.0.19041.0
+cd bin/Debug/net10.0-windows10.0.19041.0
 
 # 第 13 步需要真实视频，用环境变量指给它；不指就自动跳过
 $env:播放器_TEST_VIDEO = "D:\某个视频.mp4"
@@ -2203,7 +2203,7 @@ catch (InvalidOperationException) { /* 句柄还没建好：先排队 */ }
 #### 系统媒体控件的 WinRT 互操作（`Ui/SmtcSession.cs`）
 
 **1.3.0 那一版是"手写 vtable 的 COM"**，1.4.0 起改成**引 WinRT 投影**
-（目标框架 `net8.0-windows10.0.19041.0`）：曲名 / 歌手 / 封面 / 进度 / **按钮事件**
+（目标框架 `net10.0-windows10.0.19041.0`）：曲名 / 歌手 / 封面 / 进度 / **按钮事件**
 都是普通属性与事件，不必再自己声明 vtable、也不必自己揉 HSTRING。
 四处值得记下来的事：
 

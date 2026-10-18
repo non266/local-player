@@ -4,6 +4,45 @@
 [语义化版本](https://semver.org/lang/zh-CN/)。
 维护期的规矩（什么算"必修"、发版要做哪三步）写在 [docs/维护手册.md](docs/维护手册.md)。
 
+## [未发布]
+
+### 构建基线：目标框架升到 net10（SDK 10.0.402）
+
+**做了什么**：三个工程的目标框架从 `net8.0-windows10.0.19041.0` 换成
+**`net10.0-windows10.0.19041.0`**；新增 `global.json` 把 SDK 钉在 **10.0.402**
+（`rollForward: latestFeature`）。**业务代码一行没动。**
+
+| 文件 | 改动 |
+| --- | --- |
+| `播放器.csproj` | TFM 改 net10（版本号与三个包引用不动） |
+| `tools/SmokeTest/SmokeTest.csproj` | TFM + 写死的 `bin\Debug\net8.0-…` 路径（`OutputPath` + 3 个 `HintPath`） |
+| `tools/IconGen/IconGen.csproj` | TFM 改 `net10.0-windows` |
+| `tools/release-check.ps1` | 冒烟输出目录同步改（顺带补回被编辑器剥掉的 UTF-8 BOM，否则 PowerShell 5.1 按 GBK 读会解析失败） |
+| `global.json`（新增） | SDK 钉 `10.0.402` |
+| `.editorconfig`（新增） | 按文件关掉 `WFO1000`（见下） |
+
+**为什么现在能升**：1.4.0 那轮升过 SDK 10，被两件事挡住——目标框架还是 net8，SDK 10 会去要
+net8.0 的 8.0.31 引用包（`NETSDK1127`）；以及 `LangVersion` 跟着 `latest` 走。现在这两条都不成立：
+目标框架本身就换成 net10，语言版本仍钉在 C# 12（语法规则和之前完全一样）。
+
+**新障碍只有一个：WFO1000**。.NET 9 起 WinForms 增加了"属性没有为其属性内容配置代码序列化"
+分析器，**默认按错误报**，一升级就 16 处红。这 16 个属性全在**代码里创建、没有 `.resx`** 的自定义控件上
+（`FlatSlider` / `SidebarPanel` / `SidebarTabs` / `DesktopLyricsWindow`），设计器永远不会去序列化它们，
+所以只在 `.editorconfig` 里**按文件**关掉这 5 个文件（外加冒烟测试里 1 个接收端窗口），
+**`MainForm` 那边保持开启**。另一种做法是给 16 个属性逐个加
+`[DesignerSerializationVisibility(Hidden)]`，效果等价、改动更大。
+
+**验证**：
+
+- `tools/release-check.ps1` 全绿：Debug / Release / 冒烟三工程 **0 警告 0 错误** + 全量 **20/20**（135～150 秒）
+- 自包含发布 `-r win-x64`：**647 个文件 / 234.7 MB**（net8 同参数 671 / 270.5 MB，**小 35.8 MB**）
+
+**如实说明**：
+
+- 只跑了自动验证（构建 + 20 步冒烟）；**界面观感 / 字体 / DPI / 渲染没有人工看过**。
+- `WFO1000` 是按文件关掉的：将来若给这几个控件加设计器，需要重新打开。
+- 这一次合并**没有出发布产物**：当前发布版 1.6.0 仍是 net8 构建的那一版。
+
 ## [1.6.0] - 2026-10-18
 
 ### 升级播放内核（libvlc 3.0.23 → 3.0.24；LibVLCSharp 3.10.1 → 3.10.2）

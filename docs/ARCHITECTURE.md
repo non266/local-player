@@ -687,7 +687,7 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net8.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（20 步，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（20 步，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -744,16 +744,17 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 做这一轮时踩到的两件事，都跟代码无关，但下次会再遇到，记在这里：
 
-1. **SDK 的坑：这一条的结论 1.5.0 之前重测过一遍，**下面是新的结论（旧的"必须用 SDK 10"是错的）**：
-   - 用 **SDK 10.0.401** 时，它会要 net8.0 的引用包 8.0.31，而本机 `packs\` 里只有 8.0.3
-     （那是另一个 SDK **8.0.202** 的版本）。于是 `dotnet build` 报
-     `NETSDK1127: 未安装目标包 Microsoft.NETCore.App`，而外网恰好不通（SSL 认证失败）时更没辙。
-   - **本机的构建基线是 SDK 8.0.202**（10.x 的 SDK 后来不在了，只剩 10.0.10 运行时；
-     `dotnet --list-sdks` 能看出来）。用 SDK 8 构建要记住两件事：
+1. **SDK 与目标框架（1.6.1 换了基线，下面是现状）**：
+   - 当前基线：**SDK `10.0.402`** + **`net10.0-windows10.0.19041.0`**，由仓库根目录的 `global.json`
+     钉住（`rollForward: latestFeature`）。换机器先看 `dotnet --list-sdks`，再看 `global.json` 要的版本在不在。
+   - 历史（1.5.0 ～ 1.6.0）：基线是 SDK `8.0.202` + `net8.0-windows10.0.19041.0`。那会儿用 SDK 10
+     构建会要 net8.0 的引用包 8.0.31（`NETSDK1127`），外网不通时更没辙——这也是当时把基线退回 SDK 8 的原因。
+     现在目标框架本身就是 net10，这条不再适用。
+   - 两条**仍然成立**的纪律：
      - **`dotnet build --no-restore` 之前先 `dotnet restore`**：`obj/project.assets.json`
-       如果是别的 SDK 留下的，`--no-restore` 会以
-       `NETSDK1112：未下载 Microsoft.Windows.SDK.NET.Ref 的运行时包` 秒红——
-       看着像"缺包"，其实是资产文件过期（`dotnet restore` 之后就正常了）。
+       如果是别的 SDK / 别的目标框架留下的，`--no-restore` 会以
+       `NETSDK1112` / `NETSDK1005` 秒红——看着像"缺包"，其实是资产文件过期
+       （`dotnet restore` 之后就正常了）。
      - **语言版本钉在 C# 12**（csproj 里的 `LangVersion`，原来是 `latest`）：1.4.0 那轮
        在 `MainForm.DesktopLyrics.cs` 写了 C# 14 的 null 条件赋值
        （`_desktopLyrics?.FontFamilyName = …`），SDK 8 的编译器只认到 C# 12，报
@@ -766,8 +767,8 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
    把它们复制成一个本地文件夹源，再指定它还原即可：
    `dotnet restore 播放器.csproj -s <本地源> -p:NuGetAudit=false`。
    这一轮需要的四个框架包是 `microsoft.netcore.app.ref` / `microsoft.windowsdesktop.app.ref` /
-   `microsoft.aspnetcore.app.ref` / `microsoft.netcore.app.host.win-x64`（都是 8.0.31），
-   外加三个 libvlc 包。还原一次之后全局包缓存就齐了，之后的构建都能离线。
+   `microsoft.aspnetcore.app.ref` / `microsoft.netcore.app.host.win-x64`（net8 那会儿是 8.0.31；
+   net10 对应 10.0.x 那一套），外加三个 libvlc 包。还原一次之后全局包缓存就齐了，之后的构建都能离线。
 3. 顺带一提：**别把临时的构建输出目录放在工程目录里**。
    它会被默认的 `**/*.cs` 通配符当成源码（连它自己生成的 `AssemblyInfo.cs` 一起），
    报一堆 `CS0579: 特性重复`——排查了半天才发现是自己留下的临时目录。

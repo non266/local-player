@@ -835,14 +835,14 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 拆到"非生成文件 ≤ 500 行"原本还剩 **17** 个。2026-10-19 的 R3 先做冒烟（风险最低）：
 
-**已拆（4 个文件 → 10 个分部）**：`Program.LyricsOffset` 569 → 264+316；`Program.SettingsProfiles` 726 → 391+245+123；
-`Program.Fonts` 1,074 → 427+187+147+100+49+122+102；`Program.OnlineLyrics` 1,084 → 463+631。判据与 20 步一步没动，每次搬完都做读回自查 + 变异。
+**已拆（5 个文件 → 13 个分部）**：`Program.LyricsOffset` 569 → 264+316；`Program.SettingsProfiles` 726 → 391+245+123；
+`Program.Fonts` 1,074 → 427+187+147+100+49+122+102；`Program.OnlineLyrics` 1,084 → 463+631；`Program.Video` 1,468 → 464+404+248+390。判据与 20 步一步没动，每次搬完都做读回自查 + 变异。
 
 剩下的按「冒烟 → 产品」的顺序排：
 
 | 类别 | 文件（行数） |
 | --- | --- |
-| 冒烟（3，先做） | `Program.DesktopLyrics` 2,046 / `Program.PlaylistLibrary` 1,735 / `Program.Video` 1,468 |
+| 冒烟（2，先做） | `Program.DesktopLyrics` 2,046 / `Program.PlaylistLibrary` 1,735 |
 | 产品·独立类（3，再做） | `AppSettings` 579 / `SmtcSession` 557 / `PlaybackHistory` 510 |
 | 产品·MainForm 族（7，不做） | `MainForm.DesktopLyrics` 849 / `MainForm.Playlists` 763 / `MainForm.Playlist` 736 / `MainForm.Floating` 721 / `MainForm.Playback` 656 / `MainForm.SettingsProfiles` 543 / `MainForm.Startup` 524 |
 

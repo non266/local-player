@@ -62,6 +62,7 @@
 | `Program.Fonts.cs` | 1,074 | **427** + `.PrivateFont.cs` 187 + `.Import.cs` 147 + `.Rename.cs` 100 + `.SystemFont.cs` 49 + `.Management.cs` 122 + `.ManagerDialog.cs` 102 |
 | `Program.OnlineLyrics.cs` | 1,084 | **463** + `.EndToEnd.cs` 631（本地假服务器把整条链路走一遍） |
 | `Program.Video.cs` | 1,468 | **464** + `.Rotation.cs` 404 + `.Layout.cs` 248 + `.Stress.cs` 390 |
+| `Program.PlaylistLibrary.cs` | 1,735 | **240** + `.State.cs` 305 + `.Files.cs` 274 + `.MainForm.cs` 470 + `.Bulk.cs` 494 |
 
 **每次搬运的验证**：搬完当场读回、与原文对应区间逐行比对一致；全量 20/20；
 再在**搬走的文件**里做一次变异，确认仍以一句具体的话变红——
@@ -71,9 +72,10 @@
 - `歌词字体检查：导入之后字体族列表里没有「Arial」`
 - `在线歌词检查：旧版接口的带轴歌词没有被优先采用（LrcApi 在线歌词 · 旧版 /lyrics，第一句「旧版接口第一句」）`
 - `画面旋转检查：顺时针 90° 的内核参数不对（--no-video-title-show … --transform-type=90）`
+- `歌单状态：标题前缀不对（「【我的歌单·未保存】」）`
 
 elease-check 三次全绿（148 / 140 / 143 秒）。**如实说明**：拆完的只是"文件行数"，
-冒烟那 7 个文件还剩 2 个（`PlaylistLibrary` / `DesktopLyrics`）。
+冒烟那 7 个文件还剩 1 个（`DesktopLyrics`）。
 
 ## [1.6.1] - 2026-10-18
 

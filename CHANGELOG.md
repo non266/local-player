@@ -152,6 +152,9 @@
   （`settings.json` / `smoke-cover` 之类），查明是**所有者本人在 2026-10-19 15:46–16:07 用过播放器**
   （`播放器.log` 里有当时播的曲目，22:00:23 退出），而那份基线是 **1.6.0 那轮（10-18）采集的**——
   拿过期基线比，就会把"用户自己用过"算成"卸载动了数据"。**用卸载前现采的基线重做 → 0 处**。
+- **已发布**：[v1.6.2](https://github.com/non266/local-player/releases/tag/v1.6.2)（**Latest**），
+  两个资产走 ASCII 名（`local-player-1.6.2-setup.exe` / `local-player-1.6.2-portable.zip`）；
+  服务端 `digest` 与本地 `Get-FileHash` **一致**，两个下载首部 2 KB 探测都是 `206`。
 
 ## [1.6.1] - 2026-10-18
 

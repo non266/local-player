@@ -835,7 +835,7 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 拆到"非生成文件 ≤ 500 行"原本还剩 **17** 个。2026-10-19 的 R3 先做冒烟（风险最低）：
 
-**已拆（7 个文件 → 23 个分部）**：`Program.LyricsOffset` 569 → 264+316；`Program.SettingsProfiles` 726 → 391+245+123；
+**已拆（R3：7 个文件 → 23 个分部；R4：产品侧 3 个类 → 6 个文件）**：`Program.LyricsOffset` 569 → 264+316；`Program.SettingsProfiles` 726 → 391+245+123；
 `Program.Fonts` 1,074 → 427+187+147+100+49+122+102；`Program.OnlineLyrics` 1,084 → 463+631；`Program.Video` 1,468 → 464+404+248+390；`Program.PlaylistLibrary` 1,735 → 240+305+274+470+494；`Program.DesktopLyrics` 2,046 → 492+461+299+261+500+88。判据与 20 步一步没动，每次搬完都做读回自查 + 变异。
 
 剩下的按「冒烟 → 产品」的顺序排：
@@ -843,7 +843,7 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 | 类别 | 文件（行数） |
 | --- | --- |
 | 冒烟（3，仍 > 500） | `Program.OnlineLyrics.EndToEnd` 631（单个方法，拆不动）/ `Program.MainForm.Session` 609 / `Program.MainForm.SeekAbLoop` 526 |
-| 产品·独立类（3，再做） | `AppSettings` 579 / `SmtcSession` 557 / `PlaybackHistory` 510 |
+| 产品·独立类（3，**已拆**） | `AppSettings` 579 → 472+124 / `SmtcSession` 557 → 464+111 / `PlaybackHistory` 510 → 395+134 |
 | 产品·MainForm 族（7，不做） | `MainForm.DesktopLyrics` 849 / `MainForm.Playlists` 763 / `MainForm.Playlist` 736 / `MainForm.Floating` 721 / `MainForm.Playback` 656 / `MainForm.SettingsProfiles` 543 / `MainForm.Startup` 524 |
 
 照 17.2 的五条规矩做即可；冒烟那 7 个只影响测试、风险最低，所以先做它们。

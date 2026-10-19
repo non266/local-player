@@ -17,6 +17,10 @@ namespace SmokeTest
         {
             var media = Path.Combine(AppContext.BaseDirectory, "smoke-tags", "sample.flac");
 
+            // 分段计时：这一步在整轮里有时 30 秒、有时 3 分钟（维护手册 R2 那一条），
+            // 先把时间花在哪一段量出来，再决定要不要改判据。
+            var sectionClock = System.Diagnostics.Stopwatch.StartNew();
+
             if (!File.Exists(media))
             {
                 Log(15, "缺少第 9 步生成的样本文件");
@@ -49,7 +53,13 @@ namespace SmokeTest
                         return false;
                     }
 
+                    Journal($"第15步分段：主窗体创建 + 读歌词 {sectionClock.ElapsedMilliseconds} ms");
+                    sectionClock.Restart();
+
                     if (!CheckDesktopLyrics(form, lyrics)) return false;
+
+                    Journal($"第15步分段：桌面歌词各项检查 {sectionClock.ElapsedMilliseconds} ms");
+                    sectionClock.Restart();
 
                     if (form.DesktopLyricsWindow is not { } window)
                     {
@@ -136,12 +146,17 @@ namespace SmokeTest
                     PumpMessages(200);
                 }
 
+                Journal($"第15步分段：重启验证 {sectionClock.ElapsedMilliseconds} ms");
+                sectionClock.Restart();
+
                 // 把会话还原：这一段的失败会直接结束整个测试（设置状态无所谓），
                 // 但成功之后要保证后面的步骤看到的是原来的设置。
                 var restore = AppSettings.Load();
                 restore.LastPlaylist = previousPlaylist;
                 restore.LastPlaylistIndex = previousIndex;
                 restore.Save();
+
+                Journal($"第15步分段：收尾 {sectionClock.ElapsedMilliseconds} ms");
 
                 Log(15, "桌面歌词全套正常：见上一条；另外开关与位置能存下来，"
                         + "重新启动自动回到上次的位置");
@@ -167,6 +182,16 @@ namespace SmokeTest
             const int wsExToolWindow = 0x00000080;
             const int wsExLayered = 0x00080000;
             const int wsExNoActivate = 0x08000000;
+            // R2：这一步有时 20 秒、有时 160 秒（见维护手册 R2 / M1）。慢块计时只记"超过 1 秒"的段落，
+            // 正常跑不留噪音；日志里出现"第15步慢块"就知道时间花在哪一段。
+            var sectionClock = System.Diagnostics.Stopwatch.StartNew();
+
+            void Section(string name)
+            {
+                var ms = sectionClock.ElapsedMilliseconds;
+                if (ms >= 1000) Journal($"第15步慢块：{name} {ms} ms");
+                sectionClock.Restart();
+            }
 
             var menu = FindViewMenuItem(form, "桌面歌词");
             if (menu == null)
@@ -248,6 +273,7 @@ namespace SmokeTest
                         + "「不抢焦点」这一条检查这次是空的");
             }
 
+            Section("开窗、置顶、拖动");
             // ---- 跟着进度换句 ----
             if (lyrics is not { IsSynchronized: true } || lyrics.Lines.Count < 2)
             {
@@ -277,6 +303,7 @@ namespace SmokeTest
                 return false;
             }
 
+            Section("跟着进度换句");
             // ---- B3：双语歌词（同一时间戳的原文 + 译文）第二行放译文 ----
             var bilingual = LyricsDocument.Parse(
                 "[00:00.50]原文一\n" +
@@ -323,6 +350,7 @@ namespace SmokeTest
                 return false;
             }
 
+            Section("双语歌词");
             // ---- 排版跟着选项走 ----
             var twoLines = window.Height;
             window.ShowNextLine = false;
@@ -338,9 +366,13 @@ namespace SmokeTest
             window.ShowNextLine = true;
             PumpMessages(120);
 
+            Section("排版与不透明度");
             // ---- 1.1.0：控制条（播放 / 暂停、上一首、下一首、停止）----
             if (!CheckDesktopLyricsControls(window)) return false;
+            Section("控制条（按钮与点击）");
+
             if (!CheckDesktopLyricsControlsSetting(form, window)) return false;
+            Section("控制条（设置与联动）");
 
             var smallWidth = window.Width;
             window.FontSize = 60;
@@ -356,6 +388,7 @@ namespace SmokeTest
             window.FontSize = 30;
             PumpMessages(120);
 
+            Section("控制条（字号）");
             // ---- 不透明度钳制 ----
             window.OpacityPercent = 1;
             if ((int)window.OpacityPercent != DesktopLyricsDefaults.MinimumOpacity)
@@ -371,21 +404,27 @@ namespace SmokeTest
                 return false;
             }
 
+            Section("不透明度钳制");
             // ---- 画面：背景必须真的透明，字必须真的画上去了 ----
             if (!CheckLyricsSurface(window, out var opaquePixels)) return false;
 
+            Section("画面透明（截屏）");
             // ---- 鼠标停在歌词上时要铺一块背景（否则用户看不出该抓哪儿）----
             if (!CheckLyricsHover(window)) return false;
 
+            Section("悬停背景");
             // ---- 字上那一点真的能被点中（"能不能拖动"就靠这个）----
             if (!CheckLyricsHitTest(window)) return false;
 
+            Section("命中测试");
             // ---- 它是不是真的显示在屏幕上（而不只是我们内存里有张位图）----
             if (!CheckLyricsOnScreen(window)) return false;
 
+            Section("截屏比对");
             // ---- 真鼠标拖一把：这才叫"能移动" ----
             if (!CheckLyricsRealDrag(window)) return false;
 
+            Section("真鼠标拖动");
             // ---- 拖动：真的发鼠标消息，看窗口跟不跟手 ----
             window.CenterOnScreen();
             PumpMessages(120);
@@ -399,6 +438,7 @@ namespace SmokeTest
                 return false;
             }
 
+            Section("拖动");
             // ---- 锁定 = 鼠标穿透 ----
             // 注意此刻不透明度正好是 100%：WinForms 会把 WS_EX_LAYERED 摘掉，
             // 而穿透要靠它，所以这一条同时验了"改完样式会把分层补回来"。
@@ -430,9 +470,11 @@ namespace SmokeTest
                 return false;
             }
 
+            Section("锁定");
             // ---- 解锁热键（Ctrl+Alt+D）：锁定之后托盘之外的另一个出口 ----
             if (!CheckDesktopLyricsLockHotKey(form, window)) return false;
 
+            Section("解锁热键");
             // ---- 右键菜单 ----
             var context = window.ContextMenuStrip;
             if (context == null ||
@@ -457,6 +499,7 @@ namespace SmokeTest
             context.Close();
             PumpMessages(120);
 
+            Section("右键菜单");
             // ---- 全屏时不能被一起收走 ----
             var sidebarWindow = form.SidebarWindow;
 
@@ -493,6 +536,7 @@ namespace SmokeTest
                 return false;
             }
 
+            Section("全屏");
             // ---- 超长的一句：必须折行，且宽度被工作区的比例钳住（否则会横穿整个桌面） ----
             // ⚠ 两行都写成超长：主窗体的界面计时会不断把"真实播放位置"推过来，
             // 位置跑到第二行时这一句就换成第二行了。只让第一行超长的话，这条断言会随
@@ -535,6 +579,7 @@ namespace SmokeTest
             window.UpdatePosition(lyrics.Lines[0].Time);
             PumpMessages(150);
 
+            Section("超长句");
             // ---- 配色选「跟随主题」时要跟着强调色走 ----
             window.ColorChoice = DesktopLyricsColor.Theme;
 
@@ -560,9 +605,11 @@ namespace SmokeTest
             autoTheme.PerformClick();
             PumpMessages(150);
 
+            Section("配色");
             // ---- 歌词字体：两处歌词要一起换，坏字体名不能把界面搞坏 ----
             if (!CheckLyricsFont(form, window)) return false;
 
+            Section("字体");
             // ---- 关掉再开：复用同一个窗口，不是又造一个 ----
             SetMenuChecked(enable, false);
             PumpMessages(200);
@@ -582,6 +629,7 @@ namespace SmokeTest
                 return false;
             }
 
+            Section("关掉再开");
             // ---- Ctrl+D 也要能开关（快捷键漏接是很常见的一类问题） ----
             if (!SendShortcut(form, Keys.Control | Keys.D))
             {

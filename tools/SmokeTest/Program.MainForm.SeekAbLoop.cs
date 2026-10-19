@@ -55,6 +55,16 @@ namespace SmokeTest
                     return false;
                 }
 
+                // 探针：只记现场、不改判据（两次偶发红都是"时间突然回到 0"，见 EngineProbe 的注释）
+                using var probe = new EngineProbe(engine, form.Playlist);
+
+                bool Fail(string message)
+                {
+                    Journal("诊断：" + probe.Dump());
+                    Log(6, message);
+                    return false;
+                }
+
                 var mid = slider.Width / 2;
                 var y = slider.Height / 2;
 
@@ -70,15 +80,13 @@ namespace SmokeTest
 
                 if (Math.Abs(draggedValue - 500) > 20)
                 {
-                    Log(6, $"进度条拖动检查：拖到中间之后取值不对（{draggedValue}/1000）");
-                    return false;
+                    return Fail($"进度条拖动检查：拖到中间之后取值不对（{draggedValue}/1000）");
                 }
 
                 if (draggedLabel != expectedLabel)
                 {
-                    Log(6, "进度条拖动检查：拖动时时间标签没有显示要跳到的位置"
+                    return Fail("进度条拖动检查：拖动时时间标签没有显示要跳到的位置"
                             + $"（「{draggedLabel}」，期望「{expectedLabel}」）");
-                    return false;
                 }
 
                 var timeBeforeHold = engine.Time;
@@ -87,24 +95,21 @@ namespace SmokeTest
 
                 if (label.Text != draggedLabel)
                 {
-                    Log(6, "进度条拖动检查：按住不动时时间标签被播放时间盖回去了"
+                    return Fail("进度条拖动检查：按住不动时时间标签被播放时间盖回去了"
                             + $"（「{draggedLabel}」→「{label.Text}」）");
-                    return false;
                 }
 
                 if (slider.Value != draggedValue)
                 {
-                    Log(6, $"进度条拖动检查：按住不动时滑块取值被抢回去了（{draggedValue} → {slider.Value}）");
-                    return false;
+                    return Fail($"进度条拖动检查：按住不动时滑块取值被抢回去了（{draggedValue} → {slider.Value}）");
                 }
 
                 var timeAfterHold = engine.Time;
 
                 if (timeAfterHold < timeBeforeHold + 300 || timeAfterHold > timeBeforeHold + 3000)
                 {
-                    Log(6, "进度条拖动检查：按住不动这 600 ms 里播放位置不对（既没照常往前走、也没跳走才怪）"
+                    return Fail("进度条拖动检查：按住不动这 600 ms 里播放位置不对（既没照常往前走、也没跳走才怪）"
                             + $"（{timeBeforeHold} → {timeAfterHold} ms）");
-                    return false;
                 }
 
                 // ---- ② 按住拖到进度条外面（下方）：仍然要跟手 ----
@@ -122,9 +127,8 @@ namespace SmokeTest
 
                 if (slider.Value <= beforeOutside || slider.Value <= afterLeave)
                 {
-                    Log(6, "进度条拖动检查：按住拖到进度条外面之后不跟手了"
+                    return Fail("进度条拖动检查：按住拖到进度条外面之后不跟手了"
                             + $"（{beforeOutside} → 离开后 {afterLeave} → 再移动 {slider.Value}）");
-                    return false;
                 }
 
                 // ---- ③ 松手：这时候才真的跳 ----
@@ -137,8 +141,7 @@ namespace SmokeTest
 
                 if (Math.Abs(seekedTo - expectedSeek) > 800)
                 {
-                    Log(6, $"进度条拖动检查：松手之后没有跳到目标（在 {seekedTo} ms，期望约 {expectedSeek} ms）");
-                    return false;
+                    return Fail($"进度条拖动检查：松手之后没有跳到目标（在 {seekedTo} ms，期望约 {expectedSeek} ms）");
                 }
 
                 // ---- ④ 右键点一下：不许 seek，也不许让界面计时器停摆 ----
@@ -159,15 +162,13 @@ namespace SmokeTest
 
                 if (labelsWhileHoldingRight.Count < 2)
                 {
-                    Log(6, "进度条拖动检查：按住右键时界面计时器停摆了"
+                    return Fail("进度条拖动检查：按住右键时界面计时器停摆了"
                             + $"（1.5 秒里时间标签一直是「{labelsWhileHoldingRight.FirstOrDefault()}」）");
-                    return false;
                 }
 
                 if (engine.Time < seekedTo - 300)
                 {
-                    Log(6, $"进度条拖动检查：右键点进度条把播放位置拽回去了（{seekedTo} → {engine.Time} ms）");
-                    return false;
+                    return Fail($"进度条拖动检查：右键点进度条把播放位置拽回去了（{seekedTo} → {engine.Time} ms）");
                 }
 
                 Log(6, "进度条拖动正常：拖动期间标签显示要跳到的位置、滑块不被抢、引擎不中途 seek，"

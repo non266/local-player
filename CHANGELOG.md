@@ -4,13 +4,69 @@
 [语义化版本](https://semver.org/lang/zh-CN/)。
 维护期的规矩（什么算"必修"、发版要做哪三步）写在 [docs/维护手册.md](docs/维护手册.md)。
 
+## [未发布]
+
+### 文档（R6：把「文档说的事实」校准到 1.6.2 的实际状态）
+
+**为什么做**：1.6.2 发完做终检，发现 README / `docs/介绍.md` / 维护手册 / 架构里有十几处
+**"当前状态"已经过时**——还写着 .NET 8、安装表里的数字是 1.2.1 那一版的、介绍里说"没有 SMTC"
+（1.4.0 就做了）、adjust 滤镜"未复测"（R5 刚复测完，结论正好相反）。**文档说的和代码做的
+不是一回事，比没有文档更糟。**
+
+**改了什么**（只改「当前状态」，历史章节与旧版本节没动）：
+
+| 位置 | 原来 | 现在（怎么量的） |
+| --- | --- | --- |
+| README 环境要求 | `.NET 8 SDK` / `本项目用 8.0 编译` / `.NET 8 Desktop Runtime` | `.NET 10 SDK`（`global.json` 钉 **10.0.402**）；运行时只有"自己构建后直接运行"才要，发行包自包含 |
+| README 安装表 | `全能本地播放器-1.2.1-…`；671 个文件 / 250.5 MB；libvlc 425 个文件 / 325 个插件；便携 669 | ASCII 资产名（`local-player-<版本>-…`）；**646 个文件 / 244.7 MB**；libvlc **422** 个文件（含 **323** 个插件）；便携 **644 个文件 / 240.3 MB**（量本机 1.6.2 安装目录与 dist 里 1.6.2 的 zip） |
+| README 构建输出 | 约 102 MB / 437 个文件；三套"约 280 MB" | **431 个文件 / 131.9 MB**；三套合计 **302.1 MB**（干净构建到 `%TEMP%`；包目录 x64 107.4 + x86 104.1 + arm64 90.7） |
+| README / 介绍：画面调整 | "3.0.24 之后上游修了 adjust filter，**没有复测**" | R5 的复测结论：`--video-filter=adjust` 一开整幅变纯绿 `(0,135,0)`（硬解软解、d3d11 都一样）→ "调了会把画面弄坏"，继续不做 |
+| 介绍「一句话概括」 | `.NET 8`；程序体积"约 100 MB" | `.NET 10`；装机 646 / 244.7 MB、便携 644 / 240.3 MB |
+| 介绍「规模」 | 26,000 行 / 90 个文件；测试 10,300 行 / 23 个文件 | **32,596 行 / 141 个文件**；测试 **16,537 行 / 53 个文件**；MainForm 族 **31** 个 partial |
+| 介绍「已知限制」 | "**没有 SMTC**"（与同文「功能总览」自相矛盾） | SMTC 早已做（1.3.0 显示 / 1.4.0 按钮与封面，需 Win10 2004+）；只剩 DLNA / 皮肤 / 跨平台不做 |
+| 介绍「构建输出」 | 约 100 MB、三套约 280 MB | 431 个文件 / 131.9 MB、三套 302.1 MB |
+| 维护手册 R 表 | R1"排第一"、R3/R4"待触发" | R1～R5 都已完成 + 1.6.2 已发布；补 R6～R9 行 |
+| 维护手册 坑表 | 两条行被粘成一行；"安装完了没有"那行还写着 671 / 250.5 | 拆成两行；改成 646 / 244.7；新增"数行数别用 `Get-Content`"（README 2,506 行会被读成 1,345） |
+| 架构 §1 | 32,541 / 138；Core 61 / 10,979；Ui 45 / 9,772；冒烟 30 / 16,024 | **32,596 / 141**；63 / 11,016；46 / 9,790；53 / 16,537（注明量于 2026-10-20） |
+| 架构 §4 与 §4.5 | 测试"22 个文件" | 22 是当时；现在 53（R3 之后） |
+| CHANGELOG 两处路径 | `\tools/…`、`修法：\tools\installer\…`（路径首字母被制表符吃掉） | 补回 `t` |
+
+### 新增（R6）：`tools/docs-check.ps1`（只读，接进 `release-check`）
+
+- 从 `global.json` / `播放器.csproj` / `Core\MediaFormats.cs` **现读**事实：SDK 10.0.402、
+  目标框架、libvlc 3.0.24 / LibVLCSharp 3.10.2、注册格式 **52 种**（视频 26 + 音频 24 +
+  播放列表 2；字幕 10 种不注册），并把"产品 / Core / Ui / MainForm / 冒烟多少文件多少行、
+  `dist\` 里有什么、本机装出来多大"打印成一张表。
+- 6 条硬检查：README 必须有 `.NET 10 SDK` 与 `10.0.402`、目标框架全串、`3.0.24`、`52 种`；
+  README 与介绍不得再有 `.NET 8 SDK` / `.NET 8 Desktop Runtime` / `本项目用 8.0 编译`；
+  README 不得再出现中文资产名 `全能本地播放器-1.`。
+- `release-check.ps1` **第一步**调用它（`-SkipDocs` 可跳），失败进 `$failures`、跳过构建与冒烟，
+  摘要里给一句"文档数字核对没通过"。
+- 写法上踩到两点，已记进坑表：**行数一律用 `[IO.File]::ReadAllLines`**（本机 `Get-Content`
+  把无 BOM 的 UTF-8 当 GBK 读，README 2,506 行读成 1,345）；PowerShell 5.1 **不接受
+  "下一行以 `+` 开头"的跨行表达式**（`Write-Host (...)` 里那样写会报 `Missing closing ')'`）。
+
+**验证**：
+
+- 脚本写完先跑 → **红 8 处**，与上表逐条对得上（说明它抓得住，不是摆设）；
+- 改完文档 → 绿；`tools\release-check.ps1` 全绿 **146 秒**（Debug / Release / 冒烟三工程
+  0 警告 0 错误 + 全量 20/20），其中第一步的"文档数字核对"通过；
+- 变异两条（各自变红后还原）：
+  README "52 种" → "51 种" → `✗ README.md 里找不到「52 种」…`（改回后绿）；
+  README `.NET 10 SDK` → `.NET 8 SDK` → `✗ README.md:387 还写着「.NET 8 SDK」…`；
+- 用 **Windows PowerShell 5.1** 实跑（不是 pwsh），中文输出不乱、BOM 生效。
+
+**如实说明**：这一轮**没有改产品代码**，也没改任何断言；`docs-check` 只管住最会漂的
+那几项（SDK / 框架 / 内核 / 格式数），**装机文件数、体积、冒烟用时仍要人对照它打出的表核**——
+自动化能替的是"读源码拿事实"，替不了"这次真的装出来多大"。
+
 ## [1.6.2] - 2026-10-19
 
 ### 测试（R2：给两处偶发红与「桌面歌词」耗时抖动装上探针）
 
 **做了什么**（只加诊断，**一条判据都没改**）：
 
-- 	ools/SmokeTest/EngineProbe.cs（新增）：每 50 ms 采一次 Time / IsPlaying / Length / 播放列表当前项，
+- `tools/SmokeTest/EngineProbe.cs`（新增）：每 50 ms 采一次 Time / IsPlaying / Length / 播放列表当前项，
   并订阅引擎的 StateChanged / PlaybackEnded / ErrorOccurred / CoreRebuilt / TracksChanged；
   只在**失败分支**把现场压成几行写进 `smoke-journal.txt`（正常跑不留噪音）。
 - CheckSeekBarDragging：9 个失败分支改成 Fail(...)——先写「诊断：探针：…」再报错。
@@ -215,7 +271,7 @@ net8.0 的 8.0.31 引用包（`NETSDK1127`）；以及 `LangVersion` 跟着 `lat
     **.NET 8 的 WPF 程序集**（PresentationFramework*.dll、System.Xaml.dll、System.Printing.dll、
     UIAutomation*.dll、WindowsFormsIntegration.dll、wpfgfx_cor3.dll …）——
     .NET 10 的 WinForms 自包含不再打包它们，而 Inno 只覆盖/新增。
-    修法：	ools\installer\播放器.iss 的 [InstallDelete] 加一条 Type: files; Name: "{app}\*.dll"，
+    修法：`tools\installer\播放器.iss` 的 [InstallDelete] 加一条 Type: files; Name: "{app}\*.dll"，
     装文件前把顶层 dll 全删一遍再写（载荷是完整应用，删掉的都会写回来；libvlc 子树由 1.6.0 就加的
     那条整棵删）。重打后 → **646 个文件**。因此**上面的 SHA256 是修好之后重打的**（前一版
     37AAA76E… 已作废）。

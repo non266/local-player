@@ -1,10 +1,11 @@
 ﻿<#
   release-check.ps1 —— 一条命令跑完本项目的验收仪式。
 
-  做三件事：
-    1. 构建主工程（Debug；默认还构建 Release）
-    2. 构建冒烟测试工程
-    3. 从输出目录跑全量 20 步冒烟，打印摘要与失败原因
+  做四件事：
+    1. 核对「当前状态」文档里的数字（tools\docs-check.ps1，只读；可 -SkipDocs 跳过）
+    2. 构建主工程（Debug；默认还构建 Release）
+    3. 构建冒烟测试工程
+    4. 从输出目录跑全量 20 步冒烟，打印摘要与失败原因
 
   零警告是硬条件：出现「N 个警告」且 N > 0 就判失败（这个项目一直按 0 警告 0 错误要求自己）。
 
@@ -13,6 +14,7 @@
       powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-check.ps1 -Filter 歌单     # 只跑名字含「歌单」的检查（连带依赖的前置）
       powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-check.ps1 -SkipSmoke       # 只构建（改文档时用）
       powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-check.ps1 -SkipRelease     # 只 Debug
+      powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-check.ps1 -SkipDocs        # 正在改文档时跳过数字核对
 
   退出码：0 = 全绿；1 = 有失败（摘要里列出每一步的失败原因）。
 
@@ -22,7 +24,8 @@
 param(
     [string]$Filter = "",
     [switch]$SkipSmoke,
-    [switch]$SkipRelease
+    [switch]$SkipRelease,
+    [switch]$SkipDocs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -133,7 +136,47 @@ if (-not (Test-Path -LiteralPath $project))
 $sdkVersion = (dotnet --version)
 if ($sdkVersion -notmatch '^(8|9|10|11|12)\.')
 {
-    Write-Host ("  ! 当前 SDK 是 " + $sdkVersion + "，本工程要 .NET 8 或更高的 SDK。") -ForegroundColor Yellow
+    Write-Host ("  ! 当前 SDK 是 " + $sdkVersion + "，本工程基线是 .NET 10（global.json 钉在 10.0.402）。") -ForegroundColor Yellow
+}
+
+# ---------------------------------------------------------------- 文档
+
+# 只读核对：README / docs\介绍.md 里写的 SDK、目标框架、内核版本、格式数必须与源码一致。
+# 漂移了就在这里红，免得"文档说的事实"又悄悄过时（正是 R6 这一轮发现的问题）。
+if (-not $SkipDocs -and $failures.Count -eq 0)
+{
+    Write-Section "文档数字核对"
+    $docsCheck = Join-Path $PSScriptRoot "docs-check.ps1"
+
+    if (-not (Test-Path -LiteralPath $docsCheck))
+    {
+        Write-Failure ("找不到 " + $docsCheck + "（文档数字核对跑不了）")
+    }
+    else
+    {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+
+        try
+        {
+            & $docsCheck
+            $docsExit = $LASTEXITCODE
+        }
+        catch
+        {
+            $docsExit = 1
+            Write-Host ("  ! 文档数字核对崩了：" + $_.Exception.Message) -ForegroundColor Yellow
+        }
+        finally
+        {
+            $ErrorActionPreference = $previous
+        }
+
+        if ($docsExit -ne 0)
+        {
+            Write-Failure "文档数字核对没通过（上面每条 ✗ 都指出了要改的文件与行）"
+        }
+    }
 }
 
 # ---------------------------------------------------------------- 构建

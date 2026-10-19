@@ -50,6 +50,27 @@
 - 「桌面歌词」慢块的成因仍未定论（候选：截屏 / DWM 合成、字体测量、机器当时的负载）；
   现在有分段日志，下次慢的时候可以直接指到段。
 
+### 重构（R3：冒烟第二批拆分，3 个文件、7 个分部）
+
+按 [ARCHITECTURE.md](docs/ARCHITECTURE.md) 17.2 的五条规矩，把冒烟里最大的几个文件逐个拆到 ≤ 500 行。
+**断言、20 步、判据一个字都没动**——只搬文件。
+
+| 文件 | 拆前 | 拆后 |
+| --- | --- | --- |
+| `Program.LyricsOffset.cs` | 569 | **264** + `.MainForm.cs` 316（主窗体上的整条链路） |
+| `Program.SettingsProfiles.cs` | 726 | **391** + `.MainForm.cs` 245 + `.LoadDialog.cs` 123 |
+| `Program.Fonts.cs` | 1,074 | **427** + `.PrivateFont.cs` 187 + `.Import.cs` 147 + `.Rename.cs` 100 + `.SystemFont.cs` 49 + `.Management.cs` 122 + `.ManagerDialog.cs` 102 |
+
+**每次搬运的验证**：搬完当场读回、与原文对应区间逐行比对一致；全量 20/20；
+再在**搬走的文件**里做一次变异，确认仍以一句具体的话变红——
+
+- `歌词偏移检查：Ctrl+] 没有让歌词提前（现在是 1000 毫秒）`
+- `设置方案检查：改动没有自动写回方案文件（音量 85，期望 85；主题 Vlc，期望 Vlc）`
+- `歌词字体检查：导入之后字体族列表里没有「Arial」`
+
+elease-check 三次全绿（148 / 140 / 143 秒）。**如实说明**：拆完的只是"文件行数"，
+冒烟那 7 个文件还剩 4 个（`OnlineLyrics` / `Video` / `PlaylistLibrary` / `DesktopLyrics`）。
+
 ## [1.6.1] - 2026-10-18
 
 ### 构建基线：目标框架升到 net10（SDK 10.0.402）

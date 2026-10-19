@@ -15,11 +15,11 @@
 | `Core/` | 11,016 行 / 63 个文件 |
 | `Ui/` | 9,790 行 / 46 个文件 |
 | `MainForm*` 这一族 partial | 11,713 行 / **31 个文件**、81 个实例字段（P1 之前是 14 个文件 / 90 个字段） |
-| `tools/SmokeTest/` | 16,537 行 / 53 个文件（拆之前是 8,900 行、**单个文件**） |
+| `tools/SmokeTest/` | 16,557 行 / 55 个文件（拆之前是 8,900 行、**单个文件**） |
 
-> 数字最后一次量是在 **2026-10-20（R6 文档真值那轮）**：R3 / R4 只搬家，
+> 数字最后一次量是在 **2026-10-20（R6 / R7 那两轮）**：R3 / R4 / R7 都只搬家，
 > 产品侧多出 3 个文件（`PlaybackHistory.Save` / `SmtcSession.Cover` / `AppSettings.Salvage`），
-> 冒烟从 30 个文件涨到 53 个。数行数用 `[IO.File]::ReadAllLines`——
+> 冒烟从 30 个文件涨到 55 个。数行数用 `[IO.File]::ReadAllLines`——
 > 本机的 `Get-Content` 会把无 BOM 的 UTF-8 按 GBK 读，行数是错的（见维护手册坑表）。
 
 分层名义上清楚（`Core` 与界面无关、`Ui` 是可复用零件、`MainForm*` 是装配），
@@ -834,20 +834,35 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 （`TagReader`）。`MainForm*` 那 31 个 partial 没动：它们本来就是"一个文件一个功能"，
 单纯按行数再切属于"为拆而拆"。
 
-### 17.4 第二波（做到一半）
+### 17.4 第二波（R3 / R4：冒烟 7 个 + 产品 3 个）
 
 拆到"非生成文件 ≤ 500 行"原本还剩 **17** 个。2026-10-19 的 R3 先做冒烟（风险最低）：
 
 **已拆（R3：7 个文件 → 23 个分部；R4：产品侧 3 个类 → 6 个文件）**：`Program.LyricsOffset` 569 → 264+316；`Program.SettingsProfiles` 726 → 391+245+123；
 `Program.Fonts` 1,074 → 427+187+147+100+49+122+102；`Program.OnlineLyrics` 1,084 → 463+631；`Program.Video` 1,468 → 464+404+248+390；`Program.PlaylistLibrary` 1,735 → 240+305+274+470+494；`Program.DesktopLyrics` 2,046 → 492+461+299+261+500+88。判据与 20 步一步没动，每次搬完都做读回自查 + 变异。
 
-剩下的按「冒烟 → 产品」的顺序排：
+产品侧三个独立类：`AppSettings` 579 → 472+124 / `SmtcSession` 557 → 464+111 / `PlaybackHistory` 510 → 395+134。
 
-| 类别 | 文件（行数） |
+### 17.5 R7：把这条账结掉（2026-10-20）
+
+R3 / R4 之后还剩 3 个 > 500 的冒烟文件。R7 把其中两个拆掉，第三个写下不拆的判据：
+
+| 文件 | 拆前 | 拆后 |
+| --- | --- | --- |
+| `Program.MainForm.Session.cs` | 609 | **423** + `Program.MainForm.Session.NowPlaying.cs` 196（B6「正在播那一行」，第 1–192 行整块搬走） |
+| `Program.MainForm.SeekAbLoop.cs` | 526 | **350** + `Program.MainForm.SeekDrag.cs` 186（B5 进度条拖动，第 8–182 行整块搬走） |
+| `Program.OnlineLyrics.EndToEnd.cs` | 631 | **不拆**：整份是一个 631 行的方法（本地假服务器把 20 来段链路走一遍）。拆它要把方法切成几个带返回值的检查——那是**改测试结构**，不是 17.2 允许的"逐字搬迁"；按 R7 的判据**显式退役** |
+
+R7 之后，**非生成文件里 > 500 行的只剩 8 个**，每个都有书面理由：
+
+| 文件（行数） | 不拆的理由 |
 | --- | --- |
-| 冒烟（3，仍 > 500） | `Program.OnlineLyrics.EndToEnd` 631（单个方法，拆不动）/ `Program.MainForm.Session` 609 / `Program.MainForm.SeekAbLoop` 526 |
-| 产品·独立类（3，**已拆**） | `AppSettings` 579 → 472+124 / `SmtcSession` 557 → 464+111 / `PlaybackHistory` 510 → 395+134 |
-| 产品·MainForm 族（7，不做） | `MainForm.DesktopLyrics` 849 / `MainForm.Playlists` 763 / `MainForm.Playlist` 736 / `MainForm.Floating` 721 / `MainForm.Playback` 656 / `MainForm.SettingsProfiles` 543 / `MainForm.Startup` 524 |
+| `MainForm.DesktopLyrics` 849 / `MainForm.Playlists` 763 / `MainForm.Playlist` 736 / `MainForm.Floating` 721 / `MainForm.Playback` 656 / `MainForm.SettingsProfiles` 543 / `MainForm.Startup` 524 | **一个文件一个功能**：再按行数切属于"为拆而拆"，切完反而要在多个文件之间来回跳才能读完一个功能 |
+| `Program.OnlineLyrics.EndToEnd` 631 | **单个方法**，拆它就是改测试结构（见上表） |
+| `MainForm.Designer.cs` 1,364 | 设计器生成，不手改 |
 
-照 17.2 的五条规矩做即可；冒烟那 7 个只影响测试、风险最低，所以先做它们。
+判据写在这里的意思是：以后有人再问"为什么这几个不拆"，答案在这，不用重新讨论一遍。
+
+照 17.2 的五条规矩做即可；冒烟那几个只影响测试、风险最低，所以先做它们。
+
 

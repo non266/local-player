@@ -733,6 +733,10 @@ cd bin/Debug/net10.0-windows10.0.19041.0
 $env:播放器_TEST_VIDEO = "D:\某个视频.mp4"
 dotnet SmokeTest.dll
 
+# 去隔行的实测探针（只量、不断言；素材自己用 ffmpeg 合成，见「去隔行」一节）
+$env:播放器_TEST_INTERLACED = "1"
+dotnet SmokeTest.dll 视频功能与逐帧
+
 # 只想验某一块时按名字筛（全量一次两分半上下，实测 136～195 秒；筛选只要十几秒）：
 dotnet SmokeTest.dll 桌面歌词      # 第 9 步（样本）+ 第 15 步：桌面歌词与歌词字体
 dotnet SmokeTest.dll 逐帧          # 只跑视频功能那一步（需要 播放器_TEST_VIDEO）

@@ -258,7 +258,8 @@ namespace 播放器
 
         private void SetDeinterlace(string? mode)
         {
-            _settings.Deinterlace = mode ?? string.Empty;
+            // 归一化只在这里做一次：认不出来的值（含 1.7.0 之前存下的 "auto"）一律按"关闭"。
+            _settings.Deinterlace = Core.DeinterlaceModes.Normalize(mode);
 
             _engine.SetDeinterlace(_settings.Deinterlace);
             sidebarPanel.VideoTools.SetDeinterlaceMode(_settings.Deinterlace);

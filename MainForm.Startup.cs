@@ -132,6 +132,9 @@ namespace 播放器
             listViewPlaylist.MouseUp += OnPlaylistMouseUp;
             listViewPlaylist.ColumnClick += OnPlaylistColumnClick;
 
+            // 1.7.0 F4：「找出重复项」是运行时插进右键菜单的（不改 Designer）
+            ConfigureFindDuplicatesMenu();
+
             // 列宽随面板宽度自适应（侧栏显示时这块面板会窄很多）
             listViewPlaylist.Resize += (s, e) => AdjustPlaylistColumns();
 

@@ -229,10 +229,19 @@ namespace 播放器.Core
 
         /// <summary>
         /// 去隔行模式；空表示关闭。
-        /// <para>可用值：<c>auto</c>、<c>blend</c>、<c>bob</c>、<c>linear</c>、<c>x</c>、
-        /// <c>yadif</c>、<c>yadif2x</c>、<c>phosphor</c>、<c>ivtc</c>。</para>
+        /// <para>可用值见 <see cref="DeinterlaceModes"/>（<c>blend</c>、<c>bob</c>、<c>linear</c>、
+        /// <c>yadif</c>、<c>yadif2x</c>、<c>phosphor</c>、<c>ivtc</c>）。
+        /// 读进来的值一律过一遍 <see cref="DeinterlaceModes.Normalize"/>：认不出来的（包括 1.7.0
+        /// 之前存下的 <c>auto</c>）都归成"关闭"——libvlc 3 的播放器级接口不认 <c>auto</c>，
+        /// 它从前就是个按了没反应的选项（见 README 的 R8 实测）。</para>
         /// </summary>
-        public string Deinterlace { get; set; } = string.Empty;
+        public string Deinterlace
+        {
+            get => _deinterlace;
+            set => _deinterlace = DeinterlaceModes.Normalize(value);
+        }
+
+        private string _deinterlace = string.Empty;
 
         /// <summary>选定的音频输出设备标识；空表示系统默认设备。</summary>
         public string AudioDeviceId { get; set; } = string.Empty;
@@ -452,7 +461,7 @@ namespace 播放器.Core
                 parsed.Equalizer.PresetName ??= EqualizerCatalog.FlatPresetName;
                 parsed.Equalizer.Amps ??= new float[EqualizerCatalog.BandCount];
 
-                parsed.Deinterlace ??= string.Empty;
+                parsed.Deinterlace = DeinterlaceModes.Normalize(parsed.Deinterlace);
                 parsed.LyricsFontFamily ??= string.Empty;
 
                 // 只是把地址收拾干净（补协议头、去尾斜杠），没填就还是空——

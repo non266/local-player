@@ -53,8 +53,10 @@ namespace SmokeTest
                     if (!CheckPlaylistSearch(form)) return false;
                     if (!CheckPlaylistSort(form)) return false;
                     if (!CheckPlaylistSummary(form)) return false;
+                    if (!CheckPlaylistDuplicates()) return false;
                     if (!CheckDurationsBeforeHandle()) return false;
                     if (!CheckThemes(form)) return false;
+                    if (!CheckDeinterlaceMenu(form)) return false;
 
                     // 放在最后：它按 Delete 会真的把列表项删掉一项，别影响前面的检查
                     if (!CheckSearchTyping(form)) return false;
@@ -342,6 +344,40 @@ namespace SmokeTest
 
             var names = string.Join(" / ", new[] { "跟随系统", "浅色", "深色", "OLED 纯黑", "VLC 橙" });
             Log(6, $"5 套主题切换正常，配色均已生效：{names}");
+            return true;
+        }
+
+        /// <summary>
+        /// A3（1.7.0）：去隔行菜单里不能再有「自动」——libvlc 3 的播放器级接口只认具体滤镜名，
+        /// <c>auto</c> 实测等于关闭（R8 两次跑都是 4.83 = 基准）。菜单项数也要和模式表对得上。
+        /// </summary>
+        private static bool CheckDeinterlaceMenu(Form form)
+        {
+            var view = FindTopMenuItem(form, "视图");
+            var menu = view == null ? null : FindMenuItem(view.DropDownItems, "去隔行");
+
+            if (menu == null)
+            {
+                Log(6, "去隔行菜单检查：找不到「视图 → 去隔行」");
+                return false;
+            }
+
+            foreach (ToolStripItem item in menu.DropDownItems)
+            {
+                if (item.Text.IndexOf("自动", StringComparison.Ordinal) >= 0)
+                {
+                    Log(6, "去隔行菜单里还有「自动」——这个模式在 libvlc 3 上不起作用（R8 实测等于关闭）");
+                    return false;
+                }
+            }
+
+            if (menu.DropDownItems.Count != DeinterlaceModes.All.Count)
+            {
+                Log(6, $"去隔行菜单有 {menu.DropDownItems.Count} 项，模式表是 {DeinterlaceModes.All.Count} 项（两边对不上）");
+                return false;
+            }
+
+            Log(6, $"去隔行菜单正常：{menu.DropDownItems.Count} 项（关闭 + 7 个滤镜），没有那个不起作用的「自动」");
             return true;
         }
     }

@@ -84,6 +84,7 @@ namespace SmokeTest
                 if (!CheckPerFileAdjustments()) return false;
                 if (!CheckHistoryWriteBehind()) return false;
                 if (!CheckSettingsSalvage()) return false;
+                if (!CheckDeinterlaceModes()) return false;
 
                 Log(8, "设置 JSON 往返正确，损坏内容可安全降级；播放历史与按文件记住的调整都正确");
                 return true;
@@ -97,6 +98,70 @@ namespace SmokeTest
             {
                 TryDeleteDirectory(folder);
             }
+        }
+
+        /// <summary>
+        /// A3（1.7.0）：去隔行的「自动」在 libvlc 3 上等于关闭（R8 实测），所以从模式表里删掉；
+        /// 老设置 / 老设置方案 / 导入的 json 里存着的 auto 读进来要归成"关闭"。
+        /// </summary>
+        private static bool CheckDeinterlaceModes()
+        {
+            foreach (var (label, value) in DeinterlaceModes.All)
+            {
+                if (string.Equals(value, "auto", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(label, "自动", StringComparison.Ordinal))
+                {
+                    Log(8, "去隔行：模式表里还有「自动」——这个模式在 libvlc 3 上不起作用（R8 实测等于关闭）");
+                    return false;
+                }
+            }
+
+            if (DeinterlaceModes.All.Count != 8)
+            {
+                Log(8, $"去隔行：模式表有 {DeinterlaceModes.All.Count} 项，期望 8 项（关闭 + 7 个滤镜）");
+                return false;
+            }
+
+            var cases = new (string? Input, string Expected, string Name)[]
+            {
+                (null, "", "null"),
+                ("", "", "空串"),
+                ("auto", "", "auto"),
+                ("AUTO", "", "AUTO"),
+                ("bogus", "", "不认识的串"),
+                (" yadif ", "yadif", "带空格的 yadif"),
+                ("YADIF", "yadif", "大写的 YADIF"),
+                ("ivtc", "ivtc", "ivtc")
+            };
+
+            foreach (var (input, expected, name) in cases)
+            {
+                var actual = DeinterlaceModes.Normalize(input);
+
+                if (actual != expected)
+                {
+                    Log(8, $"去隔行：Normalize({name}) 给的是「{actual}」，期望「{expected}」");
+                    return false;
+                }
+            }
+
+            var fromJson = AppSettings.FromJson("{\"Deinterlace\":\"auto\"}");
+
+            if (fromJson.Deinterlace.Length != 0)
+            {
+                Log(8, $"去隔行：老设置里的「auto」没有迁移成「关闭」（现在还是「{fromJson.Deinterlace}」）");
+                return false;
+            }
+
+            var assigned = new AppSettings { Deinterlace = "AUTO" };
+
+            if (assigned.Deinterlace.Length != 0)
+            {
+                Log(8, $"去隔行：直接赋「AUTO」之后没有归一（现在是「{assigned.Deinterlace}」）");
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>

@@ -732,5 +732,99 @@ namespace 播放器
         {
             AdjustVolume(e.Delta > 0 ? 5 : -5);
         }
+
+        // =====================================================================
+        // 找出重复项（1.7.0 F4）
+        // =====================================================================
+
+        private ToolStripMenuItem? _cmsFindDuplicates;
+
+        /// <summary>测试用：右键菜单里那一项（没加就返回 <c>null</c>）。</summary>
+        internal ToolStripMenuItem? MenuFindDuplicates => _cmsFindDuplicates;
+
+        /// <summary>
+        /// 在右键菜单里加「找出重复项」。
+        /// <para>
+        /// **不改 Designer 生成的代码**：运行时插在「从列表移除」后面。顺序与 cmsRemove 绑着，
+        /// 找不到它（理论上不会）就追加到末尾。
+        /// </para>
+        /// </summary>
+        private void ConfigureFindDuplicatesMenu()
+        {
+            if (_cmsFindDuplicates != null) return;
+
+            _cmsFindDuplicates = new ToolStripMenuItem("找出重复项(&D)")
+            {
+                Name = "cmsFindDuplicates",
+                ToolTipText = "按完整路径找出重复项：只选中，不自动删"
+            };
+
+            _cmsFindDuplicates.Click += (s, e) => FindDuplicateItems();
+
+            var index = contextMenuPlaylist.Items.IndexOf(cmsRemove);
+
+            if (index < 0) contextMenuPlaylist.Items.Add(_cmsFindDuplicates);
+            else contextMenuPlaylist.Items.Insert(index + 1, _cmsFindDuplicates);
+        }
+
+        /// <summary>
+        /// 找出重复项：每个文件**第一次出现的那一项保留**，其余重复项只**选中**（不删）。
+        /// <para>
+        /// 筛选状态下与拖动同口径：界面行与模型索引不连续，选错了更难解释，先请用户清掉筛选。
+        /// </para>
+        /// </summary>
+        private void FindDuplicateItems()
+        {
+            if (_playlist.Count == 0)
+            {
+                SetStatus("播放列表是空的，没有重复项");
+                return;
+            }
+
+            if (_playlistFilter.Length > 0)
+            {
+                SetStatus("筛选状态下不找重复项，请先清空搜索框");
+                return;
+            }
+
+            var duplicates = PlaylistDuplicates.FindDuplicates(_playlist.GetPaths());
+
+            if (duplicates.Count == 0)
+            {
+                listViewPlaylist.SelectedIndices.Clear();
+                SetStatus("没有重复项");
+                return;
+            }
+
+            listViewPlaylist.BeginUpdate();
+
+            try
+            {
+                listViewPlaylist.SelectedIndices.Clear();
+
+                var missing = 0;
+
+                foreach (var index in duplicates)
+                {
+                    var row = FindRow(index);
+
+                    if (row == null)
+                    {
+                        missing++;
+                        continue;
+                    }
+
+                    row.Selected = true;
+                }
+
+                SetStatus($"找到 {duplicates.Count} 项重复，已选中"
+                          + (missing > 0 ? $"（{missing} 项被筛选挡住）" : string.Empty)
+                          + "；要删按 Delete（不会自动删）");
+            }
+            finally
+            {
+                listViewPlaylist.EndUpdate();
+            }
+        }
     }
 }

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -40,6 +41,23 @@ namespace 播放器.Core
         /// 不影响别的记录。</para>
         /// </summary>
         public string Rotation { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 这个文件上次选的音轨 id（libvlc 的轨道 id；<c>null</c> = 没记过）。
+        /// <para><b>只增字段</b>：老记录读出来是 <c>null</c>，不影响别的字段；
+        /// 不写空值（<see cref="JsonIgnoreCondition.WhenWritingNull"/>），老文件不会因为这个字段膨胀。</para>
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? AudioTrackId { get; set; }
+
+        /// <summary>
+        /// 这个文件上次选的字幕轨 id：<c>null</c> = 没记过；<c>-1</c> = 用户特意关掉了字幕；
+        /// 正数 = libvlc 的轨道 id。
+        /// <para><b>"没记过"和"记过关掉"必须分得开</b>：否则上次特意关掉字幕的片子，
+        /// 下次会被自动选上一条（用户会以为"我关了它又自己开了"）。</para>
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? SubtitleTrackId { get; set; }
     }
 
     /// <summary>
@@ -280,6 +298,45 @@ namespace 播放器.Core
             return rotation != ScreenRotation.None;
         }
 
+        /// <summary>
+        /// 记住某个文件上次选的音轨 / 字幕轨（字幕传 <c>-1</c> 表示"用户特意关掉了字幕"）。
+        /// <para>和 <see cref="RecordRotation"/> 一样：刻意不动 <see cref="PlaybackRecord.LastPlayedUtc"/>、
+        /// 跳过网络流（流没有稳定的"同一个文件"）。两样都传 <c>null</c> 时什么都不做。</para>
+        /// </summary>
+        public void RecordTracks(string filePath, int? audioTrackId, int? subtitleTrackId)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return;
+            if (MediaFormats.IsStreamUri(filePath)) return;
+            if (audioTrackId == null && subtitleTrackId == null) return;
+
+            if (!_records.TryGetValue(filePath, out var record))
+            {
+                record = new PlaybackRecord { FilePath = filePath };
+                _records[filePath] = record;
+            }
+
+            if (record.AudioTrackId == audioTrackId && record.SubtitleTrackId == subtitleTrackId) return;
+
+            record.AudioTrackId = audioTrackId;
+            record.SubtitleTrackId = subtitleTrackId;
+            _dirty = true;
+        }
+
+        /// <summary>取某个文件上次选的音轨 / 字幕轨；两样都没记过时返回 <c>false</c>。</summary>
+        public bool TryGetTracks(string filePath, out int? audioTrackId, out int? subtitleTrackId)
+        {
+            audioTrackId = null;
+            subtitleTrackId = null;
+
+            if (string.IsNullOrWhiteSpace(filePath)) return false;
+            if (!_records.TryGetValue(filePath, out var record)) return false;
+
+            audioTrackId = record.AudioTrackId;
+            subtitleTrackId = record.SubtitleTrackId;
+
+            return audioTrackId != null || subtitleTrackId != null;
+        }
+
         /// <summary>只清掉播放进度，保留"最近播放"。</summary>
         public void ClearPositions()
         {
@@ -310,7 +367,9 @@ namespace 播放器.Core
             {
                 if (record.AudioDelayMilliseconds == 0 &&
                     record.SubtitleDelayMilliseconds == 0 &&
-                    record.LyricsOffsetMilliseconds == 0)
+                    record.LyricsOffsetMilliseconds == 0 &&
+                    record.AudioTrackId == null &&
+                    record.SubtitleTrackId == null)
                 {
                     continue;
                 }

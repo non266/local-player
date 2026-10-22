@@ -167,6 +167,39 @@ namespace SmokeTest
                 return false;
             }
 
+            // 1.7.0 F3：音轨 / 字幕轨也按文件记；「没记过」与「记过关掉字幕」必须分得开
+            adjustments.RecordTracks(a, audioTrackId: 2, subtitleTrackId: 3);
+            adjustments.RecordTracks(b, audioTrackId: null, subtitleTrackId: -1);
+
+            var tracksA = adjustments.Get(a);
+
+            if (tracksA.AudioTrackId != 2 || tracksA.SubtitleTrackId != 3)
+            {
+                Log(8, "按文件调整：音轨 / 字幕轨没记对（A 记的是"
+                        + $" 音轨 {tracksA.AudioTrackId?.ToString() ?? "null"}"
+                        + $" / 字幕 {tracksA.SubtitleTrackId?.ToString() ?? "null"}"
+                        + "，期望 2 / 3）");
+                return false;
+            }
+
+            var tracksB = adjustments.Get(b);
+
+            if (tracksB.AudioTrackId != null || tracksB.SubtitleTrackId != -1)
+            {
+                Log(8, "按文件调整：「记过关掉字幕」被当成了「没记过」"
+                        + $"（B 现在是 音轨 {tracksB.AudioTrackId?.ToString() ?? "null"}"
+                        + $" / 字幕 {tracksB.SubtitleTrackId?.ToString() ?? "null"}，期望 null / -1）");
+                return false;
+            }
+
+            adjustments.RecordTracks(stream, audioTrackId: 1, subtitleTrackId: 2);
+
+            if (adjustments.Get(stream).AudioTrackId != null)
+            {
+                Log(8, "按文件调整：网络流也记了音轨轨（流没有稳定的「同一个文件」）");
+                return false;
+            }
+
             // ---- 改一次就该落盘：这一条要碰磁盘（用一条自己的路径，免得和别的检查打架）----
             // 这条路径只是 history.json 里的一个键，不需要真的存在文件——
             // 所以别把它挪到 smoke-tags 之类的目录下（那是第 9 步才建的，而这里在第 4 步跑）

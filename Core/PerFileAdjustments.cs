@@ -11,12 +11,16 @@ namespace 播放器.Core
             long audioDelayMilliseconds,
             long subtitleDelayMilliseconds,
             long lyricsOffsetMilliseconds,
-            ScreenRotation rotation = ScreenRotation.None)
+            ScreenRotation rotation = ScreenRotation.None,
+            int? audioTrackId = null,
+            int? subtitleTrackId = null)
         {
             AudioDelayMilliseconds = audioDelayMilliseconds;
             SubtitleDelayMilliseconds = subtitleDelayMilliseconds;
             LyricsOffsetMilliseconds = lyricsOffsetMilliseconds;
             Rotation = rotation;
+            AudioTrackId = audioTrackId;
+            SubtitleTrackId = subtitleTrackId;
         }
 
         /// <summary>音画延迟：正值 = 声音延后。</summary>
@@ -31,12 +35,20 @@ namespace 播放器.Core
         /// <summary>画面旋转 / 翻转（按文件记住；<see cref="ScreenRotation.None"/> = 没转过）。</summary>
         public ScreenRotation Rotation { get; }
 
+        /// <summary>上次选的音轨 id；<c>null</c> = 没记过。</summary>
+        public int? AudioTrackId { get; }
+
+        /// <summary>上次选的字幕轨 id；<c>null</c> = 没记过，<c>-1</c> = 特意关掉了字幕。</summary>
+        public int? SubtitleTrackId { get; }
+
         /// <summary>几样都是"没调过"。</summary>
         public bool IsEmpty =>
             AudioDelayMilliseconds == 0 &&
             SubtitleDelayMilliseconds == 0 &&
             LyricsOffsetMilliseconds == 0 &&
-            Rotation == ScreenRotation.None;
+            Rotation == ScreenRotation.None &&
+            AudioTrackId == null &&
+            SubtitleTrackId == null;
     }
 
     /// <summary>
@@ -71,8 +83,9 @@ namespace 播放器.Core
             _history.TryGetDelays(path, out var audio, out var subtitle);
             _history.TryGetLyricsOffset(path, out var offset);
             _history.TryGetRotation(path, out var rotation);
+            _history.TryGetTracks(path, out var audioTrackId, out var subtitleTrackId);
 
-            return new TrackAdjustments(audio, subtitle, offset, rotation);
+            return new TrackAdjustments(audio, subtitle, offset, rotation, audioTrackId, subtitleTrackId);
         }
 
         /// <summary>记住这个文件的音画 / 字幕延迟，并立刻落盘（一次都不许丢，见 <see cref="SaveEagerly"/>）。</summary>
@@ -101,6 +114,18 @@ namespace 播放器.Core
             if (string.IsNullOrWhiteSpace(path)) return;
 
             _history.RecordRotation(path, rotation);
+            SaveEagerly();
+        }
+
+        /// <summary>
+        /// 记住这个文件选的音轨 / 字幕轨（1.7.0 F3），并立刻落盘。
+        /// <para>字幕传 <c>-1</c> 表示"用户特意关掉了字幕"——与"没记过"（<c>null</c>）是两件事。</para>
+        /// </summary>
+        public void RecordTracks(string? path, int? audioTrackId, int? subtitleTrackId)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+
+            _history.RecordTracks(path, audioTrackId, subtitleTrackId);
             SaveEagerly();
         }
 

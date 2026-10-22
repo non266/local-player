@@ -19,6 +19,9 @@ namespace SmokeTest
             // M3 / R8：去隔行的实际画面效果（只在 播放器_TEST_INTERLACED=1 时跑，只量不判）
             RunInterlacedProbeIfRequested();
 
+            // 1.7.0 F3：按文件记住音轨 / 字幕轨（2 音轨 + 2 字幕轨的样本自己合成）
+            if (!CheckTrackMemory()) return false;
+
             var video = Environment.GetEnvironmentVariable("播放器_TEST_VIDEO");
 
             if (string.IsNullOrWhiteSpace(video) || !File.Exists(video))

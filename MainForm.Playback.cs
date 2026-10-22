@@ -102,6 +102,9 @@ namespace 播放器
                     // 记录当前文件：音画/字幕延迟要按文件记住
                     _track.SetPath(item.FilePath);
 
+                    // 1.7.0 F3：等轨道清单出来后，把这个文件上次选的音轨 / 字幕轨设回去
+                    PrepareTrackRestore(item.FilePath);
+
                     // 手动播到的这一项如果本来排着队，就从队里去掉：它已经不是"下一首"了。
                     if (_queue.Remove(item.FilePath)) item.Queued = false;
 

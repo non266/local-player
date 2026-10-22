@@ -202,6 +202,9 @@ ffmpeg 现造 640×360 / 25fps / 10 秒的隔行素材（`testsrc2` + `tinterlac
   （卸载前现采的基线，含 mtime）；随后按原选项重装 1.7.0（646 文件 / 244.7 MB）。
 - `tools\release-check.ps1` 全绿 **146 秒**（文档数字核对 + Debug / Release / 冒烟三工程
   0 警告 0 错误 + 全量 20/20）。
+- **发布**：GitHub Release `v1.7.0` 是 **Latest**；两个资产用 ASCII 名
+  （`local-player-1.7.0-setup.exe` / `local-player-1.7.0-portable.zip`），
+  服务端 `digest` 与本地 SHA256 一致，两个资产的匿名 `Range` 探测都是 **206**。
 
 ## [1.6.2] - 2026-10-19
 

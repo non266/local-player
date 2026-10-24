@@ -386,7 +386,8 @@ namespace SmokeTest
                     form.VideoMenu.Close();
                     PumpMessages(300);
 
-                    // 合成右键：视频窗口会把鼠标消息吞掉，所以这里验的是"轮询这条路走不走得通"
+                    // 双击画面 = 进 / 退全屏；但浮在画面上的「不抢焦点」窗口（桌面歌词就是这种）
+                    // 不算——那里只判矩形的话，双击歌词会顺手把播放器切进全屏。
                     var view = FindVideoView(form);
 
                     if (view != null)
@@ -396,7 +397,10 @@ namespace SmokeTest
 
                         if (Form.ActiveForm == form)
                         {
-                            Cursor.Position = view.PointToScreen(new Point(view.Width / 2, view.Height / 2));
+                            var center = view.PointToScreen(new Point(view.Width / 2, view.Height / 2));
+
+                            // ① 右键
+                            Cursor.Position = center;
                             PumpMessages(200);
 
                             mouse_event(MouseEventRightDown, 0, 0, 0, IntPtr.Zero);
@@ -412,13 +416,71 @@ namespace SmokeTest
 
                             form.VideoMenu.Close();
                             PumpMessages(300);
+
+                            // ② 真的在画面上双击：进全屏；再双击：退出来
+                            if (!form.IsScreenPointOnVideo(center))
+                            {
+                                Log(13, "双击：画面中心没有被认成画面（WindowFromPoint 那条链断了）");
+                                return false;
+                            }
+
+                            SynthesizeDoubleClick(center);
+
+                            if (!form.IsFullscreen)
+                            {
+                                Log(13, "双击：在画面上双击，没有进全屏");
+                                return false;
+                            }
+
+                            SynthesizeDoubleClick(view.PointToScreen(new Point(view.Width / 2, view.Height / 2)));
+
+                            if (form.IsFullscreen)
+                            {
+                                form.ExitFullscreen();
+                                PumpMessages(300);
+                                Log(13, "双击：在全屏里再双击一次，没有退出全屏");
+                                return false;
+                            }
                         }
                         else
                         {
-                            Log(13, "画面右键菜单：窗口没被激活，合成右键这一条跳过（菜单内容已单独验过）");
+                            Log(13, "画面右键菜单：窗口没被激活，合成右键与双击这两条跳过（菜单内容已单独验过）");
+                        }
+
+                        // ③ 浮在画面上的「不抢焦点」小窗（桌面歌词就是这种）不能被认成画面。
+                        // 这里直接判命中，不依赖前台——判据就是 1.8.0 修的那条（只判矩形会误伤）。
+                        var overlayCenter = view.PointToScreen(new Point(view.Width / 2, view.Height / 2));
+
+                        using (var overlay = new NoActivateProbe
+                               {
+                                   StartPosition = FormStartPosition.Manual,
+                                   Location = new Point(overlayCenter.X - 90, overlayCenter.Y - 50),
+                                   Size = new Size(180, 100),
+                                   ShowInTaskbar = false
+                               })
+                        {
+                            overlay.Show();
+                            PumpMessages(400);
+
+                            var overlayPoint = overlay.PointToScreen(new Point(overlay.Width / 2, overlay.Height / 2));
+                            var onTop = WindowFromPoint(overlayPoint) == overlay.Handle;
+                            var mistaken = form.IsScreenPointOnVideo(overlayPoint);
+
+                            overlay.Close();
+                            PumpMessages(200);
+
+                            if (!onTop)
+                            {
+                                Log(13, "双击：探针小窗没有浮在画面上面，浮窗命中这一条跳过");
+                            }
+                            else if (mistaken)
+                            {
+                                Log(13, "双击：浮在画面上的小窗（桌面歌词就是这种不抢焦点的窗口）被认成了画面，"
+                                        + "双击一下它就会把播放器切进全屏");
+                                return false;
+                            }
                         }
                     }
-
                     form.Close();
                     PumpMessages(300);
                 }
@@ -466,6 +528,42 @@ namespace SmokeTest
             }
 
             return null;
+        }
+
+        /// <summary>合成一次"双击"：两次按下 / 抬起，间隔落在系统的双击时间里。</summary>
+        private static void SynthesizeDoubleClick(Point screenPoint)
+        {
+            Cursor.Position = screenPoint;
+            PumpMessages(150);
+
+            for (var i = 0; i < 2; i++)
+            {
+                mouse_event(MouseEventLeftDown, 0, 0, 0, IntPtr.Zero);
+                PumpMessages(100);
+                mouse_event(MouseEventLeftUp, 0, 0, 0, IntPtr.Zero);
+                PumpMessages(120);
+            }
+
+            PumpMessages(400);
+        }
+
+        /// <summary>
+        /// 和桌面歌词一个脾气的小窗：显示与点击都不抢焦点（WS_EX_NOACTIVATE）。
+        /// 用来验"双击浮在画面上的窗口"不该被当成"双击画面"。
+        /// </summary>
+        private sealed class NoActivateProbe : Form
+        {
+            protected override bool ShowWithoutActivation => true;
+
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    var parameters = base.CreateParams;
+                    parameters.ExStyle |= 0x08000000;   // WS_EX_NOACTIVATE
+                    return parameters;
+                }
+            }
         }
     }
 }

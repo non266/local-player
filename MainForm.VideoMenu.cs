@@ -26,6 +26,12 @@ namespace 播放器
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr WindowFromPoint(Point point);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetParent(IntPtr window);
+
         /// <summary>系统的双击间隔（控制面板里能调，默认 500 ms）。</summary>
         [DllImport("user32.dll")]
         private static extern uint GetDoubleClickTime();
@@ -136,8 +142,9 @@ namespace 播放器
             if (!down && _leftButtonWasDown)
             {
                 // 没有媒体时画面那块是占位标签，它自己的双击是"打开文件"——
-                // 这里不能顺手把窗口切进全屏。
-                if (_engine.HasMedia && CursorOverVideo())
+                // 这里不能顺手把窗口切进全屏。窗口不在前台时也不动手：轮询是全局的，
+                // 在别的程序里连点两下不该把播放器切进全屏。
+                if (_engine.HasMedia && Form.ActiveForm == this && CursorOverVideo())
                 {
                     var now = Environment.TickCount64;
 
@@ -162,12 +169,34 @@ namespace 播放器
 
         private static bool IsKeyDown(int virtualKey) => (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
 
-        /// <summary>光标是不是在画面那块上（播放列表 / 侧栏 / 菜单栏上的右键不归这个菜单管）。</summary>
+        /// <summary>
+        /// 光标是不是**真的**在画面那块上：先看矩形，再问系统"这个点上是哪个窗口"，
+        /// 顺着父窗口找到最外层——必须是我们那个 <see cref="VideoView"/> 或它的子窗口（libvlc 的
+        /// 画面窗口）。只判矩形的话，浮在画面上的桌面歌词 / 侧栏悬浮窗、甚至别的程序窗口，
+        /// 都会被当成"在画面上双击"。
+        /// </summary>
         private bool CursorOverVideo()
         {
             if (!Visible || WindowState == FormWindowState.Minimized) return false;
 
-            return videoView.RectangleToScreen(videoView.ClientRectangle).Contains(Cursor.Position);
+            return IsScreenPointOnVideo(Cursor.Position);
+        }
+
+        /// <summary>测试用：这个屏幕坐标是不是落在画面（视频窗口）上。</summary>
+        internal bool IsScreenPointOnVideo(Point position)
+        {
+            if (!videoView.RectangleToScreen(videoView.ClientRectangle).Contains(position)) return false;
+
+            var window = WindowFromPoint(position);
+
+            while (window != IntPtr.Zero)
+            {
+                if (window == videoView.Handle) return true;
+
+                window = GetParent(window);
+            }
+
+            return false;
         }
 
         /// <summary>

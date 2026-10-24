@@ -155,6 +155,9 @@ namespace 播放器
 
         private bool _isFullscreen;
 
+        /// <summary>测试用：现在是不是全屏（"双击画面"那条判据要它）。</summary>
+        internal bool IsFullscreen => _isFullscreen;
+
         private bool _userSeeking;
 
         private bool _suppressSeekEvent;

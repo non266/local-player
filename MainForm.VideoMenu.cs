@@ -135,7 +135,9 @@ namespace 播放器
 
             if (!down && _leftButtonWasDown)
             {
-                if (CursorOverVideo())
+                // 没有媒体时画面那块是占位标签，它自己的双击是"打开文件"——
+                // 这里不能顺手把窗口切进全屏。
+                if (_engine.HasMedia && CursorOverVideo())
                 {
                     var now = Environment.TickCount64;
 
@@ -169,11 +171,11 @@ namespace 播放器
         }
 
         /// <summary>
-        /// 只在自己的窗口是活动窗口时动手：轮询是全局的，不然在别的程序里右键也会冒出这个菜单、
-        /// 双击也会把播放器切进全屏。
+        /// 只在自己的窗口是活动窗口、而且真的有媒体时动手：轮询是全局的，不然在别的程序里右键
+        /// 也会冒出这个菜单、双击也会把播放器切进全屏；空窗口时右键也不该弹这个（没有轨道可选）。
         /// </summary>
         private bool CanShowVideoMenu() =>
-            Form.ActiveForm == this && (_videoMenu == null || !_videoMenu.Visible);
+            _engine.HasMedia && Form.ActiveForm == this && (_videoMenu == null || !_videoMenu.Visible);
 
         /// <summary>在指定屏幕坐标弹出画面菜单（测试直接调这个，避开合成鼠标）。</summary>
         internal void ShowVideoMenu(Point screenPoint)

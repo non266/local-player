@@ -311,6 +311,10 @@ namespace SmokeTest
 
         private const uint MouseEventLeftUp = 0x0004;
 
+        private const uint MouseEventRightDown = 0x0008;
+
+        private const uint MouseEventRightUp = 0x0010;
+
         /// <summary>合成真实鼠标输入（拖动的检查必须走真实输入，否则绕过了命中测试与鼠标捕获）。</summary>
         [DllImport("user32.dll")]
         private static extern void mouse_event(uint flags, int dx, int dy, uint data, IntPtr extraInfo);

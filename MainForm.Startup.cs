@@ -81,7 +81,8 @@ namespace 播放器
 
             // ---- 字幕菜单 ----
             menuSubtitleOpen.Click += (s, e) => OpenSubtitleDialog();
-            menuSubtitleDisable.Click += (s, e) => DisableSubtitle();
+            menuSubtitleDisable.Click += (s, e) => ToggleSubtitles();
+            menuSubtitle.DropDownOpening += (s, e) => UpdateSubtitleToggleText();
 
             // ---- 视图菜单 ----
             menuViewPlaylist.CheckedChanged += OnShowPlaylistChanged;
@@ -186,11 +187,15 @@ namespace 播放器
             }
 
             // ---- 视频区交互 ----
-            videoView.DoubleClick += (s, e) => ToggleFullscreen();
+            // 双击进 / 退全屏不挂在这里：视频区域是 libvlc 的子窗口，WinForms 收不到那一下，
+            // 改成 MainForm.VideoMenu.cs 里轮询键状态（那里也管画面右键菜单）。
             lblPlaceholder.DoubleClick += (s, e) => OpenFilesDialog();
             videoView.MouseWheel += OnSurfaceMouseWheel;
             lblPlaceholder.MouseWheel += OnSurfaceMouseWheel;
             pnlTransport.MouseWheel += OnSurfaceMouseWheel;
+
+            // 画面右键菜单：全屏时菜单栏收起来了，这里要能选字幕 / 音轨
+            ConfigureVideoMenu();
 
             // ---- 引擎与模型 ----
             _engine.StateChanged += OnEngineStateChanged;

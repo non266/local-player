@@ -76,7 +76,7 @@ namespace 播放器
                     StopPlayback();
                     return true;
                 case Keys.V:
-                    DisableSubtitle();
+                    ToggleSubtitles();
                     return true;
                 case Keys.F9:
                     menuViewPlaylist.Checked = !menuViewPlaylist.Checked;

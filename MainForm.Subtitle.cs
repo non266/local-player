@@ -22,6 +22,9 @@ namespace 播放器
 
         private bool _restoringTracks;
 
+        /// <summary>上一次开着的字幕轨 id（V 关掉之后再按一次要回到它）。</summary>
+        private int? _lastSubtitleTrackId;
+
         /// <summary>换到这一首时挂起"恢复上次选的音轨 / 字幕轨"（由 <see cref="RestoreTracksForCurrentMedia"/> 消费）。</summary>
         private void PrepareTrackRestore(string? path) => _trackRestorePath = path;
 
@@ -55,12 +58,62 @@ namespace 播放器
             }
         }
 
-        /// <summary>关字幕（不记；菜单项走 <see cref="ChooseNoSubtitle"/> 才会记）。</summary>
-        private void DisableSubtitle()
+        /// <summary>
+        /// V /「字幕 → 关闭字幕」：开着就关，关着就打开上一次那条（1.8.0 修：关了之后打不开）。
+        /// <para>
+        /// 这一下**不写记忆**：它是个临时开关（"探头看一眼画面"）；要"这部片子以后都关"，
+        /// 请用「字幕轨道 → 关闭字幕」，那条才记 <c>-1</c>。
+        /// </para>
+        /// </summary>
+        internal void ToggleSubtitles()
         {
-            if (!_engine.HasMedia) return;
-            _engine.DisableSubtitle();
-            SetStatus("已关闭字幕");
+            if (!_engine.HasMedia)
+            {
+                SetStatus("请先播放一个视频，再切换字幕");
+                return;
+            }
+
+            var current = _engine.CurrentSubtitleTrack;
+
+            if (current >= 0)
+            {
+                _lastSubtitleTrackId = current;
+                _engine.DisableSubtitle();
+                SetStatus("已关闭字幕（再按 V 打开）");
+                UpdateSubtitleToggleText();
+                return;
+            }
+
+            var tracks = _engine.GetSubtitleTracks().Where(track => track.Id >= 0).ToList();
+
+            if (tracks.Count == 0)
+            {
+                SetStatus("这个视频没有字幕轨");
+                return;
+            }
+
+            var target = _lastSubtitleTrackId is int id && tracks.Any(track => track.Id == id)
+                ? id
+                : tracks[0].Id;
+
+            _engine.SetSubtitleTrack(target);
+            _lastSubtitleTrackId = target;
+            SetStatus("字幕已打开（按 V 关闭）");
+            UpdateSubtitleToggleText();
+        }
+
+        /// <summary>
+        /// 「字幕」菜单第一项的文字跟着开 / 关变。
+        /// <para>
+        /// 1.8.0 修：它原来一直写着「关闭字幕」——关掉之后这一项按下去还是"关"，用户以为坏了。
+        /// </para>
+        /// </summary>
+        internal void UpdateSubtitleToggleText()
+        {
+            if (menuSubtitleDisable == null) return;
+
+            var open = _engine.HasMedia && _engine.CurrentSubtitleTrack >= 0;
+            menuSubtitleDisable.Text = open ? "关闭字幕(&C)" : "打开字幕(&C)";
         }
 
         private void ChooseAudioTrack(int id)
@@ -77,8 +130,10 @@ namespace 播放器
             if (!_engine.HasMedia) return;
 
             _engine.SetSubtitleTrack(id);
+            if (id >= 0) _lastSubtitleTrackId = id;
             RememberTracks(chosenSubtitle: id);
             SetStatus("字幕轨：已记住（下次打开这部片子自动选回）");
+            UpdateSubtitleToggleText();
         }
 
         private void ChooseNoSubtitle()
@@ -88,6 +143,7 @@ namespace 播放器
             _engine.DisableSubtitle();
             RememberTracks(chosenSubtitle: -1);
             SetStatus("已关闭字幕；这部片子下次打开也会是关的");
+            UpdateSubtitleToggleText();
         }
 
         /// <summary>
@@ -220,68 +276,91 @@ namespace 播放器
 
             RestoreTracksForCurrentMedia();
 
-            // ---- 字幕轨道 ----
-            ClearMenuItems(menuSubtitleTracks.DropDownItems);
+            FillSubtitleTrackMenu(menuSubtitleTracks.DropDownItems);
+            FillAudioTrackMenu(menuViewAudioTrack.DropDownItems);
 
-            var currentSubtitle = _engine.HasMedia ? _engine.CurrentSubtitleTrack : -1;
-            var disableItem = new ToolStripMenuItem("关闭字幕") { Checked = currentSubtitle < 0 };
-            disableItem.Click += (s, e) => ChooseNoSubtitle();
-            menuSubtitleTracks.DropDownItems.Add(disableItem);
-
-            var subtitleTracks = _engine.HasMedia
-                ? _engine.GetSubtitleTracks()
-                : Array.Empty<LibVLCSharp.Shared.Structures.TrackDescription>();
-
-            if (subtitleTracks.Count > 0)
-            {
-                menuSubtitleTracks.DropDownItems.Add(new ToolStripSeparator());
-                foreach (var track in subtitleTracks)
-                {
-                    var id = track.Id;
-                    var item = new ToolStripMenuItem(DescribeTrack(track.Name, "字幕", id))
-                    {
-                        Checked = id == currentSubtitle,
-                        Tag = id
-                    };
-                    item.Click += (s, e) => ChooseSubtitleTrack(id);
-                    menuSubtitleTracks.DropDownItems.Add(item);
-                }
-            }
-            else
-            {
-                menuSubtitleTracks.DropDownItems.Add(new ToolStripMenuItem("（无可用字幕轨道）") { Enabled = false });
-            }
-
-            // ---- 音轨 ----
-            ClearMenuItems(menuViewAudioTrack.DropDownItems);
-
-            var currentAudio = _engine.HasMedia ? _engine.CurrentAudioTrack : -1;
-            var audioTracks = _engine.HasMedia
-                ? _engine.GetAudioTracks()
-                : Array.Empty<LibVLCSharp.Shared.Structures.TrackDescription>();
-
-            if (audioTracks.Count == 0)
-            {
-                menuViewAudioTrack.DropDownItems.Add(
-                    new ToolStripMenuItem("（无可用音轨）") { Enabled = false });
-            }
-            else
-            {
-                foreach (var track in audioTracks)
-                {
-                    var id = track.Id;
-                    var item = new ToolStripMenuItem(DescribeTrack(track.Name, "音轨", id))
-                    {
-                        Checked = id == currentAudio,
-                        Tag = id
-                    };
-                    item.Click += (s, e) => ChooseAudioTrack(id);
-                    menuViewAudioTrack.DropDownItems.Add(item);
-                }
-            }
+            UpdateSubtitleToggleText();
 
             // 章节列表同样依赖"媒体已经被解析"，和轨道一起重建
             RebuildChapterMenu();
+        }
+
+        /// <summary>
+        /// 把「字幕轨道」菜单填一遍（主菜单和画面右键菜单共用这一份，两边不会走偏）。
+        /// <para>
+        /// libvlc 的轨道清单里有一条 <c>«Disable»</c>（id = -1）：字幕这边它就是"关字幕"
+        /// （我们自己有一个），音轨那边它是"静音一切"——都不该当成可选轨道列出来
+        /// （1.8.0 修：以前它会作为一个叫 <c>Disable</c> 的项出现在列表最上面，点它像是没反应）。
+        /// </para>
+        /// </summary>
+        internal void FillSubtitleTrackMenu(ToolStripItemCollection items)
+        {
+            ClearMenuItems(items);
+
+            var current = _engine.HasMedia ? _engine.CurrentSubtitleTrack : -1;
+
+            if (current >= 0) _lastSubtitleTrackId = current;
+
+            var disableItem = new ToolStripMenuItem("关闭字幕") { Checked = current < 0 };
+            disableItem.Click += (s, e) => ChooseNoSubtitle();
+            items.Add(disableItem);
+
+            var tracks = (_engine.HasMedia
+                    ? _engine.GetSubtitleTracks()
+                    : Array.Empty<LibVLCSharp.Shared.Structures.TrackDescription>())
+                .Where(track => track.Id >= 0)
+                .ToList();
+
+            if (tracks.Count == 0)
+            {
+                items.Add(new ToolStripMenuItem("（无可用字幕轨道）") { Enabled = false });
+                return;
+            }
+
+            items.Add(new ToolStripSeparator());
+
+            foreach (var track in tracks)
+            {
+                var id = track.Id;
+                var item = new ToolStripMenuItem(DescribeTrack(track.Name, "字幕", id))
+                {
+                    Checked = id == current,
+                    Tag = id
+                };
+                item.Click += (s, e) => ChooseSubtitleTrack(id);
+                items.Add(item);
+            }
+        }
+
+        /// <summary>把「音轨」菜单填一遍（主菜单和画面右键菜单共用）。</summary>
+        internal void FillAudioTrackMenu(ToolStripItemCollection items)
+        {
+            ClearMenuItems(items);
+
+            var current = _engine.HasMedia ? _engine.CurrentAudioTrack : -1;
+            var tracks = (_engine.HasMedia
+                    ? _engine.GetAudioTracks()
+                    : Array.Empty<LibVLCSharp.Shared.Structures.TrackDescription>())
+                .Where(track => track.Id >= 0)
+                .ToList();
+
+            if (tracks.Count == 0)
+            {
+                items.Add(new ToolStripMenuItem("（无可用音轨）") { Enabled = false });
+                return;
+            }
+
+            foreach (var track in tracks)
+            {
+                var id = track.Id;
+                var item = new ToolStripMenuItem(DescribeTrack(track.Name, "音轨", id))
+                {
+                    Checked = id == current,
+                    Tag = id
+                };
+                item.Click += (s, e) => ChooseAudioTrack(id);
+                items.Add(item);
+            }
         }
 
         private static string DescribeTrack(string? name, string category, int id) =>

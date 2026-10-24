@@ -134,7 +134,7 @@ namespace 播放器
                 "    Ctrl+Shift+S     另存为 m3u 文件\n" +
                 "    Ctrl+L           从 m3u 文件追加到当前列表\n" +
                 "    Ctrl+T           加载字幕文件\n" +
-                "    V                关闭字幕\n" +
+                "    V                关闭 / 打开字幕\n" +
                 "    Ctrl+P           截取当前画面\n\n" +
                 "界面\n" +
                 "    F9               显示 / 隐藏播放列表\n" +
@@ -142,6 +142,7 @@ namespace 播放器
                 "    F11 / F          进入 / 退出全屏\n" +
                 "    Esc              退出全屏\n" +
                 "    双击画面          进入 / 退出全屏\n" +
+                "    右键画面          字幕轨道 / 音轨 / 播放控制（全屏里也能用）\n" +
                 "    Delete           从列表移除选中项\n" +
                 "    F1               显示本帮助";
 
@@ -333,6 +334,7 @@ namespace 播放器
             _uiTimer.Dispose();
             _skipTimer.Stop();
             _skipTimer.Dispose();
+            DisposeVideoMenu();
 
             _scanner.DurationFound -= OnDurationFound;
             _scanner.Dispose();

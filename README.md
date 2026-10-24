@@ -578,6 +578,8 @@ MainForm.Floating.cs   侧栏 / 播放列表脱离主窗口并吸附到主窗口
 MainForm.DesktopLyrics.cs 桌面歌词的菜单、选项、位置持久化与生命周期
 MainForm.OnlineLyrics.cs 在线歌词与封面：自动/手动获取、菜单、会话内缓存
 MainForm.Lyrics.cs     歌词时间轴偏移：菜单 / 右键菜单 / 热键、按文件记住与应用
+MainForm.Subtitle.cs   字幕与轨道：字幕文件、开 / 关字幕、音视频轨菜单（按文件记住）
+MainForm.VideoMenu.cs  画面右键菜单：字幕轨道 / 音轨 / 播放控制 / 全屏（全屏里唯一入口）
 MainForm.Tray.cs       系统托盘与单实例转发
 
 app.ico                程序图标（exe 资源；窗口与托盘图标是运行时现画的）
@@ -587,6 +589,7 @@ tools/SmokeTest/       独立冒烟试试工程，不参与主程序编译
      Program.Harness.cs    日志打印、消息泵、反射取值、等待与清理
      Program.Native.cs     Win32 互操作、鼠标键盘合成、截图比对
      Program.Fixtures.cs   合成样本（WAV / PNG / JPEG / FLAC / ID3 / MP4）
+     Program.Fixtures.Tracks.cs 多轨样本（2 音轨 + 2 字幕轨的 mkv，ffmpeg 现造）
      Program.<区域>.cs     一份装一块检查（Playback / MainForm / Tags / DesktopLyrics / Fonts / …）
      Program.MainForm.*.cs 主窗体那一组再按检查点细分（列表 / 拖动与 A-B / 队列 / 洗牌与睡眠 / 系统 / 会话 / 历史）
      FakeLrcApiServer.cs   本地假 LrcApi，端到端检查不依赖外网

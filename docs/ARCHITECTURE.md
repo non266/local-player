@@ -11,14 +11,15 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 33,052 行 / **142 个文件** |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 33,359 行 / **143 个文件** |
 | `Core/` | 11,193 行 / 64 个文件 |
 | `Ui/` | 9,790 行 / 46 个文件 |
-| `MainForm*` 这一族 partial | 11,992 行 / **31 个文件**、81 个实例字段（P1 之前是 14 个文件 / 90 个字段） |
-| `tools/SmokeTest/` | 17,492 行 / 58 个文件（拆之前是 8,900 行、**单个文件**） |
+| `MainForm*` 这一族 partial | 12,299 行 / **32 个文件**、81 个实例字段（P1 之前是 14 个文件 / 90 个字段） |
+| `tools/SmokeTest/` | 17,760 行 / 59 个文件（拆之前是 8,900 行、**单个文件**） |
 
-> 数字最后一次量是在 **2026-10-22（1.7.0：A3 + F3 + F4）**：产品侧多出
-> `PlaylistDuplicates.cs`，冒烟多出 `Program.Video.Tracks.cs` 与 `Program.MainForm.Duplicates.cs`。
+> 数字最后一次量是在 **2026-10-24（1.8.0：B7 + F10）**：产品侧多出
+> `MainForm.VideoMenu.cs`（画面右键菜单），冒烟多出 `Program.Fixtures.Tracks.cs`
+> （多轨样本从 `Program.Video.Tracks.cs` 整块搬走，让那个文件留在 469 行）。
 > 数行数用 `[IO.File]::ReadAllLines`——本机的 `Get-Content` 会把无 BOM 的 UTF-8 按 GBK 读，
 > 行数是错的（见维护手册坑表）。
 
@@ -854,16 +855,19 @@ R3 / R4 之后还剩 3 个 > 500 的冒烟文件。R7 把其中两个拆掉，�
 | `Program.OnlineLyrics.EndToEnd.cs` | 631 | **不拆**：整份是一个 631 行的方法（本地假服务器把 20 来段链路走一遍）。拆它要把方法切成几个带返回值的检查——那是**改测试结构**，不是 17.2 允许的"逐字搬迁"；按 R7 的判据**显式退役** |
 
 R7 之后（1.7.0 又给 `MainForm.Playlist` / `MainForm.Playback` / `MainForm.Startup` 加了代码，
-行数有小幅变化），**非生成文件里 > 500 行的还是 8 个**，每个都有书面理由：
+1.8.0 又给 `MainForm.Startup` / `MainForm.Subtitle` 加了代码，行数有小幅变化），
+**非生成文件里 > 500 行的还是 8 个**，每个都有书面理由：
 
 | 文件（行数） | 不拆的理由 |
 | --- | --- |
-| `MainForm.DesktopLyrics` 849 / `MainForm.Playlist` 830 / `MainForm.Playlists` 763 / `MainForm.Floating` 721 / `MainForm.Playback` 659 / `MainForm.SettingsProfiles` 543 / `MainForm.Startup` 527 | **一个文件一个功能**：再按行数切属于"为拆而拆"，切完反而要在多个文件之间来回跳才能读完一个功能 |
+| `MainForm.DesktopLyrics` 849 / `MainForm.Playlist` 830 / `MainForm.Playlists` 763 / `MainForm.Floating` 721 / `MainForm.Playback` 659 / `MainForm.SettingsProfiles` 543 / `MainForm.Startup` 532 | **一个文件一个功能**：再按行数切属于"为拆而拆"，切完反而要在多个文件之间来回跳才能读完一个功能 |
 | `Program.OnlineLyrics.EndToEnd` 631 | **单个方法**，拆它就是改测试结构（见上表） |
 | `MainForm.Designer.cs` 1,364 | 设计器生成，不手改 |
 
 （1.7.0 的新测试刻意放进了自己的文件：F3 在 `Program.Video.Tracks.cs`、
-F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.cs` 涨过 500 行。）
+F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.cs` 涨过 500 行。
+1.8.0 往第 13 步加断言之后 `Program.Video.Tracks.cs` 到了 592 行，于是把**多轨样本合成**
+整块搬到 `Program.Fixtures.Tracks.cs`（114 行），它回到 469。）
 
 判据写在这里的意思是：以后有人再问"为什么这几个不拆"，答案在这，不用重新讨论一遍。
 

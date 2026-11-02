@@ -71,6 +71,9 @@ namespace SmokeTest
                 // 关窗时"界面 → 设置"的那一段镜像，单独再摆一次状态验（它自己会还原设置）
                 if (!CheckSessionMirror()) return false;
 
+                // 1.9.0 A4：关掉「记住播放进度」之后「最近播放」不能跟着一起断
+                if (!CheckRecentPlayback()) return false;
+
                 // A1：启动恢复上次列表时不做同步磁盘查询，打不开的交给后台核对标出来
                 if (!CheckRestoreSessionOptimistic()) return false;
 

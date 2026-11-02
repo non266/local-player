@@ -150,8 +150,41 @@ namespace 播放器.Core
             if (duration > TimeSpan.Zero)
                 record.DurationSeconds = duration.TotalSeconds;
 
-            // DateTime.UtcNow 的精度可能只有十几毫秒，连续记录会撞上同一时刻，
-            // 导致"最近播放"排序不稳定。这里强制单调递增。
+            Touch(record);
+        }
+
+        /// <summary>
+        /// 记下"这个文件播过"，但<b>不碰播到哪儿</b>。
+        /// <para>
+        /// 给「记住播放进度」<b>关着</b>的时候用：那个开关的意思是"别记我播到哪儿"，
+        /// 不是"别记我听过什么"。以前两者共用一个开关，关掉之后「文件 → 最近播放」永远是空的
+        /// ——看着就像那个菜单坏了（1.9.0 修，见 docs/1.9.0计划.md 的 B8）。
+        /// </para>
+        /// <para>和 <see cref="Record"/> 一样：空路径与网络流不记。</para>
+        /// </summary>
+        public void MarkPlayed(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return;
+            if (MediaFormats.IsStreamUri(filePath)) return;
+
+            if (!_records.TryGetValue(filePath, out var record))
+            {
+                record = new PlaybackRecord { FilePath = filePath };
+                _records[filePath] = record;
+            }
+
+            Touch(record);
+        }
+
+        /// <summary>
+        /// 把"最近播过的时间"往前推一格。
+        /// <para>
+        /// <c>DateTime.UtcNow</c> 的精度可能只有十几毫秒，连续记录会撞上同一时刻，
+        /// 导致"最近播放"排序不稳定。这里强制单调递增。
+        /// </para>
+        /// </summary>
+        private void Touch(PlaybackRecord record)
+        {
             var now = DateTime.UtcNow;
             if (record.LastPlayedUtc >= now)
                 now = record.LastPlayedUtc.AddMilliseconds(1);

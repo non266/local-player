@@ -33,19 +33,27 @@ namespace 播放器
         private TimeSpan? _pendingResume;
         private int _historyFlushTicks;
 
-        /// <summary>把当前播放位置记进历史（只动内存）。由界面计时器每 200ms 调一次。</summary>
+        /// <summary>
+        /// 把当前播放位置记进历史（只动内存）。由界面计时器每 200ms 调一次。
+        /// <para>
+        /// 「记住播放进度」<b>只控制"记不记位置"</b>：关掉之后仍然记"这个文件播过"，
+        /// 否则「文件 → 最近播放」永远是空的（1.9.0 修，见 docs/1.9.0计划.md 的 A4）。
+        /// </para>
+        /// </summary>
         private void RecordCurrentPosition()
         {
-            if (!_settings.ResumePlayback) return;
             if (!_engine.HasMedia) return;
 
             var path = _engine.CurrentPath;
             if (string.IsNullOrEmpty(path)) return;
 
-            _history.Record(
-                path,
-                TimeSpan.FromMilliseconds(_engine.Time),
-                TimeSpan.FromMilliseconds(_engine.Length));
+            if (_settings.ResumePlayback)
+                _history.Record(
+                    path,
+                    TimeSpan.FromMilliseconds(_engine.Time),
+                    TimeSpan.FromMilliseconds(_engine.Length));
+            else
+                _history.MarkPlayed(path);
 
             // 定期落盘，程序被强制结束时最多丢 20 秒的进度。
             // 注意用后台写：序列化 2000 条记录是几百 KB，放在 UI 线程上会让画面周期性地顿一下。
@@ -88,11 +96,11 @@ namespace 播放器
         /// 切歌 / 暂停时把当前进度落盘。
         /// <para>写文件交给线程池（<see cref="PlaybackHistory.SaveInBackground"/>），
         /// 免得切歌时因为序列化整份历史而卡一下。</para>
+        /// <para><b>不以「记住播放进度」为前提</b>：那个开关只决定记不记位置，
+        /// 最近播放与按文件记下的调整都要落盘（1.9.0 修，以前关掉开关这里整个早退）。</para>
         /// </summary>
         private void CommitHistory()
         {
-            if (!_settings.ResumePlayback) return;
-
             RecordCurrentPosition();
             _history.SaveInBackground();
         }
@@ -102,8 +110,6 @@ namespace 播放器
         /// </summary>
         private void FlushHistory()
         {
-            if (!_settings.ResumePlayback) return;
-
             RecordCurrentPosition();
             _history.Save();
         }
@@ -135,6 +141,12 @@ namespace 播放器
         // 最近播放
         // -----------------------------------------------------------------
 
+        /// <summary>
+        /// 给冒烟测试用：按当前历史重排「最近播放」菜单（平时由下拉触发）。
+        /// <para>菜单里那串「· 位置」是否显示，取决于「记住播放进度」——这条只有靠它才验得到。</para>
+        /// </summary>
+        internal void RefreshRecentMenu() => RebuildRecentMenu();
+
         private void RebuildRecentMenu()
         {
             ClearMenuItems(menuFileRecent.DropDownItems);
@@ -161,7 +173,9 @@ namespace 播放器
                 var name = Path.GetFileName(path).Replace("&", "&&");
                 var text = i < 9 ? $"&{i + 1} {name}" : name;
 
-                if (_history.TryGetResumePosition(path, out var position))
+                // 「· 位置」只在"记住播放进度"开着时显示：关着的时候打开它也不会续播，
+                // 显示出来就是骗人（1.9.0 修，见 docs/1.9.0计划.md 的 A4）。
+                if (_settings.ResumePlayback && _history.TryGetResumePosition(path, out var position))
                     text += $"　·　{TimeFormatter.Format(position)}";
 
                 var item = new ToolStripMenuItem(text) { ToolTipText = path };

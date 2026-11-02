@@ -189,10 +189,11 @@ if (Test-Path -LiteralPath $installed)
 # ---------------------------------------------------------------- 检查
 
 Write-Host ""
-Write-Host "=== 检查「当前状态」文档（README.md / docs/介绍.md） ===" -ForegroundColor Cyan
+Write-Host "=== 检查「当前状态」文档（README.md / docs/介绍.md / docs/ARCHITECTURE.md） ===" -ForegroundColor Cyan
 
 $readme = Read-Lines "README.md"
 $intro = Read-Lines "docs\介绍.md"
+$architecture = Read-Lines "docs\ARCHITECTURE.md"
 
 Assert-Contains "README.md" $readme (".NET " + $sdkMajor + " SDK") ("环境要求里的 SDK 要跟 global.json 一致（现在是 " + $sdk + "）")
 Assert-Contains "README.md" $readme $sdk "环境要求里要写出 global.json 钉住的那个版本号"
@@ -200,6 +201,18 @@ Assert-Contains "README.md" $readme $tfm "「构建与运行」里的输出路�
 Assert-Contains "README.md" $readme $libvlc "README 里要写当前内核版本"
 Assert-Contains "docs\介绍.md" $intro $libvlc "介绍的技术栈里要写当前内核版本"
 Assert-Contains "README.md" $readme ($extensionTotal.ToString() + " 种") "「打开方式」注册的格式数要与 Core\MediaFormats.cs 一致"
+
+# 规模数字（1.9.0 起）：以前这些数只打印、不检查，于是"忘了更新"只能靠人记得。
+# 断言写的是文档里的原话片段，改文档时照抄「事实」表即可。
+$productCountText = $productSources.Count.ToString()
+$productLinesText = $productLines.ToString("N0")
+$smokeCountText = $smokeSources.Count.ToString()
+$smokeLinesText = $smokeLines.ToString("N0")
+
+Assert-Contains "docs\介绍.md" $intro ("主程序 **" + $productLinesText + " 行 / " + $productCountText + " 个文件**") ("介绍里的主程序规模要与源码一致（现在是 " + $productLinesText + " 行 / " + $productCountText + " 个文件）")
+Assert-Contains "docs\介绍.md" $intro ("测试 **" + $smokeLinesText + " 行 / " + $smokeCountText + " 个文件**") ("介绍里的测试规模要与源码一致（现在是 " + $smokeLinesText + " 行 / " + $smokeCountText + " 个文件）")
+Assert-Contains "docs\ARCHITECTURE.md" $architecture ($productLinesText + " 行 / **" + $productCountText + " 个文件**") ("ARCHITECTURE 第 1 节的规模要与源码一致（现在是 " + $productLinesText + " 行 / " + $productCountText + " 个文件）")
+Assert-Contains "docs\ARCHITECTURE.md" $architecture ($smokeLinesText + " 行 / " + $smokeCountText + " 个文件") ("ARCHITECTURE 第 1 节的冒烟规模要与源码一致（现在是 " + $smokeLinesText + " 行 / " + $smokeCountText + " 个文件）")
 
 Assert-Absent "README.md" $readme ".NET 8 SDK" ("SDK 已经换成 " + $sdkMajor + "（global.json）")
 Assert-Absent "README.md" $readme ".NET 8 Desktop Runtime" ("运行时要写 .NET " + $sdkMajor + " Desktop Runtime，或者写明发行包是自包含的")

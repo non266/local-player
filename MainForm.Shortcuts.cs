@@ -79,6 +79,13 @@ namespace 播放器
                     ToggleSubtitles();
                     return true;
                 case Keys.F9:
+                    // 音频窗口里没有播放列表那一栏：别把窗口撑开，先说明白的路
+                    if (_isAudioWindow)
+                    {
+                        SetStatus("音频窗口没有播放列表；按 Ctrl+Alt+M 切回视频窗口");
+                        return true;
+                    }
+
                     menuViewPlaylist.Checked = !menuViewPlaylist.Checked;
                     return true;
                 case Keys.F11:
@@ -119,6 +126,10 @@ namespace 播放器
                     return true;
                 case Keys.Control | Keys.D:
                     SetDesktopLyricsEnabled(!_settings.DesktopLyricsEnabled);
+                    return true;
+                // 音频 / 视频窗口：翻一下并把偏好定成翻到的那个形态（与菜单等价）
+                case Keys.Control | Keys.Alt | Keys.M:
+                    ToggleWindowMode();
                     return true;
 
                 // ---- 歌词偏移：Ctrl+] 提前、Ctrl+[ 延后（正负号与 LRC 的 [offset:] 一致）----

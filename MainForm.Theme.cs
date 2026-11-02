@@ -54,6 +54,8 @@ namespace 播放器
             playlistHost.BackColor = p.PanelBack;
 
             sidebarPanel.ApplyPalette(p);
+            // 音频窗口那张卡片（可能还没建出来）
+            _nowPlaying?.ApplyPalette(p);
             // 分离出去的悬浮窗也要跟着换配色
             ApplyThemeToFloatingWindows();
             // 桌面歌词的"跟随主题"配色取自强调色，同样要更新

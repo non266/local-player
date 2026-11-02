@@ -23,6 +23,13 @@ namespace 播放器
         {
             if (_isFullscreen) return;
 
+            // 音频窗口是一张卡片，没有"满屏画面"可言（计划里明确不做全屏封面）
+            if (_isAudioWindow)
+            {
+                SetStatus("音频窗口没有全屏；按 Ctrl+Alt+M 切回视频窗口再按 F11");
+                return;
+            }
+
             _fullscreenState = new FullscreenState
             {
                 BorderStyle = FormBorderStyle,
@@ -143,6 +150,10 @@ namespace 播放器
 
                 return;
             }
+
+            // 音频窗口里没有播放列表这一栏（菜单项是灰的，这里只是兜底）：
+            // 只记设置，不动布局——否则一按就把它从卡片里挤出来
+            if (_isAudioWindow) return;
 
             if (_isFullscreen) return;
 

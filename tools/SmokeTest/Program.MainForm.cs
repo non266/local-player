@@ -74,6 +74,9 @@ namespace SmokeTest
                 // 1.9.0 A4：关掉「记住播放进度」之后「最近播放」不能跟着一起断
                 if (!CheckRecentPlayback()) return false;
 
+                // 1.9.0 F11：音频窗口 / 视频窗口（自带窗体，不碰上面那些检查的状态）
+                if (!CheckAudioWindow()) return false;
+
                 // A1：启动恢复上次列表时不做同步磁盘查询，打不开的交给后台核对标出来
                 if (!CheckRestoreSessionOptimistic()) return false;
 

@@ -263,6 +263,31 @@ namespace 播放器.Core
 
         public bool WindowMaximized { get; set; }
 
+        /// <summary>
+        /// 窗口模式：<c>auto</c>（按文件自动切）/ <c>audio</c>（总是音频窗口）/ <c>video</c>（总是视频窗口）。
+        /// <para>
+        /// 存字符串而不是枚举：<c>JsonStringEnumConverter</c> 碰到不认识的值会让那一项读不出来，
+        /// 整份设置要进"抢救"流程；字符串 + <see cref="WindowModes.Normalize"/> 收得下任何值
+        /// （和 <see cref="Deinterlace"/> 同一套做法，见 docs/1.9.0计划.md 的 F11）。
+        /// </para>
+        /// </summary>
+        public string WindowMode
+        {
+            get => _windowMode;
+            set => _windowMode = WindowModes.Normalize(value);
+        }
+
+        private string _windowMode = WindowModes.Auto;
+
+        /// <summary>音频窗口的位置与大小；宽高为 0 表示尚未保存过。</summary>
+        public int AudioWindowX { get; set; }
+
+        public int AudioWindowY { get; set; }
+
+        public int AudioWindowWidth { get; set; }
+
+        public int AudioWindowHeight { get; set; }
+
         /// <summary>主分隔条的当前位置；0 表示尚未保存过，由程序按默认宽度推算。</summary>
         public int SplitterDistance { get; set; }
 

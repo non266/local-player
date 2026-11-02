@@ -139,6 +139,7 @@ namespace 播放器
                 "界面\n" +
                 "    F9               显示 / 隐藏播放列表\n" +
                 "    Ctrl+D           开 / 关桌面歌词\n" +
+                "    Ctrl+Alt+M       音频窗口 / 视频窗口（翻一下，并固定成那个形态）\n" +
                 "    F11 / F          进入 / 退出全屏\n" +
                 "    Esc              退出全屏\n" +
                 "    双击画面          进入 / 退出全屏\n" +
@@ -392,22 +393,34 @@ namespace 播放器
 
             if (!_isFullscreen)
             {
-                _settings.WindowMaximized = WindowState == FormWindowState.Maximized;
-
                 var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+
                 if (bounds.Width > 0 && bounds.Height > 0)
                 {
-                    _settings.WindowX = bounds.X;
-                    _settings.WindowY = bounds.Y;
-                    _settings.WindowWidth = bounds.Width;
-                    _settings.WindowHeight = bounds.Height;
+                    if (_isAudioWindow)
+                    {
+                        // 音频窗口记自己那一套；视频窗口那份原样留着（切回去还要用）
+                        _settings.AudioWindowX = bounds.X;
+                        _settings.AudioWindowY = bounds.Y;
+                        _settings.AudioWindowWidth = bounds.Width;
+                        _settings.AudioWindowHeight = bounds.Height;
+                    }
+                    else
+                    {
+                        _settings.WindowMaximized = WindowState == FormWindowState.Maximized;
+                        _settings.WindowX = bounds.X;
+                        _settings.WindowY = bounds.Y;
+                        _settings.WindowWidth = bounds.Width;
+                        _settings.WindowHeight = bounds.Height;
+                    }
                 }
 
                 try
                 {
                     // 存的是"视频宽度"，侧栏宽度单独存：
                     // 这样收起侧栏、分离再归位之后，两者的宽度都还能还原。
-                    if (!splitVideo.Panel2Collapsed)
+                    // 音频窗口里两栏是折叠的，这几项不动（否则会把视频窗口的宽度写成 0）。
+                    if (!_isAudioWindow && !splitVideo.Panel2Collapsed)
                     {
                         _settings.SplitterDistance = splitVideo.SplitterDistance;
                         _settings.SidebarWidth = SidebarDockedWidth;

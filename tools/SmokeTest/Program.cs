@@ -62,6 +62,12 @@ namespace SmokeTest
             {
                 var settings = AppSettings.Load();
                 settings.OnlineLookup = false;
+
+                // 1.9.0：窗口模式默认是"自动"（放音乐自动进音频窗口）。整套检查绝大多数
+                // 是按视频窗口的布局写的（侧栏、播放列表、全屏都在），所以这里钉成"总是视频窗口"；
+                // 音频窗口那一段（第 11 项 CheckAudioWindow）自己会切过去、验完再切回来。
+                settings.WindowMode = WindowModes.Video;
+
                 settings.Save();
             }
             catch (Exception)

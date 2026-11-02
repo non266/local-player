@@ -298,6 +298,10 @@ namespace 播放器
             _sortField = _settings.SortField;
             _sortDescending = _settings.SortDescending;
             ApplySortMenu();
+
+            // 设置方案里可能带着另一种窗口模式：界面已经在了就当场换过去
+            // （构造期间窗体还没显示，形态交给 OnLoad 的 PrepareInitialWindowShape）
+            if (IsHandleCreated && Visible) SyncWindowShape(_track.Path, force: true);
         }
 
         protected override void OnLoad(EventArgs e)
@@ -321,6 +325,9 @@ namespace 播放器
                 }
             }
 
+            // 形态要在恢复位置之前定下来：它决定用哪一套几何（WindowX… 还是 AudioWindowX…）
+            PrepareInitialWindowShape();
+
             // 此时控件尺寸（含 DPI 缩放）已经确定，再做依赖布局的恢复。
             RestoreWindowPlacement();
             ClampToWorkingArea();
@@ -336,6 +343,10 @@ namespace 播放器
             // 恢复"分离出去"的窗口。放在 OnLoad 而不是 OnShown，
             // 是为了在窗口可见之前就把控件搬走，避免闪一下停靠布局。
             RestoreFloatingWindows();
+
+            // 形态最后摆一次：音频窗口要把工具栏收起来、两栏折叠、卡片盖到画面上
+            // （OnLoad 上面那几步会按设置重新展开两栏，必须在它们之后）
+            ApplyWindowShapeLayout();
 
             // 桌面歌词是独立的置顶窗口，和主窗口的布局无关，放这里恢复即可。
             RestoreDesktopLyrics();
@@ -368,6 +379,16 @@ namespace 播放器
 
         private void RestoreWindowPlacement()
         {
+            // 音频窗口：用它自己那套几何；顺手把"视频窗口本该在哪儿"记下来，退出时回到那里
+            if (_isAudioWindow)
+            {
+                _videoBoundsBeforeAudio = ResolveVideoBounds();
+
+                StartPosition = FormStartPosition.Manual;
+                Bounds = ResolveAudioBounds();
+                return;
+            }
+
             // 没有保存过位置，或者保存的尺寸小到不合理：沿用设计尺寸并居中。
             if (_settings.WindowWidth <= 0 || _settings.WindowHeight <= 0)
             {

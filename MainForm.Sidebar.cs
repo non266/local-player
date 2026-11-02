@@ -61,6 +61,7 @@ namespace 播放器
             ConfigureQueueMenu();
             ConfigurePlaylistLibraryMenu();
             ConfigureLogMenu();
+            ConfigureWindowModeMenu();
         }
 
         private void ConfigureSidebarMenus()
@@ -127,6 +128,9 @@ namespace 播放器
                 return;
             }
 
+            // 音频窗口里没有侧栏那一栏（菜单项是灰的，这里只是兜底）
+            if (_isAudioWindow) return;
+
             if (_isFullscreen) return;
 
             splitVideo.Panel2Collapsed = !visible;
@@ -166,6 +170,9 @@ namespace 播放器
         /// </summary>
         private void ApplyPanelLayout()
         {
+            // 音频窗口里两栏都是收起的，没有"分配宽度"这回事
+            if (_isAudioWindow) return;
+
             var total = splitMain.Width;
             if (total <= 0) return;
 
@@ -207,6 +214,9 @@ namespace 播放器
         /// <summary>在视频区内部摆放侧栏：视频占左边，侧栏固定宽度靠右。</summary>
         private void ApplySidebarWidth()
         {
+            // 音频窗口里侧栏是收起的：这里再摆一次会把它重新展开
+            if (_isAudioWindow) return;
+
             if (_settings.SidebarFloating)
             {
                 if (!splitVideo.Panel2Collapsed) splitVideo.Panel2Collapsed = true;

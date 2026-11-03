@@ -14,7 +14,10 @@ namespace SmokeTest
         private static bool CheckAudioWindow()
         {
             if (!CheckWindowModeRules()) return false;
-            return CheckAudioWindowLayoutAndGeometry();
+            if (!CheckAudioWindowLayoutAndGeometry()) return false;
+
+            // 1.10.0：卡片排版（B9）、卡片里的播放控件（F12）、按真实轨道判形态（F11′）
+            return CheckAudioCardAndControls();
         }
 
         /// <summary>纯函数：三个偏好 × 几类路径，加上"认不出来的值归成 auto"。</summary>

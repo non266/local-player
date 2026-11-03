@@ -270,86 +270,22 @@ namespace 播放器.Ui
             g.FillPath(brush, path);
         }
 
-        /// <summary>按钮里的图形：自己画形状而不是用字体图标，DPI 变了也不会糊。</summary>
+        /// <summary>
+        /// 按钮里的图形：自己画形状而不是用字体图标，DPI 变了也不会糊。
+        /// <para>画法本身搬去了 <see cref="PlaybackGlyphs"/>：音频窗口卡片里那排按钮用的是同一份。</para>
+        /// </summary>
         private void DrawControlGlyph(Graphics g, LyricsControl control, Rectangle box, Color color)
         {
-            using var brush = new SolidBrush(color);
-
-            switch (control)
+            var glyph = control switch
             {
-                case LyricsControl.PlayPause when _playing:
-                    DrawPauseBars(g, brush, box);
-                    break;
+                LyricsControl.PlayPause => _playing ? PlaybackGlyph.Pause : PlaybackGlyph.Play,
+                LyricsControl.Previous => PlaybackGlyph.Previous,
+                LyricsControl.Next => PlaybackGlyph.Next,
+                LyricsControl.Stop => PlaybackGlyph.Stop,
+                _ => PlaybackGlyph.Play
+            };
 
-                case LyricsControl.PlayPause:
-                    DrawTriangle(g, brush, box, pointingRight: true);
-                    break;
-
-                case LyricsControl.Previous:
-                    DrawDoubleTriangle(g, brush, box, pointingRight: false);
-                    break;
-
-                case LyricsControl.Next:
-                    DrawDoubleTriangle(g, brush, box, pointingRight: true);
-                    break;
-
-                case LyricsControl.Stop:
-                    {
-                        var (left, top, right, bottom) = Inset(box, 0.30f);
-                        g.FillRectangle(brush, left, top, right - left, bottom - top);
-                        break;
-                    }
-            }
-        }
-
-        private void DrawTriangle(Graphics g, Brush brush, Rectangle box, bool pointingRight)
-        {
-            var (left, top, right, bottom) = Inset(box, 0.28f);
-            var middle = (top + bottom) / 2f;
-
-            g.FillPolygon(brush, pointingRight
-                ? new[] { new PointF(left, top), new PointF(right, middle), new PointF(left, bottom) }
-                : new[] { new PointF(right, top), new PointF(left, middle), new PointF(right, bottom) });
-        }
-
-        private void DrawPauseBars(Graphics g, Brush brush, Rectangle box)
-        {
-            var (left, top, right, bottom) = Inset(box, 0.30f);
-
-            var width = (right - left);
-            var bar = width * 0.34f;
-            var gap = width * 0.32f;
-
-            g.FillRectangle(brush, left, top, bar, bottom - top);
-            g.FillRectangle(brush, left + bar + gap, top, bar, bottom - top);
-        }
-
-        /// <summary>上一首 / 下一首的"双三角"（和播放键同一个三角，画两个）。</summary>
-        private void DrawDoubleTriangle(Graphics g, Brush brush, Rectangle box, bool pointingRight)
-        {
-            var (left, top, right, bottom) = Inset(box, 0.26f);
-            var middle = (top + bottom) / 2f;
-
-            var half = (right - left) / 2f;
-            var gap = half * 0.16f;
-
-            for (var i = 0; i < 2; i++)
-            {
-                var start = left + i * (half + gap);
-                var tip = start + half - gap;
-
-                g.FillPolygon(brush, pointingRight
-                    ? new[] { new PointF(start, top), new PointF(tip, middle), new PointF(start, bottom) }
-                    : new[] { new PointF(tip, top), new PointF(start, middle), new PointF(tip, bottom) });
-            }
-        }
-
-        private static (float Left, float Top, float Right, float Bottom) Inset(Rectangle box, float ratio)
-        {
-            var dx = box.Width * ratio;
-            var dy = box.Height * ratio;
-
-            return (box.Left + dx, box.Top + dy, box.Right - dx, box.Bottom - dy);
+            PlaybackGlyphs.Draw(g, glyph, box, color);
         }
     }
 }

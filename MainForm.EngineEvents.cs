@@ -125,6 +125,10 @@ namespace 播放器
 
             // 轨道变了（换片、字幕加载）"有没有视频轨"也可能变了
             RefreshRotationMenu();
+
+            // 1.10.0 F11′：轨道清单出来了，按**真实轨道**纠正一次窗口形态
+            // （扩展名只是解析之前的猜测；只有音轨的 mkv 就是靠这里才切进音频窗口的）
+            SyncWindowShapeFromTracks();
         }
 
         private void OnShuffleChanged(object? sender, EventArgs e)

@@ -104,7 +104,44 @@ namespace 播放器.Ui
                 return;
             }
 
-            // 封面先占一个正方形，剩下的高度留给文字
+            var layout = MeasureLayout();
+
+            DrawCover(g, layout.Square);
+
+            if (layout.TextHeight > 0)
+            {
+                DrawTextBlock(
+                    g,
+                    new Rectangle(
+                        padding,
+                        layout.Square.Bottom + (int)Math.Round(10 * DpiScale),
+                        available,
+                        layout.TextHeight));
+            }
+        }
+
+        /// <summary>
+        /// 封面现在画在哪（按当前 <c>ClientSize</c> 现算）。
+        /// <para>给冒烟测试用：音频窗口那张卡片要断言"封面在卡片里水平居中"，
+        /// 靠它比靠像素比色稳。</para>
+        /// </summary>
+        internal Rectangle CoverRectangle
+        {
+            get
+            {
+                var padding = (int)Math.Round(12 * DpiScale);
+                if (ClientSize.Width - padding * 2 <= 8) return Rectangle.Empty;
+
+                return MeasureLayout().Square;
+            }
+        }
+
+        /// <summary>封面方框与文字块高度：封面先占一个正方形，剩下的高度留给文字。</summary>
+        private (Rectangle Square, int TextHeight) MeasureLayout()
+        {
+            var padding = (int)Math.Round(12 * DpiScale);
+            var available = ClientSize.Width - padding * 2;
+
             var textHeight = MeasureTextBlock(available);
             var maxSquare = ClientSize.Height - padding * 2 - textHeight - (int)Math.Round(10 * DpiScale);
             var side = Math.Max(0, Math.Min(available, maxSquare));
@@ -122,10 +159,7 @@ namespace 播放器.Ui
                 side,
                 side);
 
-            DrawCover(g, square);
-
-            if (textHeight > 0)
-                DrawTextBlock(g, new Rectangle(padding, square.Bottom + (int)Math.Round(10 * DpiScale), available, textHeight));
+            return (square, textHeight);
         }
 
         private void DrawCover(Graphics g, Rectangle square)

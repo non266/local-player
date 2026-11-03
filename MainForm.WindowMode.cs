@@ -154,9 +154,11 @@ namespace 播放器
         // =====================================================================
 
         /// <summary>
-        /// 按当前偏好与文件决定要不要换形态。
+        /// 按当前偏好、文件与**真实轨道**决定要不要换形态。
         /// <para><paramref name="path"/> 为 <c>null</c> 且偏好是"自动"时什么都不做：
         /// 没有媒体可判，不猜（否则一按停止，窗口就自己从卡片跳回大窗口）。</para>
+        /// <para>真实轨道只在"这份媒体的轨道真的解析出来了"时才拿来判（<see cref="PlayerEngine.HasVideoTrackFor"/>），
+        /// 否则退回扩展名——刚打开的那一瞬间 <c>media.Tracks</c> 还是空的，不能拿它当"没有视频"。</para>
         /// </summary>
         private void SyncWindowShape(string? path, bool force = false)
         {
@@ -165,7 +167,29 @@ namespace 播放器
             var mode = WindowModes.Normalize(_settings.WindowMode);
             if (path == null && !force && mode == WindowModes.Auto) return;
 
-            if (WindowModes.Resolve(mode, path) == WindowShape.Audio) EnterAudioWindow();
+            var realVideo = _engine.HasVideoTrackFor(path);
+
+            if (WindowModes.Resolve(mode, path, realVideo) == WindowShape.Audio) EnterAudioWindow();
+            else ExitAudioWindow();
+        }
+
+        /// <summary>
+        /// 轨道清单刚出来（或变了）时按**真实轨道**纠正一次形态。
+        /// <para>只纠正"自动"模式：手动固定成音频 / 视频窗口是用户的明确选择，轨道不推翻它。</para>
+        /// <para>形态本来就对就什么都不做——正常文件（扩展名已经猜对）不会有任何窗口跳动，
+        /// 只有"只有音轨的 mkv"这类扩展名猜错的情况才会缩一次（见 docs/1.10.0计划.md 的 F11′）。</para>
+        /// </summary>
+        private void SyncWindowShapeFromTracks()
+        {
+            if (_isFullscreen) return;
+            if (!_engine.HasMedia) return;
+            if (WindowModes.Normalize(_settings.WindowMode) != WindowModes.Auto) return;
+
+            if (!_engine.TryGetHasVideoTrack(out var hasVideo)) return;
+
+            var wanted = hasVideo ? WindowShape.Video : WindowShape.Audio;
+
+            if (wanted == WindowShape.Audio) EnterAudioWindow();
             else ExitAudioWindow();
         }
 
@@ -263,21 +287,59 @@ namespace 播放器
 
             UpdateWindowModeGating();
 
-            // 卡片是新建的（或刚显示），把当时的配色补一次
+            // 卡片是新建的（或刚显示），把当时的配色与状态补一次，再按当前面板尺寸摆好
             _nowPlaying.ApplyPalette(_palette);
+            _nowPlaying.SetTransportState(_engine.HasMedia, _engine.IsPlaying, _playlist.Count > 0);
+            LayoutAudioCard();
+        }
+
+        /// <summary>
+        /// 把卡片摆成"视频面板去掉传输条"的矩形，并让卡片内部重排一次。
+        /// <para>1.9.0 的封面错位就是少了这一步：卡片与卡片里的 <c>CoverView</c> 只在创建时量过尺寸
+        /// （那时窗体还是设计尺寸 1152），之后窗口缩小不会重排，封面按旧宽度居中、被窗口边缘裁掉。
+        /// 现在卡片不参加 Dock 布局，尺寸由这里显式给，窗口每次缩放都重算（见 docs/1.10.0计划.md 的 B9）。</para>
+        /// </summary>
+        private void LayoutAudioCard()
+        {
+            if (!_isAudioWindow || _nowPlaying == null) return;
+
+            var panel = splitVideo.Panel1;
+            var width = panel.ClientSize.Width;
+            var height = panel.ClientSize.Height - pnlTransport.Height;
+            if (width <= 0 || height <= 0) return;
+
+            var bounds = new Rectangle(0, 0, width, Math.Max(0, height));
+            if (_nowPlaying.Bounds != bounds) _nowPlaying.Bounds = bounds;
+
+            _nowPlaying.PerformLayout();
+        }
+
+        /// <summary>音频窗口里窗口尺寸变了（拖边 / DPI 变化 / 最大化）：卡片要跟着重排。</summary>
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+
+            if (_isAudioWindow) LayoutAudioCard();
         }
 
         private void EnsureNowPlayingView()
         {
             if (_nowPlaying != null) return;
 
-            _nowPlaying = new NowPlayingView { Dock = DockStyle.Fill, Visible = false };
+            // 刻意不用 Dock=Fill：尺寸由 LayoutAudioCard() 显式给，避免"隐藏期间排一次、之后不再重排"
+            _nowPlaying = new NowPlayingView { Visible = false };
 
             splitVideo.Panel1.Controls.Add(_nowPlaying);
 
-            // 插在画面之上、占位标签之下：停靠按"列表倒序"处理，
-            // 这样它会填满传输条以上的区域，又不会盖住空闲时的拖放提示。
+            // 盖在画面之上、占位标签之下：占位标签是最前面那个（DragDrop 提示），别把它挡住
             splitVideo.Panel1.Controls.SetChildIndex(_nowPlaying, 1);
+
+            // 卡片里的控件条接到主窗体现成的动作上（和工具栏、托盘、桌面歌词同一个入口）
+            var transport = _nowPlaying.Transport;
+            transport.PlayPauseRequested += (s, e) => TogglePlayPause();
+            transport.PreviousRequested += (s, e) => PlayPrevious();
+            transport.NextRequested += (s, e) => PlayNext(true);
+            transport.StopRequested += (s, e) => StopPlayback();
 
             _nowPlaying.ShowTrack(_track.Path, _track.Tags);
             _nowPlaying.ApplyPalette(_palette);

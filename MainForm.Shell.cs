@@ -43,6 +43,13 @@ namespace 播放器
             lblStatus.Text = text;
         }
 
+        /// <summary>
+        /// 冒烟用：按当前状态重刷一次传输条与卡片（占位提示的显示也跟着它走）。
+        /// <para>和 <c>RefreshRecentMenu</c> 同一类入口：有些分支（例如"停止之后没有媒体"）
+        /// 只有状态变化才会跑到，测试里不好等。</para>
+        /// </summary>
+        internal void RefreshTransportState() => UpdateTransportState();
+
         private void UpdateTransportState()
         {
             var hasMedia = _engine.HasMedia;
@@ -68,7 +75,8 @@ namespace 播放器
             menuSubtitleDisable.Enabled = hasMedia;
 
             // 视频控件始终可见（保证 HWND 存在），空闲时用占位标签盖住它。
-            lblPlaceholder.Visible = !hasMedia;
+            // 音频窗口里那块位置是卡片，不能再用"拖文件到这里"的大字盖上去。
+            lblPlaceholder.Visible = !hasMedia && !_isAudioWindow;
 
             if (!hasMedia)
             {
@@ -96,6 +104,10 @@ namespace 播放器
 
             // 「下一首播放」那两项跟着"列表空不空 / 队列空不空"走，同理。
             RefreshQueueMenu();
+
+            // 音频窗口卡片里那排播放控件：可用状态与播放 / 暂停图标都从这里推，
+            // 免得工具栏、托盘、卡片三处各算一套（见 docs/1.10.0计划.md 的 F12）。
+            _nowPlaying?.SetTransportState(hasMedia, isPlaying, hasItems);
         }
 
         private void UpdateWindowTitle()

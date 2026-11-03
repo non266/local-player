@@ -68,21 +68,32 @@ namespace 播放器.Core
         }
 
         /// <summary>
-        /// 按偏好与当前文件决定该用哪种窗口。
+        /// 按偏好、当前文件与**真实轨道**决定该用哪种窗口。
         /// <para>
-        /// <b>只看扩展名，不看引擎里有没有视频轨</b>：真实轨道要等 libvlc 解析（打开后 0.3～2 秒），
-        /// 那会让窗口先出来再"变形"，比按扩展名判更糟（见 docs/1.9.0计划.md 的 F11 风险一条）。
+        /// 判定顺序：手动固定（总是音频 / 总是视频）最高 → 真实轨道已知就按它 →
+        /// 还不知道就退回扩展名 → 连扩展名都没有（串流 / 空路径）按视频窗口。
         /// </para>
-        /// <para><c>null</c> / 串流 / 不认识的扩展名都算视频窗口：没东西可判的时候不猜。</para>
+        /// <para>
+        /// <paramref name="hasVideoTrack"/> 为 <c>null</c> 表示"轨道清单还没解析出来"（刚打开的那一瞬间）。
+        /// 真实轨道比扩展名可靠：只有音轨的 <c>.mkv</c>、扩展名是音频却真的带视频轨的文件都靠它纠正；
+        /// 扩展名只当解析出来之前的临时猜测（见 docs/1.10.0计划.md 的 F11′）。
+        /// </para>
+        /// <para>纯函数，不碰引擎、不碰窗体。</para>
         /// </summary>
-        public static WindowShape Resolve(string? preference, string? path)
+        public static WindowShape Resolve(string? preference, string? path, bool? hasVideoTrack)
         {
             var mode = Normalize(preference);
 
             if (mode == Audio) return WindowShape.Audio;
             if (mode == Video) return WindowShape.Video;
 
+            if (hasVideoTrack.HasValue)
+                return hasVideoTrack.Value ? WindowShape.Video : WindowShape.Audio;
+
             return MediaFormats.IsAudioFile(path) ? WindowShape.Audio : WindowShape.Video;
         }
+
+        /// <summary>只看扩展名的旧判定（保留给"轨道还没出来"的调用点与测试）。</summary>
+        public static WindowShape Resolve(string? preference, string? path) => Resolve(preference, path, null);
     }
 }

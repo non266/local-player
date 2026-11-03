@@ -125,6 +125,46 @@ namespace 播放器.Core
             catch (Exception) { return false; }
         }
 
+        /// <summary>
+        /// 轨道清单解析出来了吗；解析出来了，<paramref name="hasVideo"/> 才是"真实"的结论。
+        /// <para>
+        /// 刚打开媒体的那一瞬间 <c>GetTracks()</c> 是空的，这时不能拿"没有视频轨"当结论——
+        /// 窗口形态那套判定要的正是"知道才判、不知道就先用扩展名猜"（见 window modes）。
+        /// </para>
+        /// </summary>
+        public bool TryGetHasVideoTrack(out bool hasVideo)
+        {
+            hasVideo = false;
+
+            var tracks = GetTracks();
+            if (tracks.Count == 0) return false;
+
+            foreach (var track in tracks)
+            {
+                if (track.TrackType != TrackType.Video) continue;
+
+                hasVideo = true;
+                return true;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 这个文件的真实轨道结论；<paramref name="path"/> 与当前媒体不一致、或轨道还没出来时返回 <c>null</c>。
+        /// <para>
+        /// 比对路径是必须的：<c>Open()</c> 之后 libvlc 解析有延迟，中间那几拍 <c>media.Tracks</c>
+        /// 可能还是空的、甚至还没来得及换成新媒体的——拿上一首的轨道去决定窗口形态会切错。
+        /// </para>
+        /// </summary>
+        public bool? HasVideoTrackFor(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            if (!string.Equals(_currentPath, path, StringComparison.OrdinalIgnoreCase)) return null;
+
+            return TryGetHasVideoTrack(out var hasVideo) ? hasVideo : null;
+        }
+
         private MediaTrack? FindVideoTrack()
         {
             try

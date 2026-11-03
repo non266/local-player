@@ -22,6 +22,10 @@ namespace 播放器
 
             UpdateProgress();
 
+            // 音频窗口里顺手对一下卡片尺寸：事件顺序不可控（启动就播、最大化后还原、换 DPI），
+            // 尺寸已经对的时候这里只做一次比较（见 docs/1.10.0计划.md 的 B9）
+            HealAudioCardLayout();
+
             // 睡眠定时器到点就在这里停：用现成的 200 ms 计时器，不另起一个（见 MainForm.SleepTimer.cs）。
             CheckSleepTimer();
         }

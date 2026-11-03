@@ -83,12 +83,30 @@ namespace SmokeTest
                     }
 
                     var splitVideo = Find(form, "splitVideo") as SplitContainer;
+                    var splitMain = Find(form, "splitMain") as SplitContainer;
                     var transport = Find(form, "pnlTransport");
                     var card = FindByTypeName(form, "NowPlayingView");
 
-                    if (splitVideo == null || transport == null || card == null)
+                    if (splitVideo == null || splitMain == null || transport == null || card == null)
                     {
-                        Log(11, "音频窗口卡片：找不到视频面板 / 传输条 / 卡片");
+                        Log(11, "音频窗口卡片：找不到 splitMain / splitVideo / 传输条 / 卡片");
+                        return false;
+                    }
+
+                    // ★ 根因（1.10.0 第二次修）：`Panel2Collapsed = true` 的 SplitContainer 不随容器变窄
+                    // 重算 Panel1 的宽度——实测窗口 581 宽时 Panel1 仍是 1171，卡片于是按 1171 排版、
+                    // 被窗口右边缘裁掉（所有者第二次截图）。这里把这条不变式钉住。
+                    if (splitMain.Panel1.Width != splitMain.Width)
+                    {
+                        Log(11, "音频窗口：折叠播放列表之后，splitMain 的 Panel1 还是旧宽度"
+                                + $"（Panel1 宽 {splitMain.Panel1.Width}，splitMain 宽 {splitMain.Width}）");
+                        return false;
+                    }
+
+                    if (splitVideo.Width != splitMain.Width)
+                    {
+                        Log(11, "音频窗口：视频区的宽度没有跟上窗口"
+                                + $"（splitVideo 宽 {splitVideo.Width}，splitMain 宽 {splitMain.Width}）");
                         return false;
                     }
 
@@ -135,6 +153,28 @@ namespace SmokeTest
 
                         // 位图兜底：卡片正中间那一列应该有画面，最左边 4 像素应该是背景
                         if (!CheckCardPixels(card, square)) return false;
+                    }
+
+                    // ★ 窗口在**显示之后**改变尺寸（拖边、最大化后还原、DPI 变化）：
+                    // 卡片自己不会跟着动（它不参加 Dock 布局），必须由面板的尺寸变化触发重排。
+                    // 1.9.0 的 bug 与"只在 OnResize 里排"的半吊子修法都会在这里露出来。
+                    var beforeWidth = card.Width;
+                    form.Size = new Size(form.Width - 60, form.Height - 40);
+                    PumpMessages(500);
+
+                    if (card.Width != splitVideo.Panel1.ClientSize.Width || card.Bottom != transport.Top)
+                    {
+                        Log(11, "音频窗口：窗口在显示之后变了尺寸，卡片没有跟着重排"
+                                + $"（卡片 {card.Bounds}，面板宽 {splitVideo.Panel1.ClientSize.Width}，"
+                                + $"传输条上沿 {transport.Top}，改动前卡片宽 {beforeWidth}）");
+                        return false;
+                    }
+
+                    if (cover.Width != card.ClientSize.Width)
+                    {
+                        Log(11, "音频窗口：窗口在显示之后变了尺寸，卡片里的封面没有跟着重排"
+                                + $"（封面宽 {cover.Width}，卡片宽 {card.ClientSize.Width}）");
+                        return false;
                     }
 
                     var placeholder = Find(form, "lblPlaceholder");

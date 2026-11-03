@@ -298,10 +298,23 @@ namespace 播放器
         /// <para>1.9.0 的封面错位就是少了这一步：卡片与卡片里的 <c>CoverView</c> 只在创建时量过尺寸
         /// （那时窗体还是设计尺寸 1152），之后窗口缩小不会重排，封面按旧宽度居中、被窗口边缘裁掉。
         /// 现在卡片不参加 Dock 布局，尺寸由这里显式给，窗口每次缩放都重算（见 docs/1.10.0计划.md 的 B9）。</para>
+        /// <para><b>为什么还要"面板自己的 SizeChanged + 每拍自愈"两道保险</b>：窗体 <c>OnResize</c> 触发时，
+        /// <c>SplitContainer</c> 的子面板可能还没换上新的尺寸（它的布局在窗体布局之后才跑），那一下算出来的
+        /// 仍是旧宽度；真实机上"启动就播音乐"正好撞上这个顺序（1.10.0 第一次修就是只挂了 OnResize，
+        /// 所有者截图里卡片还是 1152 宽）。所以真正可靠的是**面板自己的 SizeChanged**，
+        /// 再加界面计时器每 200 ms 对比一次兜底——事件顺序怎么变都不会留下错位的封面。</para>
         /// </summary>
         private void LayoutAudioCard()
         {
             if (!_isAudioWindow || _nowPlaying == null) return;
+
+            // 折叠状态下 SplitContainer 不随容器变窄重算 Panel1（实测 Width=581 时 Panel1 仍是 1171）：
+            // 折叠切换一次逼它按当前宽度重排
+            if (splitMain.Panel2Collapsed && splitMain.Panel1.Width != splitMain.Width)
+            {
+                splitMain.Panel2Collapsed = false;
+                splitMain.Panel2Collapsed = true;
+            }
 
             var panel = splitVideo.Panel1;
             var width = panel.ClientSize.Width;
@@ -312,6 +325,12 @@ namespace 播放器
             if (_nowPlaying.Bounds != bounds) _nowPlaying.Bounds = bounds;
 
             _nowPlaying.PerformLayout();
+        }
+
+        /// <summary>界面计时器每 200ms 顺手对一次卡片尺寸（兜底，尺寸对的时候只做一次比较）。</summary>
+        private void HealAudioCardLayout()
+        {
+            if (_isAudioWindow) LayoutAudioCard();
         }
 
         /// <summary>音频窗口里窗口尺寸变了（拖边 / DPI 变化 / 最大化）：卡片要跟着重排。</summary>
@@ -333,6 +352,13 @@ namespace 播放器
 
             // 盖在画面之上、占位标签之下：占位标签是最前面那个（DragDrop 提示），别把它挡住
             splitVideo.Panel1.Controls.SetChildIndex(_nowPlaying, 1);
+
+            // ★ 真正可靠的触发点：面板自己的尺寸变了（它在窗体布局之后才换尺寸，
+            //   挂窗体 OnResize 时读到的可能还是旧宽度）
+            splitVideo.Panel1.SizeChanged += (s, e) =>
+            {
+                if (_isAudioWindow) LayoutAudioCard();
+            };
 
             // 卡片里的控件条接到主窗体现成的动作上（和工具栏、托盘、桌面歌词同一个入口）
             var transport = _nowPlaying.Transport;

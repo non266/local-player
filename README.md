@@ -793,7 +793,7 @@ dotnet SmokeTest.dll
 $env:播放器_TEST_INTERLACED = "1"
 dotnet SmokeTest.dll 视频功能与逐帧
 
-# 只想验某一块时按名字筛（全量一次两分半上下，实测 136～195 秒；筛选只要十几秒）：
+# 只想验某一块时按名字筛（全量一次三分多钟，实测 167～203 秒（干净树重建后那次 203 秒）；筛选只要十几秒）：
 dotnet SmokeTest.dll 桌面歌词      # 第 9 步（样本）+ 第 15 步：桌面歌词与歌词字体
 dotnet SmokeTest.dll 逐帧          # 只跑视频功能那一步（需要 播放器_TEST_VIDEO）
 dotnet SmokeTest.dll 侧栏          # 第 9 步 + 第 11 步

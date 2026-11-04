@@ -56,7 +56,9 @@
   - `光盘真盘检查正常：DVD 光盘 (L:) 开播成功，总时长 00:23:49`（环境变量 `播放器_TEST_DISC=L:`；不设就打印原因跳过）
   - `全屏进度条正常：进全屏就出现、贴底居中且不超屏、滑块跟着时间走、拖到中间松手会跳过去、空闲会收起再动又回来、不抢前台、退出全屏就放掉`
   - `任务栏缩略图按钮正常：窗口显示后才挂上 4 个（含停止），窗口没显示时一次都没注册，点播放 / 暂停与停止都能作用到引擎，没媒体时播放 / 停止置灰、上一个 / 下一个跟着列表走`
-- 全量 **21/21、17 步、167 秒**。
+- 全量 **21/21、17 步**：一次 167 秒，干净树重建后那次 **203 秒**。
+  中间有一次在冷构建刚结束、机器很忙时红在既有的「进度条拖动」检查（`按住拖到进度条外面之后不跟手了`），
+  隔一会儿复跑即绿——属于维护手册 R2 记过的那类时序抖动，不是这一版的回归。
 - 变异十条（各自变红后还原，下面是实测抓下来的原话）：
   1. 判定不认 `VIDEO_TS` → `光盘：有 VIDEO_TS 的盘 没有被判成 DvdVideo（判成了 Data）`
   2. DVD 的 MRL 返回盘符路径 → `光盘：DVD 的 MRL 不是 dvdsimple:///L:（拼出来的是「L:\」）`
@@ -673,7 +675,8 @@ ffmpeg 现造 640×360 / 25fps / 10 秒的隔行素材（`testsrc2` + `tinterlac
 | 文件 | 改动 |
 | --- | --- |
 | `播放器.csproj` | TFM 改 net10（版本号与三个包引用不动） |
-| `tools/SmokeTest/SmokeTest.csproj` | TFM + 写死的 `bin\Debug\net8.0-…` 路径（`OutputPath` + 3 个 `HintPath`） |
+| `tools/SmokeTest/SmokeTest.csproj` | TFM + 写死的 `bin\Debug
+et8.0-…` 路径（`OutputPath` + 3 个 `HintPath`） |
 | `tools/IconGen/IconGen.csproj` | TFM 改 `net10.0-windows` |
 | `tools/release-check.ps1` | 冒烟输出目录同步改（顺带补回被编辑器剥掉的 UTF-8 BOM，否则 PowerShell 5.1 按 GBK 读会解析失败） |
 | `global.json`（新增） | SDK 钉 `10.0.402` |

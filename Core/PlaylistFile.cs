@@ -40,7 +40,7 @@ namespace 播放器.Core
 
             foreach (var item in items)
             {
-                if (item.IsStream)
+                if (item.IsLocation)
                 {
                     builder.AppendLine("#EXTINF:-1," + item.DisplayName);
                     builder.AppendLine(item.FilePath);
@@ -106,7 +106,7 @@ namespace 播放器.Core
                 if (line.Length == 0) continue;
                 if (line.StartsWith("#", StringComparison.Ordinal)) continue;
 
-                if (MediaFormats.IsStreamUri(line))
+                if (MediaFormats.IsLocationUri(line))
                 {
                     result.Add(line);
                     continue;

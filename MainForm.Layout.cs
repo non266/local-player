@@ -65,6 +65,9 @@ namespace 播放器
             // 显式再提一次，且不激活自己——否则视频刚播起来就被抢走焦点。
             _desktopLyrics?.BringToTop();
 
+            // 1.11.0 F14：进全屏先把进度条亮一次，用户才知道"鼠标一动底下有东西"。
+            ShowFullscreenBar();
+
             SetStatus("已进入全屏，按 Esc 或 F11 退出");
         }
 
@@ -75,6 +78,9 @@ namespace 播放器
             _isFullscreen = false;
             var state = _fullscreenState;
             _fullscreenState = null;
+
+            // 进度条是独立窗口：退出全屏就整个放掉，别让它留一条置顶的条在桌面上。
+            DisposeFullscreenBar();
 
             WindowState = FormWindowState.Normal;
 

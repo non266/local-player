@@ -62,6 +62,10 @@ namespace 播放器
                 ? TimeFormatter.FormatWithHours(TimeSpan.FromMilliseconds(length))
                 : "--:--:--";
 
+            // 全屏时那条浮在画面底部的进度条（1.11.0 F14）跟这里同步：
+            // 同一次算出来的时间与长度，不另起一套计时。
+            if (_isFullscreen) UpdateFullscreenBar(time, length);
+
             RecordCurrentPosition();
             UpdateLyricsPosition();
         }

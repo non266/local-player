@@ -138,7 +138,9 @@ namespace 播放器.Core
             if (string.IsNullOrWhiteSpace(filePath)) return;
 
             // 网络流没有稳定标识，记了也没意义。
-            if (MediaFormats.IsStreamUri(filePath)) return;
+            // 网络流与光盘都没有"同一个文件"这回事（换个盘还是同一个盘符），
+            // 记了只会把别的盘的位置套到这张盘上。
+            if (MediaFormats.IsLocationUri(filePath)) return;
 
             if (!_records.TryGetValue(filePath, out var record))
             {
@@ -165,7 +167,9 @@ namespace 播放器.Core
         public void MarkPlayed(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return;
-            if (MediaFormats.IsStreamUri(filePath)) return;
+            // 网络流与光盘都没有"同一个文件"这回事（换个盘还是同一个盘符），
+            // 记了只会把别的盘的位置套到这张盘上。
+            if (MediaFormats.IsLocationUri(filePath)) return;
 
             if (!_records.TryGetValue(filePath, out var record))
             {
@@ -229,7 +233,9 @@ namespace 播放器.Core
         public void RecordDelays(string filePath, long audioDelayMilliseconds, long subtitleDelayMilliseconds)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return;
-            if (MediaFormats.IsStreamUri(filePath)) return;
+            // 网络流与光盘都没有"同一个文件"这回事（换个盘还是同一个盘符），
+            // 记了只会把别的盘的位置套到这张盘上。
+            if (MediaFormats.IsLocationUri(filePath)) return;
 
             if (!_records.TryGetValue(filePath, out var record))
             {
@@ -270,7 +276,9 @@ namespace 播放器.Core
         public void RecordLyricsOffset(string filePath, long milliseconds)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return;
-            if (MediaFormats.IsStreamUri(filePath)) return;
+            // 网络流与光盘都没有"同一个文件"这回事（换个盘还是同一个盘符），
+            // 记了只会把别的盘的位置套到这张盘上。
+            if (MediaFormats.IsLocationUri(filePath)) return;
 
             if (!_records.TryGetValue(filePath, out var record))
             {
@@ -304,7 +312,9 @@ namespace 播放器.Core
         public void RecordRotation(string filePath, ScreenRotation rotation)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return;
-            if (MediaFormats.IsStreamUri(filePath)) return;
+            // 网络流与光盘都没有"同一个文件"这回事（换个盘还是同一个盘符），
+            // 记了只会把别的盘的位置套到这张盘上。
+            if (MediaFormats.IsLocationUri(filePath)) return;
 
             if (!_records.TryGetValue(filePath, out var record))
             {
@@ -339,7 +349,9 @@ namespace 播放器.Core
         public void RecordTracks(string filePath, int? audioTrackId, int? subtitleTrackId)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return;
-            if (MediaFormats.IsStreamUri(filePath)) return;
+            // 网络流与光盘都没有"同一个文件"这回事（换个盘还是同一个盘符），
+            // 记了只会把别的盘的位置套到这张盘上。
+            if (MediaFormats.IsLocationUri(filePath)) return;
             if (audioTrackId == null && subtitleTrackId == null) return;
 
             if (!_records.TryGetValue(filePath, out var record))

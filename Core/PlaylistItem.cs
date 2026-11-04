@@ -22,11 +22,22 @@ namespace 播放器.Core
         /// <summary>是否为网络流。</summary>
         public bool IsStream => MediaFormats.IsStreamUri(FilePath);
 
+        /// <summary>
+        /// 是否为光盘 / 设备位置（<c>dvdsimple:///L:</c> 这类 MRL）。
+        /// <para>它既不是文件也不是网络流：不读标签、不扫时长、不记进度，但能播。</para>
+        /// </summary>
+        public bool IsDisc => MediaFormats.IsDiscLocation(FilePath);
+
+        /// <summary>网络流或光盘：凡是"不是本地文件"的媒体。</summary>
+        public bool IsLocation => IsStream || IsDisc;
+
         /// <summary>带扩展名的文件名。</summary>
         public string FileName
         {
             get
             {
+                // 光盘没有文件名：按 MRL 反推一个能显示的名字（否则会得到 "L:"）
+                if (IsDisc) return OpticalDisc.DescribeLocation(FilePath);
                 if (IsStream) return FilePath;
                 try
                 {

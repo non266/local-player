@@ -35,6 +35,7 @@ namespace 播放器
             this.menuFileOpen = new System.Windows.Forms.ToolStripMenuItem();
             this.menuFileOpenFolder = new System.Windows.Forms.ToolStripMenuItem();
             this.menuFileOpenUrl = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuFileOpenDisc = new System.Windows.Forms.ToolStripMenuItem();
             this.menuFileRecent = new System.Windows.Forms.ToolStripMenuItem();
             this.menuFileSep1 = new System.Windows.Forms.ToolStripSeparator();
             this.menuFilePlaylists = new System.Windows.Forms.ToolStripMenuItem();
@@ -212,6 +213,7 @@ namespace 播放器
                 this.menuFileOpen,
                 this.menuFileOpenFolder,
                 this.menuFileOpenUrl,
+                this.menuFileOpenDisc,
                 this.menuFileRecent,
                 this.menuFileSep1,
                 this.menuFilePlaylists,
@@ -236,6 +238,13 @@ namespace 播放器
             this.menuFileOpenUrl.ShortcutKeyDisplayString = "Ctrl+U";
             this.menuFileOpenUrl.Size = new System.Drawing.Size(220, 22);
             this.menuFileOpenUrl.Text = "打开网络串流(&U)...";
+
+            // 
+            // menuFileOpenDisc（内容在运行时按本机光驱重建：一个光驱一行，见 MainForm.Disc.cs）
+            // 
+            this.menuFileOpenDisc.Name = "menuFileOpenDisc";
+            this.menuFileOpenDisc.Size = new System.Drawing.Size(220, 22);
+            this.menuFileOpenDisc.Text = "打开光盘(&I)";
 
             this.menuFileSep1.Name = "menuFileSep1";
             this.menuFileSep1.Size = new System.Drawing.Size(217, 6);
@@ -1224,6 +1233,7 @@ namespace 播放器
         private System.Windows.Forms.ToolStripMenuItem menuFileOpen;
         private System.Windows.Forms.ToolStripMenuItem menuFileOpenFolder;
         private System.Windows.Forms.ToolStripMenuItem menuFileOpenUrl;
+        private System.Windows.Forms.ToolStripMenuItem menuFileOpenDisc;
         private System.Windows.Forms.ToolStripMenuItem menuFileRecent;
         private System.Windows.Forms.ToolStripSeparator menuFileSep1;
         private System.Windows.Forms.ToolStripMenuItem menuFilePlaylists;

@@ -533,7 +533,7 @@ namespace 播放器
                     // 而拖它进来的人想要的是"把里面的条目加进来"。
                     playlists.Add(path);
                 }
-                else if (MediaFormats.IsMediaFile(path) || MediaFormats.IsStreamUri(path))
+                else if (MediaFormats.IsMediaFile(path) || MediaFormats.IsLocationUri(path))
                 {
                     media.Add(path);
                 }

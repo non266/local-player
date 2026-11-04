@@ -78,6 +78,9 @@ namespace 播放器
             // 音频窗口里那块位置是卡片，不能再用"拖文件到这里"的大字盖上去。
             lblPlaceholder.Visible = !hasMedia && !_isAudioWindow;
 
+            // 没有媒体就没有进度可看：全屏进度条跟着收起来。
+            if (!hasMedia) _fullscreenBar?.HideBar();
+
             if (!hasMedia)
             {
                 _suppressSeekEvent = true;
@@ -108,6 +111,10 @@ namespace 播放器
             // 音频窗口卡片里那排播放控件：可用状态与播放 / 暂停图标都从这里推，
             // 免得工具栏、托盘、卡片三处各算一套（见 docs/1.10.0计划.md 的 F12）。
             _nowPlaying?.SetTransportState(hasMedia, isPlaying, hasItems);
+
+            // 任务栏缩略图上的四个按钮（上一个 / 播放暂停 / 下一个 / 停止）同理：
+            // 没媒体时播放与停止置灰，列表为空时上一个 / 下一个置灰。
+            _taskbarButtons?.SetTransportState(hasMedia, isPlaying, hasItems, hasItems);
         }
 
         private void UpdateWindowTitle()
@@ -117,7 +124,9 @@ namespace 播放器
             var path = _engine.CurrentPath;
             if (!string.IsNullOrWhiteSpace(path))
             {
-                var name = MediaFormats.IsStreamUri(path) ? path : Path.GetFileName(path);
+                var name = MediaFormats.IsDiscLocation(path)
+                    ? OpticalDisc.DescribeLocation(path)
+                    : MediaFormats.IsStreamUri(path) ? path : Path.GetFileName(path);
                 Text = name + " - " + appName;
                 return;
             }
@@ -348,6 +357,9 @@ namespace 播放器
             _skipTimer.Stop();
             _skipTimer.Dispose();
             DisposeVideoMenu();
+
+            // 全屏进度条也是自绘窗口 + 自己的计时器，跟着一起收。
+            DisposeFullscreenBar();
 
             _scanner.DurationFound -= OnDurationFound;
             _scanner.Dispose();

@@ -24,7 +24,7 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <AssemblyTitle>全能本地播放器</AssemblyTitle>
     <Product>播放器</Product>
-    <Version>1.10.0</Version>
+    <Version>1.11.0</Version>
     <Company></Company>
     <NeutralLanguage>zh-CN</NeutralLanguage>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
@@ -54,6 +54,24 @@
     <PackageReference Include="LibVLCSharp" Version="3.10.2" />
     <PackageReference Include="LibVLCSharp.WinForms" Version="3.10.2" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
+  </ItemGroup>
+
+  <!--
+    随包的 DVD 访问插件（1.11.0 的 F13）。
+    VideoLAN.LibVLC.Windows 3.0.24 的 plugins\access 里**没有** dvdread / dvdnav，
+    少了它们 dvd:// / dvdsimple:// 只会得到 "Your input can't be opened"，
+    「打开光盘」里的 DVD-Video 就走不通（来源、哈希与许可证见 native\README.md）。
+
+    这里用和 VLC 包同一套机制：Content + Link + CopyToOutputDirectory / CopyToPublishDirectory。
+    比"构建完再 Copy 一次"可靠：publish 有自己的输出目录，只复制到 OutDir 不会出现在
+    publish 结果里，而 .iss 是整目录打包的——那样发出去的安装包会缺这两个文件。
+  -->
+  <ItemGroup>
+    <Content Include="native\vlc-3.0.24\*.dll">
+      <Link>libvlc\win-x64\plugins\access\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <!--

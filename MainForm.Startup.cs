@@ -47,6 +47,9 @@ namespace 播放器
             menuFileOpenUrl.Click += (s, e) => OpenUrlDialog();
             menuFileExit.Click += (s, e) => Close();
 
+            // 1.11.0 F13：「打开光盘」的子菜单在每次下拉时按本机光驱重建
+            ConfigureDiscMenu();
+
             // ---- 播放菜单 ----
             menuPlayPause.Click += (s, e) => TogglePlayPause();
             menuStop.Click += (s, e) => StopPlayback();
@@ -473,7 +476,7 @@ namespace 播放器
         /// </summary>
         private void CheckRestoredFilesInBackground(IReadOnlyList<string> files)
         {
-            var candidates = files.Where(path => !MediaFormats.IsStreamUri(path)).ToList();
+            var candidates = files.Where(path => !MediaFormats.IsLocationUri(path)).ToList();
 
             if (candidates.Count == 0) return;
 

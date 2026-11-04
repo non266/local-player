@@ -58,6 +58,9 @@ namespace SmokeTest
                     if (!CheckThemes(form)) return false;
                     if (!CheckDeinterlaceMenu(form)) return false;
 
+                    // 1.11.0 B11：任务栏缩略图按钮（必须在窗口显示着的时候验）
+                    if (!CheckTaskbarThumbnailButtons(form)) return false;
+
                     // 放在最后：它按 Delete 会真的把列表项删掉一项，别影响前面的检查
                     if (!CheckSearchTyping(form)) return false;
 

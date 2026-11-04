@@ -44,7 +44,7 @@ namespace 播放器
         }
 
         /// <summary>播放指定索引（会同步播放列表的当前项）。</summary>
-        private void PlayIndex(int index) => PlayIndex(index, keepCurrent: false);
+        private void PlayIndex(int index) => PlayIndex(index, keepCurrent: false, allowFallback: true);
 
         /// <summary>
         /// 播放指定索引；若该项不可播放则自动顺延，整轮都不可用时停止。
@@ -53,7 +53,13 @@ namespace 播放器
         /// 「下一首播放」的插播用它——播完插播的这一首还要回到列表原来的位置继续。
         /// </para>
         /// </summary>
-        private void PlayIndex(int index, bool keepCurrent)
+        private void PlayIndex(int index, bool keepCurrent) => PlayIndex(index, keepCurrent, allowFallback: true);
+
+        /// <param name="allowFallback">
+        /// 失败时要不要顺延到下一项。用户明确点开的那一项（例如「打开光盘」）传 <c>false</c>：
+        /// 那张盘打不开就该停下说清楚，而不是顺手把列表里别的歌放起来——那会让人以为点错了。
+        /// </param>
+        private void PlayIndex(int index, bool keepCurrent, bool allowFallback)
         {
             if (_playlist.Count == 0) return;
             if (index < 0 || index >= _playlist.Count) index = 0;
@@ -62,6 +68,7 @@ namespace 播放器
             // RefreshPlaylistView 是整体重建 ListView，放在这个循环里就会变成
             // "跳过一个重建一次"——整份列表都失效时要重建上千次，窗口直接假死。
             var marked = false;
+            string? lastError = null;
 
             for (var offset = 0; offset < _playlist.Count; offset++)
             {
@@ -70,9 +77,15 @@ namespace 播放器
 
                 // 启动时后台核对已经标成"打不开"的条目直接跳过：网络盘离线时，
                 // 每个 File.Exists 都可能卡到 SMB 超时，列表里几百条的时候
-                // 按一次播放能把界面冻住好几分钟。串流不适用（它本来就不查磁盘）。
-                if (!item.IsStream && item.HasError && item.ErrorMessage == MissingFileMessage)
+                // 按一次播放能把界面冻住好几分钟。网络流 / 光盘不适用（它们本来就不查磁盘）。
+                if (!item.IsLocation && item.HasError && item.ErrorMessage == MissingFileMessage)
+                {
+                    lastError = item.ErrorMessage;
+
+                    if (!allowFallback) break;
+
                     continue;
+                }
 
                 if (!MediaFormats.IsOpenable(item.FilePath))
                 {
@@ -82,6 +95,11 @@ namespace 播放器
                         item.ErrorMessage = MissingFileMessage;
                         marked = true;
                     }
+
+                    lastError = item.ErrorMessage;
+
+                    if (!allowFallback) break;
+
                     continue;
                 }
 
@@ -141,13 +159,18 @@ namespace 播放器
                     item.HasError = true;
                     item.ErrorMessage = ex.Message;
                     marked = true;
+                    lastError = ex.Message;
+
+                    if (!allowFallback) break;
                 }
             }
 
             if (marked) RefreshPlaylistView();
 
             StopPlayback();
-            SetStatus("播放列表中没有可播放的媒体");
+            SetStatus(allowFallback
+                ? "播放列表中没有可播放的媒体"
+                : "打不开这一项：" + (lastError ?? "没有可播放的内容"));
         }
 
         private void PlaySelectedItem()

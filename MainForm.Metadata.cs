@@ -40,6 +40,14 @@ namespace 播放器
                 return;
             }
 
+            // 光盘（dvd / cdda 这类 MRL）没有标签、没有歌词、更不该去网上查：
+            // 直接给一份空的，别让 TagReader 对着 "dvdsimple:///L:" 去当文件读。
+            if (MediaFormats.IsDiscLocation(path))
+            {
+                ApplyMetadata(path, new MediaTags(), LyricsDocument.Empty, allowOnlineLookup: false);
+                return;
+            }
+
             // 读标签要真的读文件（内嵌封面动辄一两 MB），丢到线程池里做，
             // 免得切歌时界面顿一下。
             Task.Run(() =>

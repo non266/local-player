@@ -113,11 +113,43 @@ namespace 播放器.Core
             }
         }
 
-        /// <summary>判断路径是否为可打开的目标：本地存在的文件，或网络流地址。</summary>
+        /// <summary>
+        /// 判断是否为光盘 / 设备位置（libvlc 的 location 型 MRL）。
+        /// <para>
+        /// 这些地址<b>不是文件</b>：它们没有扩展名、不参与标签 / 歌词 / 时长扫描、也不该记播放进度——
+        /// 但 libvlc 认得它们，而且必须用 <c>libvlc_media_new_location</c> 打开（走 <c>FromPath</c> 会失败）。
+        /// </para>
+        /// </summary>
+        public static bool IsDiscLocation(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            if (!Uri.TryCreate(path, UriKind.Absolute, out var uri)) return false;
+
+            switch (uri.Scheme.ToLowerInvariant())
+            {
+                case "dvd":
+                case "dvdsimple":
+                case "cdda":
+                case "bluray":
+                case "vcd":
+                case "vcdx":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// 网络流或光盘：凡是"不是本地文件"的媒体都算。
+        /// <para>历史记录、标签、歌词、同目录字幕这些"按文件来"的功能一律跳过它们。</para>
+        /// </summary>
+        public static bool IsLocationUri(string? path) => IsStreamUri(path) || IsDiscLocation(path);
+
+        /// <summary>判断路径是否为可打开的目标：本地存在的文件、网络流地址，或光盘位置。</summary>
         public static bool IsOpenable(string? path)
         {
             if (string.IsNullOrWhiteSpace(path)) return false;
-            if (IsStreamUri(path)) return true;
+            if (IsLocationUri(path)) return true;
             return File.Exists(path);
         }
 

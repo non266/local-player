@@ -106,6 +106,27 @@ namespace 播放器
         {
             PollRightClick();
             PollLeftDoubleClick();
+            PollFullscreenBar();
+        }
+
+        /// <summary>
+        /// 全屏进度条：视频区收不到 WinForms 的鼠标消息，只能靠这里每 30 ms 看一眼光标。
+        /// <para>
+        /// 只在"真的动了"时点亮；不动就什么都不做（收起由进度条自己的空闲计时器负责）。
+        /// 主窗口不在前台时<b>不点亮</b>——它是置顶窗口，在别的程序里动鼠标不该把它弹出来。
+        /// "离开前台就收起"由 <see cref="OnDeactivate"/> 负责（那里是唯一可靠的事件）。
+        /// </para>
+        /// </summary>
+        private void PollFullscreenBar()
+        {
+            if (!_isFullscreen || !_engine.HasMedia) return;
+            if (Form.ActiveForm != this) return;
+
+            var cursor = Cursor.Position;
+            if (cursor == _lastFullscreenPointer) return;
+
+            _lastFullscreenPointer = cursor;
+            NotifyFullscreenPointer(cursor);
         }
 
         private void PollRightClick()

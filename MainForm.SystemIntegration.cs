@@ -86,25 +86,62 @@ namespace 播放器
 
         private void InitializeSystemIntegration()
         {
+            // 任务栏缩略图按钮：这里只建对象、把句柄记下来。**按钮要等窗口可见才能加**
+            // （见 Ui/TaskbarThumbnailButtons.cs 的说明——1.0～1.10 一直是在这里加，
+            //  Explorer 收下调用却什么也没做，于是那排按钮从来没出现过）。
+            EnsureTaskbarButtons();
+
+            ApplyGlobalMediaKeys(_settings.GlobalMediaKeys);
+
+            // 桌面歌词的解锁热键是**常开**的，不跟着"全局媒体键"那个开关走：
+            // 那个开关是给"媒体键被别的播放器占了"用的，关掉它不该顺带把解锁出口也关掉。
+            ApplyDesktopLyricsHotKey(true);
+        }
+
+        /// <summary>
+        /// 建立 / 重新挂上任务栏按钮对象，并按当前主题重建图标。
+        /// <para>句柄重建之后（WinForms 换过 HWND）必须 <see cref="TaskbarThumbnailButtons.Attach"/>，
+        /// 否则按钮会挂在那个已经不存在的窗口上。</para>
+        /// </summary>
+        private void EnsureTaskbarButtons()
+        {
             if (_taskbarButtons == null)
             {
                 try
                 {
                     _taskbarButtons = new TaskbarThumbnailButtons(Handle);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                     // 系统不支持就算了，功能降级。
+                    AppLog.Swallowed("任务栏缩略图按钮建不起来（功能降级）", ex);
                     _taskbarButtons = null;
                 }
             }
+            else
+            {
+                _taskbarButtons.Attach(Handle);
+            }
 
             UpdateTaskbarIcons();
-            ApplyGlobalMediaKeys(_settings.GlobalMediaKeys);
+        }
 
-            // 桌面歌词的解锁热键是**常开**的，不跟着"全局媒体键"那个开关走：
-            // 那个开关是给"媒体键被别的播放器占了"用的，关掉它不该顺带把解锁出口也关掉。
-            ApplyDesktopLyricsHotKey(true);
+        /// <summary>
+        /// 窗口第一次真的显示出来：这时任务栏上才有它的按钮，缩略图按钮可以挂了。
+        /// </summary>
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+
+            UpdateTaskbarIcons();
+        }
+
+        /// <summary>从托盘 / 最小化回来时也补一次（可见性守卫会挡住"还没显示"的那些调用）。</summary>
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+
+            if (Visible) UpdateTaskbarIcons();
         }
 
         /// <summary>按当前主题重建任务栏按钮的图标（GetHicon 得到的是独立副本，位图可以立刻释放）。</summary>
@@ -116,7 +153,8 @@ namespace 播放器
             {
                 using (var icons = new MediaIconSet(_palette.IconInk, _palette.Accent, TaskbarIconSize))
                 {
-                    _taskbarButtons.SetIcons(icons.Previous, icons.Play, icons.Pause, icons.Next);
+                    _taskbarButtons.SetIcons(
+                        icons.Previous, icons.Play, icons.Pause, icons.Next, icons.Stop);
                 }
             }
             catch (Exception ex)
@@ -281,6 +319,9 @@ namespace 播放器
                             break;
                         case TaskbarThumbnailButtons.ButtonNext:
                             PlayNext(true);
+                            break;
+                        case TaskbarThumbnailButtons.ButtonStop:
+                            StopPlayback();
                             break;
                     }
 

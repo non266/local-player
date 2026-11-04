@@ -16,6 +16,9 @@ namespace SmokeTest
             // 1.3.0 B-2：画面旋转 / 翻转（素材自己用 ffmpeg 合成，所以不依赖 播放器_TEST_VIDEO）
             if (!CheckVideoRotation()) return false;
 
+            // 1.11.0 F14：全屏进度条（自造 WAV 就能验，不依赖真实视频）
+            if (!CheckFullscreenProgressBar()) return false;
+
             // M3 / R8：去隔行的实际画面效果（只在 播放器_TEST_INTERLACED=1 时跑，只量不判）
             RunInterlacedProbeIfRequested();
 

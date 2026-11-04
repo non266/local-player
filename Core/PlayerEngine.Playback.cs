@@ -133,13 +133,20 @@ namespace 播放器.Core
 
         private Media CreateMedia(string path)
         {
-            // 串流走 Uri 构造，本地文件走路径构造；选项串由 MediaOptions 拼（纯函数，便于断言）。
-            Uri? uri = null;
-            var isStream = MediaFormats.IsStreamUri(path) && Uri.TryCreate(path, UriKind.Absolute, out uri);
+            // 串流走 Uri 构造，本地文件走路径构造，光盘 / 设备走 location 构造。
+            // ⚠ 光盘必须用 FromLocation（libvlc_media_new_location）：走 FromPath 时
+            // "dvdsimple:///L:" 会被当成一个文件路径，结果就是 "Your input can't be opened"。
+            var isDisc = MediaFormats.IsDiscLocation(path);
 
-            var media = isStream && uri != null
-                ? new Media(_libVlc, uri)
-                : new Media(_libVlc, path, FromType.FromPath);
+            Uri? uri = null;
+            var isStream = !isDisc && MediaFormats.IsStreamUri(path) &&
+                           Uri.TryCreate(path, UriKind.Absolute, out uri);
+
+            var media = isDisc
+                ? new Media(_libVlc, path, FromType.FromLocation)
+                : isStream && uri != null
+                    ? new Media(_libVlc, uri)
+                    : new Media(_libVlc, path, FromType.FromPath);
 
             foreach (var option in MediaOptions.For(isStream, NormalizeVolume))
                 media.AddOption(option);

@@ -60,6 +60,8 @@ namespace 播放器
             ApplyThemeToFloatingWindows();
             // 桌面歌词的"跟随主题"配色取自强调色，同样要更新
             _desktopLyrics?.SetPalette(p);
+            // 全屏进度条（可能还没建出来）
+            _fullscreenBar?.ApplyPalette(p);
             // 视频区
             videoView.BackColor = p.VideoBack;
             lblPlaceholder.BackColor = p.VideoBack;

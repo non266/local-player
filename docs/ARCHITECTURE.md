@@ -11,17 +11,16 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 34,626 行 / **148 个文件** |
-| `Core/` | 11,394 行 / 65 个文件 |
-| `Ui/` | 10,257 行 / 49 个文件 |
-| `MainForm*` 这一族 partial | 12,858 行 / **33 个文件**、81 个实例字段（P1 之前是 14 个文件 / 90 个字段；1.9.0 / 1.10.0 又加了几个，**没重数**） |
-| `tools/SmokeTest/` | 19,101 行 / 63 个文件（拆之前是 8,900 行、**单个文件**） |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 35,806 行 / **152 个文件** |
+| `Core/` | 11,709 行 / 66 个文件 |
+| `Ui/` | 10,731 行 / 50 个文件 |
+| `MainForm*` 这一族 partial | 13,289 行 / **35 个文件**、81 个实例字段（P1 之前是 14 个文件 / 90 个字段；1.9.0 起又加了几个，**没重数**） |
+| `tools/SmokeTest/` | 19,644 行 / 66 个文件（拆之前是 8,900 行、**单个文件**） |
 
-> 数字最后一次量是在 **2026-11-03（1.9.0：A4 + F11）**：产品侧多出
-> `Core/WindowModes.cs`（窗口形态的纯判定）、`Ui/NowPlayingView.cs`（音频窗口那张卡片）、
-> `MainForm.WindowMode.cs`（切换与两份几何）；冒烟多出 `Program.History.Recent.cs`（A4 的断言）、
-> `Program.AudioWindow.cs`（F11 的断言）与 `Program.Video.Menu.cs`
-> （1.9.0 把「关闭字幕」记忆 + `V` 开关整块从 `Program.Video.Tracks.cs` 搬走，让那个文件回到 427 行）。
+> 数字最后一次量是在 **2026-11-04（1.11.0：打开光盘 / 全屏进度条 / 任务栏按钮）**：产品侧多出
+> `Core/OpticalDisc.cs`、`MainForm.Disc.cs`、`MainForm.Fullscreen.cs`、`Ui/FullscreenProgressBar.cs`；
+> 冒烟多出 `Program.Disc.cs`（新第 17 步）、`Program.Video.FullscreenBar.cs`、`Program.MainForm.Taskbar.cs`；
+> 另外 `native\vlc-3.0.24\` 里有两个 DVD 访问插件（不算进 `.cs` 行数）。
 > 数行数用 `[IO.File]::ReadAllLines`——本机的 `Get-Content` 会把无 BOM 的 UTF-8 按 GBK 读，
 > 行数是错的（见维护手册坑表）。
 

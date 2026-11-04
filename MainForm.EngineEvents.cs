@@ -40,8 +40,8 @@ namespace 播放器
                 _ => MediaPlaybackStatus.Stopped
             });
 
-            // 任务栏缩略图上的按钮跟着切换播放/暂停图标。
-            _taskbarButtons?.SetPlaying(state == PlayerState.Playing);
+            // 任务栏缩略图上的按钮：图标与置灰由下面的 UpdateTransportState 统一推，
+            // 不再单独 SetPlaying（两处各推一次迟早对不上）。
 
             // 暂停时立刻把进度落盘，避免强制结束丢掉位置。
             if (state == PlayerState.Paused) CommitHistory();

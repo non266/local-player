@@ -96,6 +96,9 @@ namespace 播放器
 
         private TaskbarThumbnailButtons? _taskbarButtons;
 
+        /// <summary>只读入口：任务栏缩略图按钮（给冒烟测试用；没建出来时为 null）。</summary>
+        internal TaskbarThumbnailButtons? TaskbarButtons => _taskbarButtons;
+
         /// <summary>
         /// 真正注册成功的全局媒体键 id。
         /// <para>

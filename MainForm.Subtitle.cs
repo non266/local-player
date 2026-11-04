@@ -155,7 +155,7 @@ namespace 播放器
         {
             var path = _track.Path;
 
-            if (string.IsNullOrWhiteSpace(path) || MediaFormats.IsStreamUri(path)) return;
+            if (string.IsNullOrWhiteSpace(path) || MediaFormats.IsLocationUri(path)) return;
 
             // 用户已经手动接管：把挂起的自动恢复清掉，别再盖回来
             _trackRestorePath = null;

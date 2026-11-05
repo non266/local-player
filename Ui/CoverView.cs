@@ -54,6 +54,15 @@ namespace 播放器.Ui
                      | ControlStyles.ResizeRedraw, true);
         }
 
+        /// <summary>
+        /// 封面下面要不要再画标题 / 艺术家 / 专辑三行。
+        /// <para>迷你模式的缩略图只要封面：那个方框本来就只有一百多像素，三行文字会把封面
+        /// 挤成一个很小的点（所有者截图里的"错位"）。关掉之后封面占满可画区域。</para>
+        /// </summary>
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        internal bool ShowText { get; set; } = true;
+
         /// <summary>显示某个文件的封面与文字信息；传 <c>null</c> 清空。</summary>
         public void ShowTrack(string? path, MediaTags? tags)
         {
@@ -142,7 +151,8 @@ namespace 播放器.Ui
             var padding = (int)Math.Round(12 * DpiScale);
             var available = ClientSize.Width - padding * 2;
 
-            var textHeight = MeasureTextBlock(available);
+            // 只画封面的模式（迷你缩略图）不占文字块的高度
+            var textHeight = ShowText ? MeasureTextBlock(available) : 0;
             var maxSquare = ClientSize.Height - padding * 2 - textHeight - (int)Math.Round(10 * DpiScale);
             var side = Math.Max(0, Math.Min(available, maxSquare));
 

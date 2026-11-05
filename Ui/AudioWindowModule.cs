@@ -144,13 +144,21 @@ namespace 播放器.Ui
             if (_mini != null) _mini.Visible = false;
         }
 
-        /// <summary>把迷你卡片铺满整个画面区（迷你模式里传输条是藏起来的）。</summary>
+        /// <summary>
+        /// 把迷你卡片铺满整个客户区。
+        /// <para>
+        /// 不从 <c>splitVideo.Panel1</c> 量尺寸：折叠的 SplitContainer 在窗体变窄 / 变矮时
+        /// 不会重算 Panel1（B9 那个老坑；这次缩放窗口时实测卡片仍是 532×153，右边多出去一截、
+        /// 底下那排控件被窗口裁掉）。迷你模式里整个客户区本来就只放这一张卡片，所以直接按
+        /// <c>Form.ClientSize</c> 摆，尺寸永远跟着窗口走。
+        /// </para>
+        /// </summary>
         public void LayoutMini()
         {
             if (_mini == null || !_mini.Visible) return;
 
-            var panel = _host.VideoSplit.Panel1;
-            var bounds = new Rectangle(0, 0, panel.ClientSize.Width, panel.ClientSize.Height);
+            var client = _host.Window.ClientSize;
+            var bounds = new Rectangle(0, 0, client.Width, client.Height);
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
 
             if (_mini.Bounds != bounds) _mini.Bounds = bounds;
@@ -344,10 +352,15 @@ namespace 播放器.Ui
 
             _mini = new MiniPlayerView { Visible = false };
 
-            _host.VideoHost.Controls.Add(_mini);
-            _host.VideoHost.Controls.SetChildIndex(_mini, 1);
+            // 迷你卡片直接挂在窗体上（不放进 SplitContainer）：迷你模式里整个客户区只有它，
+            // 这样窗口怎么缩放，卡片都按 ClientSize 跟着走，不受折叠面板"不重算"的老毛病影响。
+            _host.Window.Controls.Add(_mini);
+            _host.Window.Controls.SetChildIndex(_mini, 0);
 
-            _host.VideoHost.SizeChanged += (s, e) => LayoutMini();
+            _host.Window.ClientSizeChanged += (s, e) =>
+            {
+                if (_mini?.Visible == true) LayoutMini();
+            };
 
             _mini.BindCommands(_host.ExecuteCommand);
             _mini.SeekRequested += milliseconds => _host.SeekTo(milliseconds);

@@ -163,14 +163,7 @@ namespace SmokeTest
                 return false;
             }
 
-            var splitVideo = Find(form, "splitVideo") as SplitContainer;
-            if (splitVideo == null)
-            {
-                Log(23, "迷你模式：找不到 splitVideo");
-                return false;
-            }
-
-            var expected = new Rectangle(Point.Empty, splitVideo.Panel1.ClientSize);
+            var expected = new Rectangle(Point.Empty, form.ClientSize);
 
             if (Math.Abs(card.Width - expected.Width) > 2 || Math.Abs(card.Height - expected.Height) > 2 ||
                 card.Left != 0 || card.Top != 0)
@@ -189,6 +182,52 @@ namespace SmokeTest
                 !card.ClientRectangle.Contains(card.CoverBounds))
             {
                 Log(23, $"迷你模式：封面没有画在卡片里（封面 {card.CoverBounds}，卡片 {card.ClientRectangle}）");
+                return false;
+            }
+
+                        // 缩略图只画封面：封面方框要占卡片高度的一大半，不能被"标题 / 艺术家"那三行挤成小点。
+            if (card.CoverImageBounds.Width * 100 < card.ClientSize.Height * 50)
+            {
+                Log(23, $"迷你模式：缩略图被挤得太小（封面 {card.CoverImageBounds.Width} 像素，"
+                        + $"卡片高 {card.ClientSize.Height}）");
+                return false;
+            }
+
+            // 调整窗口大小（所有者 2026-11-05 报"调整窗口大小导致错位"）：
+            // 卡片必须跟着客户区走，贴底的进度 / 控件不能被窗口裁掉。
+            var originalSize = form.Size;
+            var smaller = new Size(
+                Math.Max(form.MinimumSize.Width, form.Width - 90),
+                Math.Max(form.MinimumSize.Height, form.Height - 25));
+
+            form.Size = smaller;
+            PumpMessages(600);
+
+            if (Math.Abs(card.Width - form.ClientSize.Width) > 2 ||
+                Math.Abs(card.Height - form.ClientSize.Height) > 2)
+            {
+                Log(23, $"迷你模式：调整窗口大小之后卡片没跟着变（卡片 {card.Size}，"
+                        + $"客户区 {form.ClientSize}）");
+                return false;
+            }
+
+            if (card.Transport.Bottom > card.ClientSize.Height ||
+                card.Progress.Right > card.ClientSize.Width)
+            {
+                Log(23, "迷你模式：调整窗口大小之后进度 / 控件超出卡片"
+                        + $"（进度 {card.Progress.Bounds}、控件 {card.Transport.Bounds}、"
+                        + $"卡片 {card.ClientRectangle}）");
+                return false;
+            }
+
+            form.Size = originalSize;
+            PumpMessages(500);
+
+            if (Math.Abs(card.Width - form.ClientSize.Width) > 2 ||
+                Math.Abs(card.Height - form.ClientSize.Height) > 2)
+            {
+                Log(23, $"迷你模式：调回原尺寸之后卡片没跟着变（卡片 {card.Size}，"
+                        + $"客户区 {form.ClientSize}）");
                 return false;
             }
 

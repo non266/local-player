@@ -21,13 +21,13 @@ namespace 播放器.Ui
     /// </summary>
     internal sealed class MiniPlayerView : Panel
     {
-        private const int LogicalPadding = 12;
-        private const int LogicalGap = 12;
-        private const int LogicalTitleHeight = 24;
-        private const int LogicalArtistHeight = 18;
-        private const int LogicalProgressHeight = 22;
-        private const int LogicalTimeHeight = 16;
-        private const int LogicalControlsHeight = 44;
+        private const int LogicalPadding = 8;
+        private const int LogicalGap = 10;
+        private const int LogicalTitleHeight = 20;
+        private const int LogicalArtistHeight = 14;
+        private const int LogicalProgressHeight = 18;
+        private const int LogicalTimeHeight = 14;
+        private const int LogicalControlsHeight = 40;
 
         /// <summary>
         /// 进度 / 时间 / 控件这一组离卡片底边留多少（逻辑像素）。
@@ -38,8 +38,8 @@ namespace 播放器.Ui
 
         private const int LogicalRestoreWidth = 56;
         private const int LogicalRestoreHeight = 24;
-        private const int LogicalCoverMax = 132;
-        private const int LogicalCoverMin = 64;
+        private const int LogicalCoverMax = 140;
+        private const int LogicalCoverMin = 56;
 
         /// <summary>进度条内部精度（与主进度条一致）。</summary>
         private const int Resolution = 1000;
@@ -62,7 +62,9 @@ namespace 播放器.Ui
             SetStyle(ControlStyles.ResizeRedraw, true);
             Font = UiFonts.Resolve(10f, FontStyle.Regular);
 
-            _cover = new CoverView();
+            // 缩略图只画封面：这个控件默认会在封面下面再画三行文字，
+            // 在迷你卡片这么小的方框里会把封面挤成一个小点（所有者截图里的「显示错误」）。
+            _cover = new CoverView { ShowText = false };
             _title = CreateLabel(ContentAlignment.MiddleLeft, UiFonts.Resolve(11f, FontStyle.Bold));
             _artist = CreateLabel(ContentAlignment.MiddleLeft, UiFonts.Resolve(9.5f, FontStyle.Regular));
 
@@ -135,6 +137,9 @@ namespace 播放器.Ui
 
         /// <summary>封面控件现在占的矩形（给冒烟测试断言排版）。</summary>
         internal Rectangle CoverBounds => _cover.Bounds;
+
+        /// <summary>封面**画出来**的方框（CoverView 会再留内边距；缩略图要够大就看这个）。</summary>
+        internal Rectangle CoverImageBounds => _cover.CoverRectangle;
 
         internal string TitleText => _title.Text;
 

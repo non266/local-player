@@ -192,6 +192,14 @@ namespace SmokeTest
                 return false;
             }
 
+            // 进度 / 时间 / 控件这一组是"贴底操作区"：离底太远会显得整块被顶起来。
+            var bottomGap = card.ClientSize.Height - card.Transport.Bottom;
+            if (bottomGap > 8)
+            {
+                Log(23, $"迷你模式：进度条与控件离卡片底边太远（{bottomGap} 像素；这一组该贴着底部）");
+                return false;
+            }
+
             // 卡片上的播放 / 暂停必须也走命令层（不是直接调引擎）：暂停 → 继续。
             card.Transport.PlayPauseButton.PerformClick();
 

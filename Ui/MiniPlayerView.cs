@@ -28,6 +28,14 @@ namespace 播放器.Ui
         private const int LogicalProgressHeight = 22;
         private const int LogicalTimeHeight = 16;
         private const int LogicalControlsHeight = 44;
+
+        /// <summary>
+        /// 进度 / 时间 / 控件这一组离卡片底边留多少（逻辑像素）。
+        /// <para>刻意比四周的 <see cref="LogicalPadding"/> 小：这一组是"贴底操作区"，
+        /// 留 12 会显得整体被顶起来，离底一条缝更像一张小卡片。</para>
+        /// </summary>
+        private const int LogicalBottomInset = 4;
+
         private const int LogicalRestoreWidth = 56;
         private const int LogicalRestoreHeight = 24;
         private const int LogicalCoverMax = 132;
@@ -267,7 +275,8 @@ namespace 播放器.Ui
             var rightWidth = Math.Max(0, width - rightX - padding);
 
             var controlsHeight = Scaled(LogicalControlsHeight);
-            var controlsTop = Math.Max(0, height - padding - controlsHeight);
+            var bottomInset = Scaled(LogicalBottomInset);
+            var controlsTop = Math.Max(0, height - bottomInset - controlsHeight);
             _controls.SetBounds(rightX, controlsTop, rightWidth, controlsHeight);
 
             var timeHeight = Scaled(LogicalTimeHeight);

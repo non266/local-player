@@ -204,9 +204,12 @@ namespace SmokeTest
             // 这条路径只是 history.json 里的一个键，不需要真的存在文件——
             // 所以别把它挪到 smoke-tags 之类的目录下（那是第 9 步才建的，而这里在第 4 步跑）
             var diskPath = Path.Combine(AppContext.BaseDirectory, "adjust-eager.mp4");
-            var onDiskHistory = PlaybackHistory.Load();
 
-            new PerFileAdjustments(onDiskHistory).RecordDelays(diskPath, 150, -250);
+            // ⚠ 必须用**同一个** store 实例。
+            // 另开一个 PlaybackHistory.Load() 的话，它和上面那批"已经排上、还没落地"的后台写
+            // 会抢同一个 history.json：谁后写谁覆盖，慢盘 / 杀毒扫描时旧快照会把 eager 记录盖掉
+            // （1.12.0 装到 LocalAppData 之后稳定复现：5 秒里磁盘上一直是 0/0）。
+            new PerFileAdjustments(store).RecordDelays(diskPath, 150, -250);
 
             if (!WaitForAdjustmentsOnDisk(diskPath, 150, -250, 5))
             {
@@ -220,8 +223,8 @@ namespace SmokeTest
             }
 
             // 收尾：这条记录不该留在 history.json 里影响后面的检查
-            onDiskHistory.Forget(diskPath);
-            onDiskHistory.Save();
+            store.Forget(diskPath);
+            store.Save();
 
             Log(8, "按文件记住的调整正常：音画 / 字幕延迟与歌词偏移各记各的、读不建壳、"
                     + "网络流不记、改一次就已经落盘、「清除最近播放」不碰它们");

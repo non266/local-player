@@ -16,7 +16,8 @@ namespace 播放器
         {
             if (state == PlayerState.Playing)
             {
-                _consecutiveErrors = 0;
+                // 一次真的播起来了：之前那串失败不再算"连续"。
+                _playback.ResetErrorCount();
 
                 // libvlc 换媒体时会重建视频输出，画面调整 / 去隔行 / 延迟都会被重置，
                 // 所以每次真正播起来都要重新推一遍。
@@ -81,16 +82,9 @@ namespace 播放器
             // 「听完这一首就停」优先于循环与插播：用户要的就是"这一首放完就别再响了"。
             if (ApplySleepTimerAtTrackEnd()) return;
 
-            if (_settings.RepeatMode == RepeatMode.One)
-            {
-                _engine.Replay();
-                return;
-            }
-
-            // 「下一首播放」队列优先：先播插播的那几首，队列空了再回到列表原来的位置继续。
-            if (PlayNextFromQueue()) return;
-
-            PlayNext(false);
+            // 单曲循环 / 插播队列 / 下一首（含末尾停住）都在播放业务里，
+            // 界面只负责先判睡眠定时器。
+            _playback.HandleEnded();
         }
 
         private void OnEngineError(object? sender, string message)
@@ -106,7 +100,9 @@ namespace 播放器
             }
 
             // 连续失败时自动跳过，但设上限，避免整列表都是坏文件时无限跳。
-            if (++_consecutiveErrors <= MaxConsecutiveErrors && _playlist.Count > 1)
+            _playback.RegisterError();
+
+            if (_playback.ShouldAutoSkipAfterError())
             {
                 _skipTimer.Stop();
                 _skipTimer.Start();

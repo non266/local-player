@@ -18,7 +18,7 @@ namespace 播放器
     /// 曲目元数据：切歌之后读标签与歌词、把它们推到侧栏与桌面歌词，以及「媒体信息」页的内容。
     /// <para>
     /// 读标签要真的读文件（内嵌封面动辄一两 MB），所以丢在线程池里做，靠
-    /// <see cref="TrackLyricsSession"/> 的版本号判断"这份结果还属于当前这首吗"。
+    /// <see cref="MediaSession"/> 的版本号判断"这份结果还属于当前这首吗"。
     /// </para>
     /// </summary>
     public partial class MainForm

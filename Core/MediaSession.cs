@@ -20,7 +20,7 @@ namespace 播放器.Core
     /// 因此下面这些状态全部只在界面线程上读写，不加锁。
     /// </para>
     /// </summary>
-    public sealed class TrackLyricsSession
+    public sealed class MediaSession
     {
         private int _metadataToken;
 

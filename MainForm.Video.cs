@@ -136,7 +136,7 @@ namespace 播放器
             PlayIndex(_playlist.CurrentIndex);
 
             // 重载之后回到原来的位置（界面计时器会在媒体真的播起来之后定位）。
-            _pendingResume = position > 0 ? TimeSpan.FromMilliseconds(position) : (TimeSpan?)null;
+            _playback.ScheduleResumeAt(position > 0 ? TimeSpan.FromMilliseconds(position) : (TimeSpan?)null);
 
             SetStatus($"画面旋转：{Core.ScreenRotations.Describe(rotation)}"
                       + $"（已重新起播以应用，从 {TimeFormatter.FormatWithHours(TimeSpan.FromMilliseconds(position))} 继续）");

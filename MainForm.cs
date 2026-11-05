@@ -23,15 +23,10 @@ namespace 播放器
 
         private const long SeekStepMilliseconds = 5000;
 
-        private const int MaxConsecutiveErrors = 5;
-
         private const int DefaultPlaylistPanelWidth = 320;
 
         /// <summary>任务栏缩略图按钮的图标尺寸。取大一点，高 DPI 下缩放更清晰。</summary>
         private const int TaskbarIconSize = 32;
-
-        /// <summary>找不到文件时的固定提示。用常量比较，避免每次顺延都重复标记、重复刷列表。</summary>
-        private const string MissingFileMessage = "文件不存在或无法访问";
 
         private readonly string[] _startupArgs;
 
@@ -64,7 +59,16 @@ namespace 播放器
 
         private readonly PlayerEngine _engine;
 
-        private readonly Playlist _playlist = new Playlist();
+        /// <summary>
+        /// 播放列表这块数据的唯一主人：列表模型、插播队列、排序方式、筛选词（见 <see cref="PlaylistWorkspace"/>）。
+        /// </summary>
+        private readonly PlaylistWorkspace _workspace;
+
+        /// <summary>只读的列表模型（由工作区持有；界面各处照旧用这个名字读）。</summary>
+        private Playlist _playlist => _workspace.List;
+
+        /// <summary>只读的插播队列（由工作区持有）。</summary>
+        private PlaybackQueue _queue => _workspace.Queue;
 
         /// <summary>
         /// 只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。
@@ -72,6 +76,18 @@ namespace 播放器
         /// 模型本身（<see cref="Playlist"/>）没打算搬家，那就别再让测试挖字段。</para>
         /// </summary>
         internal Playlist Playlist => _playlist;
+
+        /// <summary>测试用：播放列表工作区（排序 / 筛选 / 队列的所有者）。</summary>
+        internal PlaylistWorkspace Workspace => _workspace;
+
+        /// <summary>
+        /// 播放业务：放哪一首、下一首是谁、播完怎么办、顺延 / 随机 / 循环 / 插播 / 续播 / A-B。
+        /// <para>它只认引擎与列表模型，不碰控件；界面通过事件接（见 <c>MainForm.Playback.cs</c>）。</para>
+        /// </summary>
+        private readonly PlaybackCoordinator _playback;
+
+        /// <summary>只读入口：播放业务协调器（给冒烟测试验"命令是不是都走了业务层"）。</summary>
+        internal PlaybackCoordinator Playback => _playback;
 
         /// <summary>
         /// 时长扫描器。
@@ -85,12 +101,6 @@ namespace 播放器
         private readonly System.Windows.Forms.Timer _uiTimer;
 
         private readonly System.Windows.Forms.Timer _skipTimer;
-
-        /// <summary>
-        /// 随机播放的"洗牌袋"（1.5.0 起）：一轮之内每首恰好一次，一轮完了重洗。
-        /// <para>以前是纯随机（可以连着播同一首），见 <see cref="NextRandomIndex"/>。</para>
-        /// </summary>
-        private readonly ShuffleBag _shuffleBag = new ShuffleBag();
 
         private readonly Font _playingItemFont;
 
@@ -171,8 +181,6 @@ namespace 播放器
         /// <summary>界面计时器的计数：每 5 拍（1 秒）把播放进度推给系统媒体控件一次。</summary>
         private int _smtcTick;
 
-        private int _consecutiveErrors;
-
         public MainForm(string[]? startupArgs, SingleInstance? singleInstance = null)
         {
             InitializeComponent();
@@ -186,10 +194,23 @@ namespace 播放器
             // 清一次就都对了，不必在每个读取点各判一次。
             if (!_settings.RestoreLastPlaylist) _settings.ForgetSession();
 
+            // 列表 / 队列 / 排序 / 筛选都归工作区；它要用设置里的排序依据。
+            _workspace = new PlaylistWorkspace(_settings);
+
             AttachSingleInstance(singleInstance);
 
             _engine = new PlayerEngine(this);
             videoView.MediaPlayer = _engine.Player;
+
+            // 播放业务：只认引擎与列表模型，界面通过事件接（见 MainForm.Playback.cs）。
+            _playback = new PlaybackCoordinator(
+                _engine,
+                _playlist,
+                _queue,
+                _settings,
+                ResumePositionLookup);
+
+            AttachPlaybackEvents();
 
             // 换画面旋转时引擎会换内核（libvlc 3 的 transform 只能在实例级设）：
             // 窗口与时长扫描都要重新接上，播放器状态也要重新铺一遍。

@@ -11,108 +11,58 @@ namespace 播放器
     /// </summary>
     public partial class MainForm
     {
-        /// <summary>每隔多少个界面计时周期（200ms）把历史落盘一次。</summary>
-        private const int HistoryFlushTicks = 100;
-
-        private readonly PlaybackHistory _history = PlaybackHistory.Load();
-        private PerFileAdjustments? _adjustments;
+        /// <summary>
+        /// 播放历史与"按文件记住的调整"都归它：什么时候记、什么时候落盘、每 100 拍后台写一次。
+        /// <para>界面只在这里调 Tick / Commit / Flush，不自己数拍子（见 <see cref="HistoryService"/>）。</para>
+        /// </summary>
+        private readonly HistoryService _historyService = new HistoryService();
 
         /// <summary>
         /// 只读入口：这份窗体的播放历史（给冒烟测试摆"写入在飞时又改了"的时序用；
         /// 主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。
         /// </summary>
-        internal PlaybackHistory History => _history;
+        internal PlaybackHistory History => _historyService.History;
 
         /// <summary>
-        /// 按文件记住的调整（音画 / 字幕延迟、歌词偏移）。
-        /// <para>和播放进度共用 <see cref="_history"/>，但落盘时机不同：
-        /// 调整是用户调出来的，改一次就立刻落盘。</para>
+        /// 按文件记住的调整（音画 / 字幕延迟、歌词偏移、画面旋转、轨道）。
+        /// <para>和播放进度共用同一份记录，但落盘时机不同：调整是用户调出来的，改一次就立刻落盘。</para>
         /// </summary>
-        private PerFileAdjustments Adjustments => _adjustments ??= new PerFileAdjustments(_history);
+        private PerFileAdjustments Adjustments => _historyService.Adjustments;
 
-        private TimeSpan? _pendingResume;
-        private int _historyFlushTicks;
+        /// <summary>把当前播放位置记进历史（只动内存，每 100 拍后台落一次盘）。由界面计时器每 200ms 调一次。</summary>
+        private void RecordCurrentPosition() =>
+            _historyService.Tick(
+                _engine.HasMedia ? _engine.CurrentPath : null,
+                _engine.Time,
+                _engine.Length,
+                _settings.ResumePlayback);
 
         /// <summary>
-        /// 把当前播放位置记进历史（只动内存）。由界面计时器每 200ms 调一次。
-        /// <para>
-        /// 「记住播放进度」<b>只控制"记不记位置"</b>：关掉之后仍然记"这个文件播过"，
-        /// 否则「文件 → 最近播放」永远是空的（1.9.0 修，见 docs/1.9.0计划.md 的 A4）。
-        /// </para>
+        /// 给播放业务查"这个文件该从哪儿接着播"。
+        /// <para>续播的<b>时机</b>（要等媒体播起来 + 总时长已知）在
+        /// <see cref="PlaybackCoordinator"/> 里，这里只回答"记的是多少"。</para>
         /// </summary>
-        private void RecordCurrentPosition()
-        {
-            if (!_engine.HasMedia) return;
-
-            var path = _engine.CurrentPath;
-            if (string.IsNullOrEmpty(path)) return;
-
-            if (_settings.ResumePlayback)
-                _history.Record(
-                    path,
-                    TimeSpan.FromMilliseconds(_engine.Time),
-                    TimeSpan.FromMilliseconds(_engine.Length));
-            else
-                _history.MarkPlayed(path);
-
-            // 定期落盘，程序被强制结束时最多丢 20 秒的进度。
-            // 注意用后台写：序列化 2000 条记录是几百 KB，放在 UI 线程上会让画面周期性地顿一下。
-            if (++_historyFlushTicks < HistoryFlushTicks) return;
-
-            _historyFlushTicks = 0;
-            _history.SaveInBackground();
-        }
-
-        /// <summary>排定续播位置：等媒体真正播起来之后再定位。</summary>
-        private void ScheduleResume(string filePath)
-        {
-            _pendingResume = null;
-
-            if (!_settings.ResumePlayback) return;
-            if (_history.TryGetResumePosition(filePath, out var position))
-                _pendingResume = position;
-        }
-
-        /// <summary>
-        /// 待续播位置要等媒体真正开始播放、且总时长已知之后才能 seek，
-        /// 否则 libvlc 还没准备好，定位会被丢掉。
-        /// </summary>
-        private void ApplyPendingResume()
-        {
-            if (!_pendingResume.HasValue) return;
-            if (!_engine.HasMedia || !_engine.IsPlaying) return;
-            if (_engine.Length <= 0) return;
-
-            var target = _pendingResume.Value;
-            _pendingResume = null;
-
-            _engine.SeekTo((long)target.TotalMilliseconds);
-
-            var name = _playlist.Current?.DisplayName ?? Path.GetFileName(_engine.CurrentPath ?? string.Empty);
-            SetStatus($"已从 {TimeFormatter.Format(target)} 继续播放：{name}");
-        }
+        private TimeSpan? ResumePositionLookup(string filePath) => _historyService.ResumePositionLookup(filePath);
 
         /// <summary>
         /// 切歌 / 暂停时把当前进度落盘。
-        /// <para>写文件交给线程池（<see cref="PlaybackHistory.SaveInBackground"/>），
-        /// 免得切歌时因为序列化整份历史而卡一下。</para>
         /// <para><b>不以「记住播放进度」为前提</b>：那个开关只决定记不记位置，
         /// 最近播放与按文件记下的调整都要落盘（1.9.0 修，以前关掉开关这里整个早退）。</para>
         /// </summary>
-        private void CommitHistory()
-        {
-            RecordCurrentPosition();
-            _history.SaveInBackground();
-        }
+        private void CommitHistory() =>
+            _historyService.Commit(
+                _engine.HasMedia ? _engine.CurrentPath : null,
+                _engine.Time,
+                _engine.Length,
+                _settings.ResumePlayback);
 
-        /// <summary>
-        /// 退出前把历史<b>同步</b>写下去。不能只排队——进程马上就要结束了。
-        /// </summary>
-        private void FlushHistory()
-        {
-            RecordCurrentPosition();
-            _history.Save();
-        }
+        /// <summary>退出前把历史<b>同步</b>写下去。不能只排队——进程马上就要结束了。</summary>
+        private void FlushHistory() =>
+            _historyService.Flush(
+                _engine.HasMedia ? _engine.CurrentPath : null,
+                _engine.Time,
+                _engine.Length,
+                _settings.ResumePlayback);
 
         /// <summary>
         /// 把"设置 / 播放历史读坏了"这件事告诉用户一次。
@@ -126,7 +76,7 @@ namespace 播放器
             var warnings = new System.Collections.Generic.List<string>();
 
             if (!string.IsNullOrEmpty(_settings.LoadWarning)) warnings.Add(_settings.LoadWarning!);
-            if (!string.IsNullOrEmpty(_history.LoadWarning)) warnings.Add(_history.LoadWarning!);
+            if (!string.IsNullOrEmpty(History.LoadWarning)) warnings.Add(History.LoadWarning!);
             if (!string.IsNullOrEmpty(PlaylistLibraryWarning)) warnings.Add(PlaylistLibraryWarning!);
 
             // 媒体键只注册上一部分时也要说一句：哪个键按了没反应，用户看不出来是被人占了
@@ -151,7 +101,7 @@ namespace 播放器
         {
             ClearMenuItems(menuFileRecent.DropDownItems);
 
-            var recent = _history.Recent
+            var recent = History.Recent
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .ToList();
 
@@ -175,7 +125,7 @@ namespace 播放器
 
                 // 「· 位置」只在"记住播放进度"开着时显示：关着的时候打开它也不会续播，
                 // 显示出来就是骗人（1.9.0 修，见 docs/1.9.0计划.md 的 A4）。
-                if (_settings.ResumePlayback && _history.TryGetResumePosition(path, out var position))
+                if (_settings.ResumePlayback && History.TryGetResumePosition(path, out var position))
                     text += $"　·　{TimeFormatter.Format(position)}";
 
                 var item = new ToolStripMenuItem(text) { ToolTipText = path };
@@ -189,8 +139,8 @@ namespace 播放器
             var clearItem = new ToolStripMenuItem("清除最近播放(&C)");
             clearItem.Click += (sender, e) =>
             {
-                _history.Clear();
-                _history.Save();
+                History.Clear();
+                History.Save();
                 RebuildRecentMenu();
                 SetStatus("已清除播放历史");
             };
@@ -224,10 +174,10 @@ namespace 播放器
         /// <summary>清掉所有文件的播放进度，但保留"最近播放"列表。</summary>
         private void ClearAllResumePositions()
         {
-            _history.ClearPositions();
-            _history.Save();
+            History.ClearPositions();
+            History.Save();
 
-            _pendingResume = null;
+            _playback.ClearPendingResume();
             SetStatus("已清除所有文件的续播进度");
         }
     }

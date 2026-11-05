@@ -34,16 +34,12 @@ namespace 播放器
         {
             if (!_engine.HasMedia) return;
 
-            // 续播定位要等媒体真正播起来、且总时长已知，否则 libvlc 还没准备好。
-            ApplyPendingResume();
-
             var length = _engine.Length;
             var time = _engine.Time;
 
-            // A-B 循环：越过 B 点（含正好到 B）就跳回 A 点。拖动进度条时不掺和——
-            // 那会儿用户正捏着位置，把他拽回 A 点只会让人以为进度条坏了。
-            if (!_userSeeking)
-                time = ApplyAbLoop(time);
+            // 续播定位与 A-B 循环都在播放业务里：续播要等"媒体播起来 + 总时长已知"，
+            // 越过 B 点才跳回 A 点（拖动进度条时不掺和——那会儿用户正捏着位置）。
+            time = _playback.Tick(time, length, _userSeeking);
 
             if (!_userSeeking && length > 0)
             {

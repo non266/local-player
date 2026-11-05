@@ -283,7 +283,7 @@ namespace SmokeTest
         }
 
         /// <summary>
-        /// 「当前这一首」的会话（<see cref="TrackLyricsSession"/>）本身的三条约定。
+        /// 「当前这一首」的会话（<see cref="MediaSession"/>）本身的三条约定。
         /// <para>
         /// 其中"切歌之后，上一首的标签结果必须作废"这条，靠界面很难稳定复现——
         /// 得让异步读标签比切歌还慢。会话是 UI 无关的纯对象，这里直接把那段时序摆出来。
@@ -291,7 +291,7 @@ namespace SmokeTest
         /// </summary>
         private static bool CheckTrackSession()
         {
-            var session = new TrackLyricsSession();
+            var session = new MediaSession();
 
             var first = session.BeginMetadata();
             if (!session.IsCurrent(first))

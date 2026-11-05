@@ -293,9 +293,9 @@ namespace 播放器
                 return;
             }
 
-            if (_playlistFilter.Length == 0)
+            if (_workspace.Filter.Length == 0)
             {
-                var (sum, known, unknown) = _playlist.GetDurationSummary();
+                var (sum, known, unknown) = _workspace.DurationSummary();
 
                 if (known == 0)
                 {
@@ -313,19 +313,7 @@ namespace 播放器
 
             visible ??= GetVisiblePlaylistIndices();
 
-            var filteredTotal = TimeSpan.Zero;
-            var filteredKnown = 0;
-
-            foreach (var index in visible)
-            {
-                var duration = _playlist.Items[index].Duration;
-                if (!duration.HasValue) continue;
-
-                filteredTotal += duration.Value;
-                filteredKnown++;
-            }
-
-            var filteredUnknown = visible.Count - filteredKnown;
+            var (filteredTotal, filteredKnown, filteredUnknown) = _workspace.DurationSummary(visible);
             var text = $"筛选 {visible.Count}/{total} 项 · 总计 "
                        + (filteredKnown == 0 ? "--:--" : TimeFormatter.Format(filteredTotal));
 
@@ -781,7 +769,7 @@ namespace 播放器
                 return;
             }
 
-            if (_playlistFilter.Length > 0)
+            if (_workspace.Filter.Length > 0)
             {
                 SetStatus("筛选状态下不找重复项，请先清空搜索框");
                 return;

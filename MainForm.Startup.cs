@@ -278,8 +278,7 @@ namespace 播放器
             if (resetTrackPanel) LoadTrackMetadata(null);
 
             // 恢复上次的排序（要在播放列表载入之前设好）。
-            _sortField = _settings.SortField;
-            _sortDescending = _settings.SortDescending;
+            _workspace.SyncSortFromSettings();
             ApplySortMenu();
 
             // 设置方案里可能带着另一种窗口模式：界面已经在了就当场换过去
@@ -459,10 +458,10 @@ namespace 播放器
             foreach (var item in _playlist.Items)
             {
                 if (!set.Contains(item.FilePath)) continue;
-                if (item.HasError && item.ErrorMessage == MissingFileMessage) continue;
+                if (item.HasError && item.ErrorMessage == PlaybackCoordinator.MissingFileMessage) continue;
 
                 item.HasError = true;
-                item.ErrorMessage = MissingFileMessage;
+                item.ErrorMessage = PlaybackCoordinator.MissingFileMessage;
                 marked++;
             }
 

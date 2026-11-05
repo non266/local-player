@@ -11,27 +11,31 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 35,806 行 / **152 个文件** |
-| `Core/` | 11,709 行 / 66 个文件 |
-| `Ui/` | 10,731 行 / 50 个文件 |
-| `MainForm*` 这一族 partial | 13,289 行 / **35 个文件**、81 个实例字段（P1 之前是 14 个文件 / 90 个字段；1.9.0 起又加了几个，**没重数**） |
-| `tools/SmokeTest/` | 19,644 行 / 66 个文件（拆之前是 8,900 行、**单个文件**） |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 38,120 行 / **166 个文件** |
+| `Core/` | 12,543 行 / 70 个文件 |
+| `Ui/` | 12,758 行 / 58 个文件 |
+| `MainForm*` 这一族 partial | 12,742 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 20,857 行 / 69 个文件 |
 
-> 数字最后一次量是在 **2026-11-04（1.11.0：打开光盘 / 全屏进度条 / 任务栏按钮）**：产品侧多出
-> `Core/OpticalDisc.cs`、`MainForm.Disc.cs`、`MainForm.Fullscreen.cs`、`Ui/FullscreenProgressBar.cs`；
-> 冒烟多出 `Program.Disc.cs`（新第 17 步）、`Program.Video.FullscreenBar.cs`、`Program.MainForm.Taskbar.cs`；
-> 另外 `native\vlc-3.0.24\` 里有两个 DVD 访问插件（不算进 `.cs` 行数）。
+> 数字最后一次量是在 **2026-11-05（1.12.0：音频迷你模式 + 命令层 / 窗口模块 / 播放业务与所有权收敛）**：
+> 产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、`Core/HistoryService`、
+> `Core/MediaSession`（由 `TrackLyricsSession` 改名）、`Ui/PlayerCommand`、`Ui/CommandBinder`、
+> `Ui/IWindowSurfaceHost`、`Ui/WindowSurfaceController`、`Ui/VideoWindowModule`、`Ui/AudioWindowModule`、
+> `Ui/MiniPlayerView`、`Ui/FullscreenModule`、`MainForm.Commands`、`MainForm.SurfaceHost`；
+> 冒烟多出 `Program.Commands`、`Program.MiniPlayer`、`Program.Ownership`（第 18～20 步）。
 > 数行数用 `[IO.File]::ReadAllLines`——本机的 `Get-Content` 会把无 BOM 的 UTF-8 按 GBK 读，
 > 行数是错的（见维护手册坑表）。
 
 分层名义上清楚（`Core` 与界面无关、`Ui` 是可复用零件、`MainForm*` 是装配），
-但**真正的耦合点是 `MainForm` 这个 god class**：
+**耦合点仍然是 `MainForm`**，但 1.12.0 之后它只管"接线"：
 
-- 设置、播放引擎、播放列表模型、时长扫描器、播放历史、当前曲目的标签 / 歌词 / 封面、
-  在线查找的会话缓存、歌词偏移……全挂在这一个对象上，82 个字段互相可见；
-- partial 只做到"文件级"切分，**没有做到职责切分**：任何一个 feature 的改动都要动 3~8 个文件，
-  并且要在 4 个菜单宿主（文件菜单 / 播放列表右键 / 工具栏下拉 / 歌单窗口）上手动保持同步；
-- 表现层到处是"手写一遍 Tag + 递归刷新"的菜单模式（桌面歌词、在线歌词、歌词偏移、歌单库各写一份）。
+- 1.12.0 之前：设置、引擎、播放列表、历史、当前曲目、在线查找、歌词偏移、窗口形态、播放序列
+  全挂在这一个对象上；partial 只做到"文件级"切分，没做到职责切分；
+- 现在：窗口形态在 `Ui/WindowSurfaceController` + 三个模块，播放业务在
+  `Core/PlaybackCoordinator`，命令在 `Ui/PlayerCommandCatalog` + `MainForm.Commands`，
+  列表 / 会话 / 历史各有主人（§18）。`MainForm` 留下的是装配、菜单、系统集成与各功能 partial；
+- 仍然存在的重复：菜单构建的"手写 Tag + 递归刷新"模式（`Ui/MenuSection` 只覆盖了两套），
+  以及若干单宿主设置项没进命令目录（判据见 §18.3）。
 
 症状不是"行数多"，而是：**加一个小功能要动很多文件、而且很容易顺坏别处**。
 
@@ -41,11 +45,11 @@
 
 编号 | 债务 | 现在会怎样出事 | 方向
 --- | --- | --- | ---
-D1 | `MainForm` god class（9,000 行 / 81 字段） | 每个 feature 都要改 3~8 个文件；字段互相可见，改一处怕碰另一处 | P1：按职责抽服务，窗体只做绑定（**已抽走 `TrackLyricsSession` / `OnlineLyricsService` / `PlaylistLibraryController` / `PerFileAdjustments`**）
+D1 | `MainForm` god class（9,000 行 / 81 字段） | 每个 feature 都要改 3~8 个文件；字段互相可见，改一处怕碰另一处 | P1：按职责抽服务（**已抽走 `OnlineLyricsService` / `PlaylistLibraryController` / `PerFileAdjustments`**）；**1.12.0 又把窗口形态 / 播放业务 / 命令 / 数据所有权抽走**（§18）
 D2 | 测试是 9,000 行单文件、大量反射访问私有成员 | 它是安全网，却和实现细节绑死；改字段名/签名就红，"重构"反而被自己的测试挡着 | **已全部做完**：测试拆成 22 个文件；反射从 **171 处降到 1 处**（只剩框架的 `ToolStripItem.OnClick`，见第 12 节）
 D3 | 按文件的调整（音画延迟 / 字幕延迟 / 歌词偏移）分散在两处"记住 / 恢复"里 | ~~三套存储~~ **前提不成立**（存储一直是同一份 `history.json`）；真实问题是两处流程各自决定"要不要落盘"，其中一处（两个延迟）落盘时机是坏的：**关掉「记住播放进度」之后，延迟调整根本不会写进 history.json**（落盘那几条路都以这个开关为前提） | **P1-4 已做**：`PerFileAdjustments` 收口"记什么、什么时候落盘"
 D4 | 在线歌词的请求编排 / 懒鉴权 / 死源记忆都在窗体里 | 这段最容易出微妙 bug（本次就抓到过一次"500 导致丢密钥"），却没法单独测 | **P1-2 已做**：编排 / 缓存 / 取消 / 去重搬进 `OnlineLyricsService`（`IOnlineLookupHost` 交回结果）；"懒鉴权 / 死源记忆"本来就在 `LrcApi` 里
-D5 | 菜单构建模式重复 4 份、宿主 2~3 个 | 新选项要记得在每一处同步；漏一处就是"菜单里没有" | **P2 已做一半**：`Ui/MenuSection.cs`（挂宿主 + 递归刷 + 一次刷全部）已用在桌面歌词与歌词偏移两套上；在线歌词（单宿主）与歌单库（展开时重建）留在原地，理由见第 9 节
+D5 | 菜单构建模式重复 4 份、宿主 2~3 个 | 新选项要记得在每一处同步；漏一处就是"菜单里没有" | **P2 已做一半**：`Ui/MenuSection.cs` 已用在桌面歌词与歌词偏移两套上；**1.12.0 用命令目录统一了播放 / 文件 / 视图命令的六张脸**（菜单 / 快捷键 / 工具栏 / 托盘 / 任务栏 / 卡片），单宿主设置项仍留在原地
 D6 | `SaveSession` 里 20 多行"UI → 设置"手工镜像 | 每次加设置项都要记得在两处改；漏了就"重启不生效" | **P2 已做**：没有做 `SessionState` 对象（理由见第 9 节），改成用一条检查把整段镜像钉住（第 6 步 `CheckSessionMirror`）
 D7 | 错误处理不统一，异常信息平时看不见 | 出了事只能靠状态栏一行字，用户报问题给不出上下文 | **P0 已做**：`AppLog` + 47 处空吞异常改成带理由的记录 + 崩溃处理器
 D8 | 侧栏装配 + 章节 + 音频设备 + 信息行混在 `MainForm.Sidebar.cs`（730 行） | 想改信息行得读完整篇 | **P3 已做**：拆成 5 份（侧栏装配 243 / 元数据 291 / 均衡器 100 / 音频设备 92 / 章节 78）
@@ -877,4 +881,51 @@ F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.c
 
 照 17.2 的五条规矩做即可；冒烟那几个只影响测试、风险最低，所以先做它们。
 
+## 18. 1.12.0：模块、命令与数据所有权（行为零变化的一轮）
 
+这一轮用户点名六件事：迷你模式、NowPlayingView / 窗口模式独立、引擎与业务分离、
+音频 / 视频 / 全屏成为独立模块、三块数据各有主人、菜单 / 快捷键 / 任务栏共用一套命令。
+实现分成六个里程碑，每个里程碑都单独跑全量（M1～M3 一次 167 秒、M4～M5 一次 168 秒），
+现有 21 项断言**一条未改**。
+
+### 18.1 模块图
+
+| 层 | 类型 | 管什么 |
+| --- | --- | --- |
+| `Core`（不引 WinForms） | `PlaybackCoordinator`（+`.AbLoop`） | 放哪一首、顺延、随机洗牌袋、循环、插播队列、末尾回绕、续播时机、A-B 回跳、连续失败上限、均衡重载。通过 `Opening/Opened/StatusChanged/ListInvalidated/QueueChanged/Stopping/Stopped/ResumeApplied` 交回界面 |
+| | `PlaylistWorkspace` | 列表模型、插播队列、排序依据、筛选词；`Matches` 保留 OrdinalIgnoreCase（土耳其语区规则） |
+| | `MediaSession`（原 `TrackLyricsSession`） | 当前曲目的路径 / 标签 / 歌词 / 封面 / 歌词偏移 / 标签版本号 |
+| | `HistoryService` | `PlaybackHistory` + `PerFileAdjustments` + 每 100 拍后台落盘；关掉"记住位置"仍 `MarkPlayed` |
+| `Ui`（WinForms 零件 + 界面模块） | `PlayerCommand` / `CommandBinder` | 25 条命令、26 个快捷键、F1 帮助正文、菜单 / 工具条绑定 |
+| | `WindowSurfaceController` | 视频 / 音频 / 迷你三种形态互斥切换、各自的几何、全屏入口、形态变化通知 |
+| | `VideoWindowModule` / `AudioWindowModule` / `FullscreenModule` | 三种形态各自的外壳、卡片、全屏进度条生命周期 |
+| | `MiniPlayerView` / `NowPlayingView` / `FullscreenProgressBar` / `PlaybackControls` | 看得见的零件 |
+| `MainForm*`（装配） | `MainForm.Commands` / `.SurfaceHost` / 各 feature partial | 菜单与门禁、事件接线、系统集成（托盘 / 任务栏 / 媒体键 / SMTC / 桌面歌词）、设置与生命周期 |
+
+### 18.2 数据所有权规则（谁能写）
+
+| 数据 | 唯一主人 | 规则 |
+| --- | --- | --- |
+| 播放列表条目、插播队列、排序、筛选 | `PlaylistWorkspace` | 增删改 / 排序 / 筛选只经过它；ListView / 菜单 / 歌单窗口只读或调方法 |
+| 当前曲目的标签 / 歌词 / 封面 / 偏移 | `MediaSession` | 只有它能写；"真正在播的路径"只有 `PlayerEngine.CurrentPath` 一个真相 |
+| 历史、按文件调整、落盘节奏 | `HistoryService` | 界面只调 `Tick/Commit/Flush/ResumePositionLookup`，不自己数拍子 |
+| 播放序列（下一首是谁、播完怎么办） | `PlaybackCoordinator` | 它是唯一按业务顺序调用引擎播放方法的地方；界面不直接 `Open/Stop/Replay` |
+| 窗口形态与几何 | `WindowSurfaceController` + 三个模块 | 各形态各记各的；模块不碰菜单项，形态变化用事件通知 |
+| 命令清单与快捷键 | `PlayerCommandCatalog` | 菜单显示串、F1 帮助、按键映射都从它生成 |
+
+`MainForm` 保留的同名成员（`IsAudioWindow` / `IsMiniWindow` / `IsFullscreen` / `NowPlaying` /
+`MiniPlayer` / `FullscreenBar` / `Playback` / `Workspace` / `Session` / `History` / `Playlist`）
+都只是委托或只读入口，给测试与少数调用点用。
+
+### 18.3 命令层为什么只收"命令"
+
+判据：**一个动作出现在 ≥2 个宿主上，或者有快捷键**，才进 `PlayerCommandCatalog`。
+因此主题 / 倍速 / 画面比例 / 循环模式 / 音轨与字幕轨子菜单没有搬（单宿主或纯设置），
+它们仍由各自的处理器维护；`Ui/PlayerCommand.cs` 放在 `Ui` 而不是 `Core`，
+是因为它要用 `Keys`（WinForms 类型），而 `Core` 一直不引用 WinForms。
+
+### 18.4 这一轮没做的事
+
+- 没有引 DI / MVVM；模块用接口（`IWindowSurfaceHost`）拿依赖，而不是容器。
+- 没有把 `MainForm.Floating.cs`（悬浮侧栏 / 播放列表窗口）拆成模块：它只通过回调配合全屏隐藏 / 恢复。
+- 没有改任何既有快捷键，也没有改菜单文字（测试与用户都按文字找菜单项）。

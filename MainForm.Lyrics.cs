@@ -40,7 +40,7 @@ namespace 播放器
 
         internal ToolStripMenuItem? TrayLyricsOffset => _trayLyricsOffset;
 
-        // 当前曲目的歌词偏移不在这里：它跟着曲目走，存在 _track（TrackLyricsSession）里
+        // 当前曲目的歌词偏移不在这里：它跟着曲目走，存在 _track（MediaSession）里
 
         // =====================================================================
         // 菜单

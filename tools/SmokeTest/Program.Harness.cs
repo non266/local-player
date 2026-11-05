@@ -57,10 +57,10 @@ namespace SmokeTest
         /// 测试里到处是 <see cref="Form"/> 形参，这里统一转一次类型。
         /// 这几样以前是主窗体的私有字段，测试靠反射去挖——内部一改名测试就红，
         /// 安全网反过来挡住了重构。现在主工程把它们收进
-        /// <see cref="TrackLyricsSession"/>，并给了测试一个 internal 只读入口。
+        /// <see cref="MediaSession"/>，并给了测试一个 internal 只读入口。
         /// </para>
         /// </summary>
-        private static TrackLyricsSession SessionOf(Form form) => ((播放器.MainForm)form).Track;
+        private static MediaSession SessionOf(Form form) => ((播放器.MainForm)form).Session;
 
         /// <summary>主窗体的设置对象（测试要摆开 / 关在线获取、换地址这些场景）。</summary>
         private static AppSettings SettingsOf(Form form) => ((播放器.MainForm)form).Settings;

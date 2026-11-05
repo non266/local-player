@@ -4,6 +4,68 @@
 [语义化版本](https://semver.org/lang/zh-CN/)。
 维护期的规矩（什么算"必修"、发版要做哪三步）写在 [docs/维护手册.md](docs/维护手册.md)。
 
+## [未发布]
+
+### 新增（F15）：音频迷你模式
+
+- `Ctrl+Alt+N` / 「视图 → 迷你模式」把窗口收成一张 **440×160** 的小卡片：封面缩略图 +
+  曲名 / 艺术家 + 进度条 + 当前 / 总时长 + 上一首 / 播放暂停 / 下一首 / 停止 + 「还原」；
+  **双击卡片**也能还原。迷你期间窗口**置顶**、没有菜单 / 工具栏 / 状态栏 / 传输条，两栏收起。
+- 退出迷你回到**进入前**的形态（视频或音频窗口）与那套几何；关窗时记住"下次还是迷你"
+  （`MiniMode`）与迷你自己的位置大小（`MiniWindow*`），**不污染音频窗口那份几何**。
+- 迷你模式里没有全屏与播放列表：`F11` / `F9` 会被挡住并在状态栏说明原因；
+  `Ctrl+Alt+M` 会退出迷你并切到音频 / 视频。换歌不会被"自动形态"推翻（用户自己选的形态优先）。
+- 新文件：`Ui/MiniPlayerView.cs`；设置新增 `MiniMode` / `MiniWindowX/Y/Width/Height`
+  （设置方案覆盖从 69 项变 74 项）。
+
+### 重构（R13）：菜单 / 快捷键 / 任务栏共用同一套命令
+
+- 新增命令目录 `Ui/PlayerCommand.cs`（25 条命令、26 个快捷键）与唯一执行入口
+  `MainForm.ExecuteCommand`；菜单、快捷键、工具栏、托盘、任务栏缩略图按钮、
+  全局媒体键 / SMTC、音频 / 迷你卡片、桌面歌词控制条**全部**经过它。
+- F1 帮助与菜单上的 `ShortcutKeyDisplayString` 都从目录生成——以前
+  `ProcessCmdKey` 的 switch、`ShowShortcuts()` 的长字符串、设计器里的显示串三份各写一遍，
+  改一个键要记得改三处。**菜单文字一个字没改**（测试与用户都按文字找菜单项）。
+- 新增 `Ui/CommandBinder.cs`；`Ui/PlaybackControls.cs` 增加 `BindCommands`。
+
+### 重构（R14）：音频窗口 / 视频窗口 / 全屏成为独立模块
+
+- `Ui/WindowSurfaceController`（形态总管）+ `Ui/VideoWindowModule` + `Ui/AudioWindowModule`
+  + `Ui/FullscreenModule`；`MainForm` 只留菜单、门禁与委托（`WindowMode.cs` 438 → 约 240 行，
+  `Fullscreen.cs` 104 → 约 40 行，`Layout.cs` 只留播放列表显隐与置顶）。
+- 模块通过 `Ui/IWindowSurfaceHost`（`MainForm.SurfaceHost.cs` 显式实现）拿窗体 / 设置 /
+  分隔条 / 状态，不直接见 `MainForm`；卡片仍是盖在画面位置上的面板（视频 HWND 不销毁），
+  算术排版 + 面板 `SizeChanged` + 200 ms 自愈三道保险原样保留（B9 不回归）。
+
+### 重构（R15）：播放引擎与播放业务分离
+
+- 新增 `Core/PlaybackCoordinator`（+ `.AbLoop.cs`）：顺延跳过打不开的项、随机洗牌袋、循环、
+  「下一首播放」插播队列、末尾回绕、续播时机（等媒体播起来 + 总时长已知）、A-B 回跳、
+  连续失败上限、音量均衡重载都归它；界面通过
+  `Opening/Opened/ListInvalidated/StatusChanged/QueueChanged/Stopping/Stopped/ResumeApplied`
+  事件接。`PlayerEngine` 一个字节没改，仍是纯内核。
+- `MainForm.Playback.cs` 682 → 约 470 行，只剩界面（按钮 / 进度 / 音量 / 速率 / A-B 菜单 / 均衡）；
+  `PlayIndex/PlayNext/PlayPrevious/StopPlayback` 成为一行委托，其它调用点不变。
+  界面计时器每拍只调 `Tick(time, length, userSeeking)`。
+
+### 重构（R16）：播放列表 / 媒体会话 / 历史各有唯一主人
+
+- `Core/PlaylistWorkspace`：列表、插播队列、排序依据、筛选词都收进去；筛选仍按
+  `OrdinalIgnoreCase`（土耳其语区规则）、排序写回设置、总时长可只算筛选后的索引。
+- `Core/TrackLyricsSession` **改名** `Core/MediaSession`：当前曲目的路径 / 标签 / 歌词 /
+  封面 / 偏移只有它能写；"真正在播的路径"仍只有 `PlayerEngine.CurrentPath` 一个真相。
+- `Core/HistoryService`：历史 + 按文件调整 + "每 100 拍后台落一次盘"的节奏；
+  关掉「记住播放进度」仍然记"听过"（1.9.0 A4 的规矩）由服务保证。
+- `MainForm` 里的 `_sortField` / `_sortDescending` / `_playlistFilter` / `_filterTokens` /
+  `_history` / `_adjustments` / `_historyFlushTicks` / `_pendingResume` / `_shuffleBag` 全部删除。
+
+### 测试与验证
+
+- 冒烟 **21 项 / 17 步 → 24 项 / 20 步**：新增「命令层」（id 22）、「迷你模式」（id 23）、
+  「播放业务与所有权」（id 24）；既有 21 项断言一条未改。
+- 变异 **13 条**全部按预期以一句具体的话变红（清单见 [docs/1.12.0计划.md](docs/1.12.0计划.md) 第 3 节）。
+- 实机全量：**24 项 / 20 步全绿，约 175 秒**；Debug / Release 0 警告 0 错误。
+
 ## [1.11.0] - 2026-11-04
 
 ### 新增（F13）：打开光盘

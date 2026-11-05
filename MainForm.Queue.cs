@@ -18,14 +18,12 @@ namespace 播放器
     /// </summary>
     public partial class MainForm
     {
-        private readonly PlaybackQueue _queue = new PlaybackQueue();
-
         private ToolStripMenuItem? _menuPlayNext;
 
         private ToolStripMenuItem? _menuClearQueue;
 
         /// <summary>只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。</summary>
-        internal PlaybackQueue Queue => _queue;
+        internal PlaybackQueue Queue => _workspace.Queue;
 
         internal ToolStripMenuItem? MenuPlayNext => _menuPlayNext;
 
@@ -167,40 +165,10 @@ namespace 播放器
             _queue.Count == 0 ? string.Empty : $"（「下一首播放」队列里还有 {_queue.Count} 项）";
 
         /// <summary>
-        /// 自然播完时先问队列：非空就播队首，<b>不动列表的当前项</b>。
-        /// </summary>
-        /// <returns>这次"播完了"是不是被队列接管了。</returns>
-        private bool PlayNextFromQueue()
-        {
-            while (true)
-            {
-                var path = _queue.Dequeue();
-                if (path == null) return false;
-
-                var index = _playlist.IndexOfPath(path);
-
-                // 入队之后那一项被删了 / 列表换过一份：这条就当没了，继续看下一条。
-                if (index < 0)
-                {
-                    AppLog.Info($"「下一首播放」队列里的条目已经不在列表里，跳过：{path}");
-                    MarkQueuedItems();
-                    RefreshQueueMenu();
-                    continue;
-                }
-
-                MarkQueuedItems();
-                RefreshQueueMenu();
-
-                PlayIndex(index, keepCurrent: true);
-                return true;
-            }
-        }
-
-        /// <summary>
         /// 正在播的这一项在列表里的索引（按引擎真正打开的路径找）。
         /// <para>
         /// 不能只看 <c>_playlist.CurrentIndex</c>：插播时列表当前项是<b>刻意不动</b>的
-        /// （见 <see cref="PlayNextFromQueue"/>），照它找会指到另外一首。
+        /// （见 <see cref="PlaybackCoordinator"/> 的插播逻辑），照它找会指到另外一首。
         /// </para>
         /// <para>不在列表里（不在 / 还没播）返回 <c>-1</c>。</para>
         /// </summary>

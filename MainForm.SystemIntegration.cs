@@ -258,7 +258,7 @@ namespace 播放器
             _settings.ResumePlayback = menuResumePlayback.Checked;
 
             if (!_settings.ResumePlayback)
-                _pendingResume = null;
+                _playback.ClearPendingResume();
 
             SetStatus(menuResumePlayback.Checked ? "已开启播放进度记忆" : "已关闭播放进度记忆");
         }

@@ -256,6 +256,12 @@ MP3 / FLAC / APE / WAV / AAC / M4A / OGG / Opus / WMA…… 以及外挂字幕�
   要它们就切回视频窗口）
 - 音频窗口里的播放控件（歌词下面那一排）：**上一首 / 播放暂停 / 下一首 / 停止**，
   和工具栏、托盘、桌面歌词是同一套动作；没有媒体时"停止"是灰的
+- **迷你模式**（`视图 → 迷你模式` 或 `Ctrl+Alt+N`）：把窗口收成一张 **440×160** 的小卡片——
+  封面缩略图 + 曲名 / 艺术家 + 进度条 + 当前 / 总时长 + 上一首 / 播放暂停 / 下一首 / 停止 + 「还原」；
+  双击卡片也能还原。迷你期间窗口**置顶**、没有菜单 / 工具栏 / 状态栏 / 传输条。
+  退出迷你回到**进入前**的形态（视频或音频窗口）与那套几何；关窗时记住"下次还是迷你"
+  和迷你自己的位置大小，**不会污染音频窗口那份几何**。迷你里没有全屏与播放列表
+  （`F11` / `F9` 会说明原因），`Ctrl+Alt+M` 会退出迷你并切到音频 / 视频
 - **侧栏和播放列表互不牵连**：关掉播放列表不会再连带把侧栏一起收走，反之亦然
 - **两者都能脱离主窗口**：「视图 → 侧栏分离为悬浮窗」「视图 → 播放列表分离为独立窗口」。
   分离出来的窗口可自由摆放、能拖到第二块屏幕，位置和大小会记住；
@@ -487,7 +493,7 @@ dotnet build 播放器.csproj -c Release
   `local-player-<版本>-setup.exe` / `local-player-<版本>-portable.zip`（ASCII 名，免得各家下载工具
   对中文名处理不一致；下到本地想改成什么名字都行）；
 - **发布包是被验过的**：装出来那一份和便携 zip 解出来的那一份，各自在**自己的目录里**
-  跑过全量 21 步冒烟（全绿），不是只验了开发目录里那份。
+  跑过全量 24 步冒烟（全绿），不是只验了开发目录里那份。
 
 ### 打包
 
@@ -541,7 +547,10 @@ Core/                  与界面无关的核心逻辑
                          （5 份：主文件 / 数据形状 / 端点与纯函数 / JSON / 网络）
   OnlineLyricsService.cs 在线歌词与封面：会话缓存、缺什么才联网、取消、请求编排、失败只说一次
   Lyrics.cs               LRC 解析 + 按优先级从多来源装载歌词（含整条时间轴的平移）
-  TrackLyricsSession.cs  「当前这一首」的会话：路径 / 标签 / 歌词 / 歌词偏移 / 版本号
+  MediaSession.cs        「当前这一首」的会话（1.12.0 由 TrackLyricsSession 改名）：路径 / 标签 / 歌词 / 歌词偏移 / 版本号
+  PlaybackCoordinator*.cs 播放业务：顺延 / 随机 / 循环 / 插播 / 末尾回绕 / 续播时机 / A-B 回跳（2 份）
+  PlaylistWorkspace.cs   播放列表这块数据的主人：列表 / 队列 / 排序 / 筛选 / 总时长
+  HistoryService.cs      播放历史与按文件调整的主人：记什么、什么时候落盘
   LyricsOffset.cs        歌词偏移的数值规则：一档 0.5 秒、范围 ±30 秒、秒 / 毫秒的手输入
   LegacyText.cs          GBK / UTF-16 / UTF-8 的识别与解码
   EqualizerSettings.cs   均衡器预置与状态（预置曲线取自 libvlc）
@@ -586,8 +595,18 @@ Ui/                    可复用的界面零件
   SettingsLoadDialog.cs  载入设置方案时挑分组：每行写明这一组和当前有几项不一样
   LogViewDialog.cs       诊断日志查看（复制全文 / 打开日志文件）
   MenuSection.cs         一套菜单项挂在多个宿主上（视图 / 右键 / 托盘）后一起刷
+  PlayerCommand.cs       命令目录：25 条命令 / 快捷键 / F1 帮助 / 可用性规则
+  CommandBinder.cs       把菜单项 / 工具条项 / 按钮绑到命令并按状态快照刷新
+  IWindowSurfaceHost.cs  窗口模块向主窗口要的那一小张清单（窄接口）+ WindowSurface 枚举
+  WindowSurfaceController.cs 视频 / 音频 / 迷你三种形态的切换、几何与全屏入口
+  VideoWindowModule.cs   视频形态的几何与「从简化形态回来怎么还外壳」
+  AudioWindowModule.cs   音频卡片 + 迷你卡片的创建 / 摆放 / 主题 / 曲目 / 进度
+  MiniPlayerView.cs      迷你模式那张 440×160 的小卡片
+  FullscreenModule.cs    全屏快照与进出、进度条生命周期、指针轮询
 
-MainForm.cs            主窗口逻辑（播放控制、全屏、快捷键、菜单、生命周期、系统集成）
+MainForm.cs            主窗口装配（字段、构造、生命周期）+ 各 partial 的总入口
+MainForm.Commands.cs   命令层：唯一执行入口、可用性快照、六种表面刷新、F1 帮助
+MainForm.SurfaceHost.cs 主窗口作为窗口模块宿主的那一面（OnResize / 形态变化通知）
 MainForm.Designer.cs   设计器布局（可由 Visual Studio 窗体设计器打开）
 MainForm.Playlist.cs   列表渲染、增删改、拖放与时长回填
 MainForm.Search.cs     搜索过滤、排序、拖动换位
@@ -607,7 +626,8 @@ MainForm.OnlineLyrics.cs 在线歌词与封面：自动/手动获取、菜单、
 MainForm.Lyrics.cs     歌词时间轴偏移：菜单 / 右键菜单 / 热键、按文件记住与应用
 MainForm.Subtitle.cs   字幕与轨道：字幕文件、开 / 关字幕、音视频轨菜单（按文件记住）
 MainForm.VideoMenu.cs  画面右键菜单：字幕轨道 / 音轨 / 播放控制 / 全屏（全屏里唯一入口）
-MainForm.Fullscreen.cs 全屏进度条：什么时候出现 / 收起、拖到哪儿跳到哪儿
+MainForm.Fullscreen.cs 全屏入口的薄层（进出 / 进度条都在 Ui/FullscreenModule）
+MainForm.WindowMode.cs 「视图 → 窗口模式 / 迷你模式」菜单、勾选与门禁（形态在 Ui/WindowSurfaceController）
 MainForm.Disc.cs       「文件 → 打开光盘」：按本机光驱重建菜单、按盘的类型分流
 MainForm.Tray.cs       系统托盘与单实例转发
 
@@ -660,6 +680,7 @@ tools/IconGen/         生成 app.ico 的一次性工具，平时不用跑
 | `Ctrl+]` / `Ctrl+[` | 歌词提前 / 延后 0.5 秒（当前曲目） |
 | `Ctrl+Alt+D` | 锁定 / 解锁桌面歌词（**全局有效**，任何程序里都能按） |
 | `Ctrl+Alt+M` | 音频窗口 / 视频窗口（翻一下，并把偏好定成翻到的那个形态） |
+| `Ctrl+Alt+N` | 迷你模式（只留一张小卡片；再按一次还原） |
 | `F11` / `F` | 进入 / 退出全屏 |
 | `Esc` | 退出全屏 |
 | `Delete` | 从列表移除选中项 |
@@ -793,7 +814,7 @@ dotnet SmokeTest.dll
 $env:播放器_TEST_INTERLACED = "1"
 dotnet SmokeTest.dll 视频功能与逐帧
 
-# 只想验某一块时按名字筛（全量一次三分多钟，实测 167～203 秒（干净树重建后那次 203 秒）；筛选只要十几秒）：
+# 只想验某一块时按名字筛（全量一次约 168 秒；筛选只要十几秒）：
 dotnet SmokeTest.dll 桌面歌词      # 第 9 步（样本）+ 第 15 步：桌面歌词与歌词字体
 dotnet SmokeTest.dll 逐帧          # 只跑视频功能那一步（需要 播放器_TEST_VIDEO）
 dotnet SmokeTest.dll 侧栏          # 第 9 步 + 第 11 步
@@ -802,6 +823,9 @@ dotnet SmokeTest.dll 歌词偏移      # 第 9 步（样本）+ 第 18 步：歌
 dotnet SmokeTest.dll 日志          # 第 19 步：诊断日志与错误处理
 dotnet SmokeTest.dll 设置方案      # 第 20 步：设置方案（多套设置 + 按组载入）
 dotnet SmokeTest.dll 光盘          # 第 21 步：光盘判定 / MRL / m3u 往返（真盘要 播放器_TEST_DISC）
+dotnet SmokeTest.dll 命令层        # 第 22 步：命令目录 / 快捷键 / 六种表面 / F1 帮助
+dotnet SmokeTest.dll 迷你模式      # 第 23 步：迷你形态 / 几何 / 还原 / 持久化
+dotnet SmokeTest.dll 播放业务      # 第 24 步：顺延 / 插播 / 回绕 / 数据所有权
 
 # 有光驱的话，把一张 DVD 放进去、告诉它盘符，就能连"真能放起来"一起验：
 $env:播放器_TEST_DISC = "L:"
@@ -2438,6 +2462,12 @@ x64 进程**根本无法加载**另外两个，LibVLCSharp 也是按进程架构
   - **音频 CD 没有实物可验**：只验到"识别 + `cdda:///L:` + 走同一条播放路径"。
   - 顺带说明：这两个 DVD 插件是 **VLC 3.0.24 官方 win64 包**里的原件（GPLv2+，约 510 KB），
     因为 `VideoLAN.LibVLC.Windows` 那个包把它们漏掉了（见 `native/README.md`）。
+- **迷你模式（1.12.0）的边界**：
+  - 迷你期间窗口**固定置顶**（退出时恢复「窗口置顶」设置），「窗口置顶」菜单项在迷你里置灰；
+  - 迷你里放视频＝**只听声音**（和音频窗口同一条道理：用户自己选的形态，画面不显示）；
+  - 迷你窗口保留标准标题栏（拖动、任务栏按钮、全局媒体键、任务栏缩略图按钮照常），
+    卡片上的「还原」按钮或双击卡片回到进入前的形态；卡片上右键不弹画面菜单；
+  - 关窗会记住"下次还是迷你"（`MiniMode`）与迷你自己的几何，想回到大窗口按 `Ctrl+Alt+N`。
 - **全屏进度条是独立窗口**：它浮在画面上、不在画面里（画面是 libvlc 的子窗口，WinForms 控件盖不上去）。
   好处是视频区尺寸永远不变；代价是它盖住的那一条画面收不到右键菜单。
   Alt+Tab 走开会立刻收起，不抢焦点。

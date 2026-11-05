@@ -30,7 +30,7 @@ namespace 播放器
         /// 当前这一首的会话状态：路径 / 标签 / 歌词 / 歌词偏移 / 标签版本号。
         /// <para>切歌就是换一份会话，界面各处只读它，不再各自持有一份。</para>
         /// </summary>
-        private readonly TrackLyricsSession _track = new TrackLyricsSession();
+        private readonly MediaSession _track = new MediaSession();
 
         /// <summary>
         /// 只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。
@@ -40,7 +40,7 @@ namespace 播放器
         /// 会话内部怎么调整都不再牵动测试。测试只读，不调这里的写方法。
         /// </para>
         /// </summary>
-        internal TrackLyricsSession Track => _track;
+        internal MediaSession Session => _track;
 
         // =====================================================================
         // 初始化

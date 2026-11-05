@@ -403,13 +403,19 @@ namespace SmokeTest
 
             var videoOk = TryCreateTinyVideo(out var videoPath, out var videoReason);
 
+            // 这一份窗体跨 try/finally 使用：收尾时先停引擎再放窗体，最后才删样本。
+            // （先删文件再放 libvlc 会在某些时序下把原生层带崩——1.12.0 的 release-check 连撞三次，
+            //   同一个位置在直接跑时又正常。）
+            播放器.MainForm form = null!;
+
             try
             {
                 var setup = AppSettings.Load();
                 setup.WindowMode = WindowModes.Auto;
                 setup.Save();
 
-                using var form = new 播放器.MainForm(Array.Empty<string>());
+                // ⚠ 必须在 Save() 之后构造：主窗体在构造函数里就把设置读进去了。
+                form = new 播放器.MainForm(Array.Empty<string>());
                 form.Show();
                 PumpMessages(300);
 
@@ -460,6 +466,24 @@ namespace SmokeTest
             }
             finally
             {
+                // 先让引擎停稳、把窗体放掉，再删媒体文件：
+                // 反过来（先删文件、libvlc 还开着它）在 release-check 那种连续构建 / 输出的环境里
+                // 会把原生层打崩（退出码 0xCFFFFFFF，日志停在"按真实轨道判形态正常"那一行）。
+                try
+                {
+                    if (form != null)
+                    {
+                        form.Engine.Stop();
+                        PumpMessages(250);
+                        form.Close();
+                        form.Dispose();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Swallowed("真实轨道检查收尾时窗体已经关掉了", ex);
+                }
+
                 TryDelete(audioOnly);
                 if (videoOk) TryDelete(videoPath);
                 defaults.Save();

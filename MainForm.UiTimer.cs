@@ -63,8 +63,8 @@ namespace 播放器
                 : "--:--:--";
 
             // 全屏时那条浮在画面底部的进度条（1.11.0 F14）跟这里同步：
-            // 同一次算出来的时间与长度，不另起一套计时。
-            if (_isFullscreen) UpdateFullscreenBar(time, length);
+            // 同一次算出来的时间与长度，不另起一套计时（不在全屏 / 没建出来时它自己会忽略）。
+            _surfaces.UpdateProgress(time, length);
 
             RecordCurrentPosition();
             UpdateLyricsPosition();

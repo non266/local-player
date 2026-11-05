@@ -407,7 +407,7 @@ namespace 播放器
             // 现在可能正放着一首歌，不需要因为换了一套设置就把侧栏清成空状态
             ApplySettings(resetTrackPanel: false);
 
-            RestoreWindowPlacement();
+            _surfaces.RestorePlacement();
             ClampToWorkingArea();
             ApplyFloatingWindowsFromSettings();
             ApplyDesktopLyricsFromSettings();

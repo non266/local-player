@@ -75,12 +75,13 @@ namespace 播放器.Core
             {
                 "Theme", "ShowPlaylist", "ShowSidebar", "SidebarWidth", "SidebarPage",
                 "SidebarFloating", "PlaylistFloating", "AlwaysOnTop", "MinimizeToTray",
-                "SortField", "SortDescending", "WindowMode"
+                "SortField", "SortDescending", "WindowMode", "MiniMode"
             },
             [SettingsSection.Windows] = new[]
             {
                 "WindowX", "WindowY", "WindowWidth", "WindowHeight", "WindowMaximized", "SplitterDistance",
                 "AudioWindowX", "AudioWindowY", "AudioWindowWidth", "AudioWindowHeight",
+                "MiniWindowX", "MiniWindowY", "MiniWindowWidth", "MiniWindowHeight",
                 "SidebarWindowX", "SidebarWindowY", "SidebarWindowWidth", "SidebarWindowHeight",
                 "SidebarSnap", "SidebarSnapOffset",
                 "PlaylistWindowX", "PlaylistWindowY", "PlaylistWindowWidth", "PlaylistWindowHeight",

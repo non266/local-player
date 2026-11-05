@@ -129,9 +129,9 @@ namespace 播放器
             }
 
             // 音频窗口里没有侧栏那一栏（菜单项是灰的，这里只是兜底）
-            if (_isAudioWindow) return;
+            if (IsAudioWindow || IsMiniWindow) return;
 
-            if (_isFullscreen) return;
+            if (IsFullscreen) return;
 
             splitVideo.Panel2Collapsed = !visible;
 
@@ -171,7 +171,7 @@ namespace 播放器
         private void ApplyPanelLayout()
         {
             // 音频窗口里两栏都是收起的，没有"分配宽度"这回事
-            if (_isAudioWindow) return;
+            if (IsAudioWindow || IsMiniWindow) return;
 
             var total = splitMain.Width;
             if (total <= 0) return;
@@ -215,7 +215,7 @@ namespace 播放器
         private void ApplySidebarWidth()
         {
             // 音频窗口里侧栏是收起的：这里再摆一次会把它重新展开
-            if (_isAudioWindow) return;
+            if (IsAudioWindow || IsMiniWindow) return;
 
             if (_settings.SidebarFloating)
             {

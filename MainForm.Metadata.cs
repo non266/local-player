@@ -108,7 +108,7 @@ namespace 播放器
             UpdateTrayText();
 
             // 音频窗口那张卡片跟着换封面 / 曲名；顺手按新文件决定要不要换形态
-            _nowPlaying?.ShowTrack(path, tags);
+            _surfaces.Audio.ShowTrack(path, tags);
             SyncWindowShape(path);
 
             // 桌面歌词是独立的窗口，内容要单独推一次（曲名在没有歌词时用来兜底）
@@ -127,7 +127,7 @@ namespace 播放器
 
             var title = FirstNonEmpty(tags?.Title, path == null ? null : Path.GetFileNameWithoutExtension(path));
 
-            _smtc.SetTrack(title, tags?.Artist, _engine.HasVideo && !_isAudioWindow);
+            _smtc.SetTrack(title, tags?.Artist, _engine.HasVideo && !IsAudioWindow);
 
             // 封面：文件里内嵌的那张优先；没有再找同目录的 cover.jpg / folder.jpg 这类外挂封面
             // （找哪个文件由 Core\SidecarCover 定，和侧栏封面、和"要不要去网上找"是同一份判定）
@@ -188,7 +188,7 @@ namespace 播放器
             _desktopLyrics?.UpdatePosition(position);
 
             // 音频窗口那张卡片只显示"当前这一句"；没有歌词 / 纯文本歌词时清空，不留一行旧字
-            if (_isAudioWindow) _nowPlaying?.SetLyricLine(CurrentLyricLine(position));
+            if (IsAudioWindow) _surfaces.Audio.SetLyricLine(CurrentLyricLine(position));
 
             // 顺手把"在不在播"推过去：控制条第一个按钮画播放还是暂停靠它。
             // 属性 setter 里有相等判断，没变的时候不会重画。

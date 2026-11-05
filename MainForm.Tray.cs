@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using 播放器.Core;
+using 播放器.Ui;
 
 namespace 播放器
 {
@@ -37,10 +38,12 @@ namespace 播放器
         {
             _trayMenu = new ContextMenuStrip { ShowImageMargin = false };
 
-            _trayMenu.Items.Add(CreateTrayItem("播放 / 暂停", TogglePlayPause));
-            _trayMenu.Items.Add(CreateTrayItem("停止", StopPlayback));
-            _trayMenu.Items.Add(CreateTrayItem("上一首", PlayPrevious));
-            _trayMenu.Items.Add(CreateTrayItem("下一首", () => PlayNext(true)));
+            // 托盘这一份也走命令层：与菜单 / 快捷键 / 任务栏按钮是同一个执行入口，
+            // 不会再出现"托盘里能点、菜单里是灰的"（或者反过来）。
+            _trayMenu.Items.Add(CreateTrayCommand("播放 / 暂停", PlayerCommandId.PlayPause));
+            _trayMenu.Items.Add(CreateTrayCommand("停止", PlayerCommandId.Stop));
+            _trayMenu.Items.Add(CreateTrayCommand("上一首", PlayerCommandId.Previous));
+            _trayMenu.Items.Add(CreateTrayCommand("下一首", PlayerCommandId.Next));
             _trayMenu.Items.Add(new ToolStripSeparator());
             _trayMenu.Items.Add(CreateTrayItem("显示主界面", RestoreFromTray));
 
@@ -54,12 +57,10 @@ namespace 播放器
             // 每次展开都对齐一遍：勾选状态、外观那一项上的当前字号 / 浓度
             _trayDesktopLyrics.DropDownOpening += (s, e) => SyncDesktopLyricsChecks();
 
-            _trayDesktopLyricsEnabled = new ToolStripMenuItem("启用桌面歌词")
-            {
-                CheckOnClick = true
-            };
-            _trayDesktopLyricsEnabled.Click +=
-                (s, e) => SetDesktopLyricsEnabled(_trayDesktopLyricsEnabled.Checked);
+            _trayDesktopLyricsEnabled = new ToolStripMenuItem("启用桌面歌词");
+
+            // 勾选态由命令层统一推（与菜单 / 快捷键 Ctrl+D 同一条命令）
+            BindCommand(_trayDesktopLyricsEnabled, PlayerCommandId.ToggleDesktopLyrics);
 
             _trayDesktopLyrics.DropDownItems.Add(_trayDesktopLyricsEnabled);
             _trayDesktopLyrics.DropDownItems.Add(new ToolStripSeparator());
@@ -102,6 +103,14 @@ namespace 播放器
         {
             var item = new ToolStripMenuItem(text);
             item.Click += (s, e) => action();
+            return item;
+        }
+
+        /// <summary>托盘里一条"命令"项（与菜单 / 快捷键 / 任务栏按钮共用同一个执行入口）。</summary>
+        private ToolStripMenuItem CreateTrayCommand(string text, PlayerCommandId id)
+        {
+            var item = new ToolStripMenuItem(text);
+            BindCommand(item, id);
             return item;
         }
 

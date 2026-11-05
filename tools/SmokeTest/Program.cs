@@ -18,7 +18,7 @@ namespace SmokeTest
     /// </summary>
     internal static partial class Program
     {
-        private const int StepCount = 21;
+        private const int StepCount = 23;
 
         /// <summary>一步检查：名字用于筛选，<c>Needs</c> 声明它依赖的前置检查。</summary>
         private sealed class SmokeStep
@@ -97,7 +97,9 @@ namespace SmokeTest
                 new SmokeStep("歌词偏移", TestLyricsOffset, "标签与歌词"),
                 new SmokeStep("日志与错误处理", TestLogging),
                 new SmokeStep("设置方案", TestSettingsProfiles),
-                new SmokeStep("光盘", TestOpticalDisc)
+                new SmokeStep("光盘", TestOpticalDisc),
+                new SmokeStep("命令层", CheckCommandLayer),
+                new SmokeStep("迷你模式", CheckMiniPlayer)
             };
 
             var selected = SelectSteps(steps, filter);

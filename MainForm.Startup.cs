@@ -41,25 +41,17 @@ namespace 播放器
 
         private void WireEvents()
         {
+            // 菜单 / 工具栏里"命令"那一类先统一接到命令层（文件、播放、字幕、视图、工具栏）。
+            // 主题 / 倍速 / 画面比例 / 循环模式这些单选设置仍由下面各自的处理器管。
+            ConfigureCommandBindings();
+
             // ---- 文件菜单 ----
-            menuFileOpen.Click += (s, e) => OpenFilesDialog();
-            menuFileOpenFolder.Click += (s, e) => OpenFolderDialog();
-            menuFileOpenUrl.Click += (s, e) => OpenUrlDialog();
             menuFileExit.Click += (s, e) => Close();
 
             // 1.11.0 F13：「打开光盘」的子菜单在每次下拉时按本机光驱重建
             ConfigureDiscMenu();
 
             // ---- 播放菜单 ----
-            menuPlayPause.Click += (s, e) => TogglePlayPause();
-            menuStop.Click += (s, e) => StopPlayback();
-            menuPrev.Click += (s, e) => PlayPrevious();
-            menuNext.Click += (s, e) => PlayNext(true);
-            menuSeekBack.Click += (s, e) => SeekRelative(-SeekStepMilliseconds);
-            menuSeekForward.Click += (s, e) => SeekRelative(SeekStepMilliseconds);
-            menuVolumeUp.Click += (s, e) => AdjustVolume(5);
-            menuVolumeDown.Click += (s, e) => AdjustVolume(-5);
-            menuMute.Click += (s, e) => ToggleMute();
             menuRateHalf.Click += (s, e) => SetRate(0.5f);
             menuRate075.Click += (s, e) => SetRate(0.75f);
             menuRateNormal.Click += (s, e) => SetRate(1.0f);
@@ -83,13 +75,10 @@ namespace 播放器
             menuFileRecent.DropDownOpening += (s, e) => RebuildRecentMenu();
 
             // ---- 字幕菜单 ----
-            menuSubtitleOpen.Click += (s, e) => OpenSubtitleDialog();
-            menuSubtitleDisable.Click += (s, e) => ToggleSubtitles();
             menuSubtitle.DropDownOpening += (s, e) => UpdateSubtitleToggleText();
 
             // ---- 视图菜单 ----
             menuViewPlaylist.CheckedChanged += OnShowPlaylistChanged;
-            menuViewFullscreen.Click += (s, e) => ToggleFullscreen();
             menuThemeAuto.Click += (s, e) => ApplyTheme(ThemeId.Auto);
             menuThemeLight.Click += (s, e) => ApplyTheme(ThemeId.Light);
             menuThemeDark.Click += (s, e) => ApplyTheme(ThemeId.Dark);
@@ -108,17 +97,8 @@ namespace 播放器
             menuAbout.Click += (s, e) => ShowAbout();
 
             // ---- 工具栏 ----
-            tsbOpen.Click += (s, e) => OpenFilesDialog();
-            tsbOpenFolder.Click += (s, e) => OpenFolderDialog();
-            tsbPlay.Click += (s, e) => PlayButtonClicked();
-            tsbPause.Click += (s, e) => _engine.Pause();
-            tsbStop.Click += (s, e) => StopPlayback();
-            tsbPrev.Click += (s, e) => PlayPrevious();
-            tsbNext.Click += (s, e) => PlayNext(true);
-            tsbRewind.Click += (s, e) => SeekRelative(-SeekStepMilliseconds);
-            tsbForward.Click += (s, e) => SeekRelative(SeekStepMilliseconds);
-            tsbSnapshot.Click += (s, e) => TakeSnapshot();
-            tsbTogglePlaylist.Click += (s, e) => menuViewPlaylist.Checked = !menuViewPlaylist.Checked;
+            // 工具栏的按钮已经在 ConfigureCommandBindings 里接到命令层；
+            // 这里只剩"不是命令"的那几个（打开光盘等由各自的下拉 / 对话框管）。
 
             // ---- 进度与音量 ----
             // 只有左键才算"用户在拖动进度条"：右键点一下不该让界面计时器停摆、更不该顺手 seek 一次。
@@ -331,8 +311,8 @@ namespace 播放器
             // 形态要在恢复位置之前定下来：它决定用哪一套几何（WindowX… 还是 AudioWindowX…）
             PrepareInitialWindowShape();
 
-            // 此时控件尺寸（含 DPI 缩放）已经确定，再做依赖布局的恢复。
-            RestoreWindowPlacement();
+            // 此时控件尺寸（含 DPI 缩放）已经确定，再做依赖布局的恢复（音频 / 视频各用各的几何）。
+            _surfaces.RestorePlacement();
             ClampToWorkingArea();
             ApplyPlaylistVisibility(_settings.ShowPlaylist);
 
@@ -378,52 +358,6 @@ namespace 播放器
                 area.Y + Math.Max(0, (area.Height - height) / 2),
                 width,
                 height);
-        }
-
-        private void RestoreWindowPlacement()
-        {
-            // 音频窗口：用它自己那套几何；顺手把"视频窗口本该在哪儿"记下来，退出时回到那里
-            if (_isAudioWindow)
-            {
-                _videoBoundsBeforeAudio = ResolveVideoBounds();
-
-                StartPosition = FormStartPosition.Manual;
-                Bounds = ResolveAudioBounds();
-                return;
-            }
-
-            // 没有保存过位置，或者保存的尺寸小到不合理：沿用设计尺寸并居中。
-            if (_settings.WindowWidth <= 0 || _settings.WindowHeight <= 0)
-            {
-                StartPosition = FormStartPosition.CenterScreen;
-                return;
-            }
-
-            var width = Math.Max(_settings.WindowWidth, MinimumSize.Width);
-            var height = Math.Max(_settings.WindowHeight, MinimumSize.Height);
-            var bounds = new Rectangle(_settings.WindowX, _settings.WindowY, width, height);
-
-            if (!IsVisibleOnAnyScreen(bounds))
-            {
-                StartPosition = FormStartPosition.CenterScreen;
-            }
-            else
-            {
-                StartPosition = FormStartPosition.Manual;
-                Bounds = bounds;
-            }
-
-            if (_settings.WindowMaximized)
-                WindowState = FormWindowState.Maximized;
-        }
-
-        private static bool IsVisibleOnAnyScreen(Rectangle bounds)
-        {
-            foreach (var screen in Screen.AllScreens)
-            {
-                if (screen.WorkingArea.IntersectsWith(bounds)) return true;
-            }
-            return false;
         }
 
         /// <summary>

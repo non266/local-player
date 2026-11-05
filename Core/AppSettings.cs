@@ -288,6 +288,22 @@ namespace 播放器.Core
 
         public int AudioWindowHeight { get; set; }
 
+        /// <summary>
+        /// 上次退出时是不是迷你模式（1.12.0）。
+        /// <para>迷你模式是用户的明确选择：记住它，下次启动就还是那张小卡片；
+        /// 想回到大窗口按 Ctrl+Alt+N 或卡片上的「还原」。</para>
+        /// </summary>
+        public bool MiniMode { get; set; }
+
+        /// <summary>迷你窗口的位置与大小；宽高为 0 表示尚未保存过（第一次贴工作区右下角）。</summary>
+        public int MiniWindowX { get; set; }
+
+        public int MiniWindowY { get; set; }
+
+        public int MiniWindowWidth { get; set; }
+
+        public int MiniWindowHeight { get; set; }
+
         /// <summary>主分隔条的当前位置；0 表示尚未保存过，由程序按默认宽度推算。</summary>
         public int SplitterDistance { get; set; }
 

@@ -52,34 +52,17 @@ namespace 播放器
 
         private void UpdateTransportState()
         {
+            // 命令表面（菜单 / 工具栏 / 托盘 / 任务栏 / 卡片）的可用性与勾选态由命令层一次推完。
+            RefreshCommandSurfaces();
+
             var hasMedia = _engine.HasMedia;
-            var isPlaying = _engine.IsPlaying;
-            var hasItems = _playlist.Count > 0;
-
-            tsbPlay.Enabled = hasMedia || hasItems;
-            tsbPause.Enabled = hasMedia && isPlaying;
-            tsbStop.Enabled = hasMedia;
-            tsbPrev.Enabled = hasItems;
-            tsbNext.Enabled = hasItems;
-            tsbRewind.Enabled = hasMedia;
-            tsbForward.Enabled = hasMedia;
-            tsbSnapshot.Enabled = hasMedia && isPlaying;
-
-            menuPlayPause.Enabled = hasMedia || hasItems;
-            menuStop.Enabled = hasMedia;
-            menuPrev.Enabled = hasItems;
-            menuNext.Enabled = hasItems;
-            menuSeekBack.Enabled = hasMedia;
-            menuSeekForward.Enabled = hasMedia;
-            menuSubtitleOpen.Enabled = hasMedia;
-            menuSubtitleDisable.Enabled = hasMedia;
 
             // 视频控件始终可见（保证 HWND 存在），空闲时用占位标签盖住它。
-            // 音频窗口里那块位置是卡片，不能再用"拖文件到这里"的大字盖上去。
-            lblPlaceholder.Visible = !hasMedia && !_isAudioWindow;
+            // 音频窗口 / 迷你模式里那块位置是卡片，不能再用"拖文件到这里"的大字盖上去。
+            lblPlaceholder.Visible = !hasMedia && !IsAudioWindow && !IsMiniWindow;
 
             // 没有媒体就没有进度可看：全屏进度条跟着收起来。
-            if (!hasMedia) _fullscreenBar?.HideBar();
+            if (!hasMedia) _surfaces.Fullscreen.HideBar();
 
             if (!hasMedia)
             {
@@ -107,14 +90,6 @@ namespace 播放器
 
             // 「下一首播放」那两项跟着"列表空不空 / 队列空不空"走，同理。
             RefreshQueueMenu();
-
-            // 音频窗口卡片里那排播放控件：可用状态与播放 / 暂停图标都从这里推，
-            // 免得工具栏、托盘、卡片三处各算一套（见 docs/1.10.0计划.md 的 F12）。
-            _nowPlaying?.SetTransportState(hasMedia, isPlaying, hasItems);
-
-            // 任务栏缩略图上的四个按钮（上一个 / 播放暂停 / 下一个 / 停止）同理：
-            // 没媒体时播放与停止置灰，列表为空时上一个 / 下一个置灰。
-            _taskbarButtons?.SetTransportState(hasMedia, isPlaying, hasItems, hasItems);
         }
 
         private void UpdateWindowTitle()
@@ -135,40 +110,35 @@ namespace 播放器
             Text = current != null ? current.DisplayName + " - " + appName : appName;
         }
 
+        /// <summary>
+        /// F1 帮助正文。
+        /// <para>
+        /// 命令那部分<b>从命令目录现生成</b>：以前这里是一大段手写字符串，与
+        /// <c>ProcessCmdKey</c> 的 switch、设计器里的 <c>ShortcutKeyDisplayString</c> 三份各写一遍，
+        /// 改一个键要记得改三处。现在目录是唯一来源，这里只剩"不是命令"的鼠标手势与几个高级键。
+        /// </para>
+        /// </summary>
+        internal string BuildShortcutsText() => PlayerCommandCatalog.FormatHelp() + ExtraShortcutsText;
+
+        private const string ExtraShortcutsText =
+            "播放控制（鼠标）\n" +
+            "    鼠标滚轮          调节音量\n\n" +
+            "画面\n" +
+            "    Esc              退出全屏\n" +
+            "    双击画面          进入 / 退出全屏\n" +
+            "    右键画面          字幕轨道 / 音轨 / 播放控制（全屏里也能用）\n\n" +
+            "列表与帮助\n" +
+            "    Delete           从列表移除选中项\n" +
+            "    F1               显示本帮助\n\n" +
+            "歌词与视频（高级）\n" +
+            "    Ctrl+] / Ctrl+[  歌词提前 / 延后 0.5 秒\n" +
+            "    E / Shift+E      逐帧前进 / 后退\n" +
+            "    G / H            音频延迟 -50 / +50 毫秒\n" +
+            "    J / K            字幕延迟 -50 / +50 毫秒";
+
         private void ShowShortcuts()
         {
-            const string text =
-                "播放控制\n" +
-                "    Space            播放 / 暂停\n" +
-                "    S                停止\n" +
-                "    PgUp / Ctrl+←    上一个\n" +
-                "    PgDn / Ctrl+→    下一个\n" +
-                "    ← / →            快退 / 快进 5 秒\n" +
-                "    ↑ / ↓            音量增大 / 减小\n" +
-                "    M                静音开关\n" +
-                "    鼠标滚轮          调节音量\n\n" +
-                "文件与字幕\n" +
-                "    Ctrl+O           打开文件\n" +
-                "    Ctrl+Shift+O     打开文件夹（递归）\n" +
-                "    Ctrl+U           打开网络串流\n" +
-                "    Ctrl+S           保存当前列表为歌单（存进歌单库）\n" +
-                "    Ctrl+Shift+S     另存为 m3u 文件\n" +
-                "    Ctrl+L           从 m3u 文件追加到当前列表\n" +
-                "    Ctrl+T           加载字幕文件\n" +
-                "    V                关闭 / 打开字幕\n" +
-                "    Ctrl+P           截取当前画面\n\n" +
-                "界面\n" +
-                "    F9               显示 / 隐藏播放列表\n" +
-                "    Ctrl+D           开 / 关桌面歌词\n" +
-                "    Ctrl+Alt+M       音频窗口 / 视频窗口（翻一下，并固定成那个形态）\n" +
-                "    F11 / F          进入 / 退出全屏\n" +
-                "    Esc              退出全屏\n" +
-                "    双击画面          进入 / 退出全屏\n" +
-                "    右键画面          字幕轨道 / 音轨 / 播放控制（全屏里也能用）\n" +
-                "    Delete           从列表移除选中项\n" +
-                "    F1               显示本帮助";
-
-            MessageBox.Show(this, text, "快捷键说明", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, BuildShortcutsText(), "快捷键说明", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void ShowAbout()
@@ -321,7 +291,7 @@ namespace 播放器
                 return;
             }
 
-            if (_isFullscreen)
+            if (IsFullscreen)
                 ExitFullscreen();
 
             // 关窗之前把当前进度存下来，下次打开才能接着播。
@@ -358,8 +328,8 @@ namespace 播放器
             _skipTimer.Dispose();
             DisposeVideoMenu();
 
-            // 全屏进度条也是自绘窗口 + 自己的计时器，跟着一起收。
-            DisposeFullscreenBar();
+            // 音频卡片与全屏进度条都是模块自己的窗口 / 计时器，一起收。
+            _surfaces?.Dispose();
 
             _scanner.DurationFound -= OnDurationFound;
             _scanner.Dispose();
@@ -415,36 +385,20 @@ namespace 播放器
             _settings.LastPlaylistIndex = _playlist.CurrentIndex;
             _settings.CurrentPlaylistName = _playlists.CurrentName;
 
-            if (!_isFullscreen)
+            if (!IsFullscreen)
             {
-                var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+                // 下次启动要不要直接进迷你模式，就在这一次退出时定下来。
+                _settings.MiniMode = IsMiniWindow;
 
-                if (bounds.Width > 0 && bounds.Height > 0)
-                {
-                    if (_isAudioWindow)
-                    {
-                        // 音频窗口记自己那一套；视频窗口那份原样留着（切回去还要用）
-                        _settings.AudioWindowX = bounds.X;
-                        _settings.AudioWindowY = bounds.Y;
-                        _settings.AudioWindowWidth = bounds.Width;
-                        _settings.AudioWindowHeight = bounds.Height;
-                    }
-                    else
-                    {
-                        _settings.WindowMaximized = WindowState == FormWindowState.Maximized;
-                        _settings.WindowX = bounds.X;
-                        _settings.WindowY = bounds.Y;
-                        _settings.WindowWidth = bounds.Width;
-                        _settings.WindowHeight = bounds.Height;
-                    }
-                }
+                // 当前形态的几何由对应的模块写回（视频 / 音频 / 迷你各记各的）
+                _surfaces.CaptureGeometry();
 
                 try
                 {
                     // 存的是"视频宽度"，侧栏宽度单独存：
                     // 这样收起侧栏、分离再归位之后，两者的宽度都还能还原。
                     // 音频窗口里两栏是折叠的，这几项不动（否则会把视频窗口的宽度写成 0）。
-                    if (!_isAudioWindow && !splitVideo.Panel2Collapsed)
+                    if (!IsAudioWindow && !splitVideo.Panel2Collapsed)
                     {
                         _settings.SplitterDistance = splitVideo.SplitterDistance;
                         _settings.SidebarWidth = SidebarDockedWidth;

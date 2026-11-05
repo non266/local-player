@@ -43,24 +43,23 @@ namespace 播放器
             switch (button)
             {
                 case SmtcButton.Play:
-                    if (_engine.HasMedia) _engine.Play();
-                    else PlayCurrentOrFirst();
+                    ExecuteCommand(PlayerCommandId.Play);
                     break;
 
                 case SmtcButton.Pause:
-                    _engine.Pause();
+                    ExecuteCommand(PlayerCommandId.Pause);
                     break;
 
                 case SmtcButton.Stop:
-                    StopPlayback();
+                    ExecuteCommand(PlayerCommandId.Stop);
                     break;
 
                 case SmtcButton.Next:
-                    PlayNext(userInitiated: true);
+                    ExecuteCommand(PlayerCommandId.Next);
                     break;
 
                 case SmtcButton.Previous:
-                    PlayPrevious();
+                    ExecuteCommand(PlayerCommandId.Previous);
                     break;
             }
         }
@@ -225,16 +224,16 @@ namespace 播放器
             switch (command)
             {
                 case MediaKeyCommand.PlayPause:
-                    TogglePlayPause();
+                    ExecuteCommand(PlayerCommandId.PlayPause);
                     break;
                 case MediaKeyCommand.Stop:
-                    StopPlayback();
+                    ExecuteCommand(PlayerCommandId.Stop);
                     break;
                 case MediaKeyCommand.Next:
-                    PlayNext(true);
+                    ExecuteCommand(PlayerCommandId.Next);
                     break;
                 case MediaKeyCommand.Previous:
-                    PlayPrevious();
+                    ExecuteCommand(PlayerCommandId.Previous);
                     break;
             }
         }
@@ -308,20 +307,20 @@ namespace 播放器
             {
                 case TaskbarThumbnailButtons.WmCommand:
                 {
-                    // 任务栏缩略图按钮点击
+                    // 任务栏缩略图按钮点击：与菜单 / 快捷键 / 托盘走同一条命令。
                     switch (TaskbarThumbnailButtons.ResolveClick(m.WParam))
                     {
                         case TaskbarThumbnailButtons.ButtonPrevious:
-                            PlayPrevious();
+                            ExecuteCommand(PlayerCommandId.Previous);
                             break;
                         case TaskbarThumbnailButtons.ButtonPlayPause:
-                            TogglePlayPause();
+                            ExecuteCommand(PlayerCommandId.PlayPause);
                             break;
                         case TaskbarThumbnailButtons.ButtonNext:
-                            PlayNext(true);
+                            ExecuteCommand(PlayerCommandId.Next);
                             break;
                         case TaskbarThumbnailButtons.ButtonStop:
-                            StopPlayback();
+                            ExecuteCommand(PlayerCommandId.Stop);
                             break;
                     }
 

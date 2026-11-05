@@ -44,101 +44,31 @@ namespace 播放器
             if (IsTypingTarget(msg) && !IsCommandKeyWhileTyping(keyData))
                 return base.ProcessCmdKey(ref msg, keyData);
 
+            // 命令目录里认得的键（Space / S / 方向键 / Ctrl+O / F9 / F11 …）统一走命令层。
+            // 目录是唯一来源：改一个键只需要改目录，帮助文本与菜单提示会跟着变。
+            if (PlayerCommandCatalog.TryMap(keyData, out var command))
+            {
+                ExecuteCommand(command);
+                return true;
+            }
+
             switch (keyData)
             {
-                case Keys.Space:
-                    TogglePlayPause();
-                    return true;
-                case Keys.Left:
-                    SeekRelative(-SeekStepMilliseconds);
-                    return true;
-                case Keys.Right:
-                    SeekRelative(SeekStepMilliseconds);
-                    return true;
-                case Keys.Up:
-                    AdjustVolume(5);
-                    return true;
-                case Keys.Down:
-                    AdjustVolume(-5);
-                    return true;
-                case Keys.PageUp:
-                case Keys.Control | Keys.Left:
-                    PlayPrevious();
-                    return true;
-                case Keys.PageDown:
-                case Keys.Control | Keys.Right:
-                    PlayNext(true);
-                    return true;
-                case Keys.M:
-                    ToggleMute();
-                    return true;
-                case Keys.S:
-                    StopPlayback();
-                    return true;
-                case Keys.V:
-                    ToggleSubtitles();
-                    return true;
-                case Keys.F9:
-                    // 音频窗口里没有播放列表那一栏：别把窗口撑开，先说明白的路
-                    if (_isAudioWindow)
-                    {
-                        SetStatus("音频窗口没有播放列表；按 Ctrl+Alt+M 切回视频窗口");
-                        return true;
-                    }
-
-                    menuViewPlaylist.Checked = !menuViewPlaylist.Checked;
-                    return true;
-                case Keys.F11:
-                case Keys.F:
-                    ToggleFullscreen();
-                    return true;
                 case Keys.F1:
                     ShowShortcuts();
                     return true;
                 case Keys.Delete:
                     RemoveSelectedPlaylistItems();
                     return true;
-                case Keys.Control | Keys.O:
-                    OpenFilesDialog();
-                    return true;
-                case Keys.Control | Keys.Shift | Keys.O:
-                    OpenFolderDialog();
-                    return true;
-                case Keys.Control | Keys.U:
-                    OpenUrlDialog();
-                    return true;
-                // Ctrl+S 是"保存这个列表"的直觉动作：存进歌单库（要起名字、能覆盖、能切回来）。
-                // 存到任意位置的 m3u 是另一件事（外发、备份），放 Ctrl+Shift+S。
-                case Keys.Control | Keys.S:
-                    SaveCurrentListAsPlaylist();
-                    return true;
-                case Keys.Control | Keys.Shift | Keys.S:
-                    ExportPlaylistDialog();
-                    return true;
-                case Keys.Control | Keys.L:
-                    OpenPlaylistFileDialog(replace: false);
-                    return true;
-                case Keys.Control | Keys.T:
-                    OpenSubtitleDialog();
-                    return true;
-                case Keys.Control | Keys.P:
-                    TakeSnapshot();
-                    return true;
-                case Keys.Control | Keys.D:
-                    SetDesktopLyricsEnabled(!_settings.DesktopLyricsEnabled);
-                    return true;
-                // 音频 / 视频窗口：翻一下并把偏好定成翻到的那个形态（与菜单等价）
-                case Keys.Control | Keys.Alt | Keys.M:
-                    ToggleWindowMode();
-                    return true;
 
-                // ---- 歌词偏移：Ctrl+] 提前、Ctrl+[ 延后（正负号与 LRC 的 [offset:] 一致）----
-                case Keys.Control | Keys.OemCloseBrackets:
-                    AdjustLyricsOffset(1);
-                    return true;
-                case Keys.Control | Keys.OemOpenBrackets:
-                    AdjustLyricsOffset(-1);
-                    return true;
+                case Keys.Escape:
+                case Keys.Enter:
+                    if (IsFullscreen)
+                    {
+                        ExitFullscreen();
+                        return true;
+                    }
+                    break;
 
                 // ---- 视频：逐帧与音画同步（与 VLC 的按键习惯保持一致）----
                 case Keys.E:
@@ -159,14 +89,14 @@ namespace 播放器
                 case Keys.K:
                     StepDelay(audio: false, direction: 1);
                     return true;
-                case Keys.Escape:
-                case Keys.Enter:
-                    if (_isFullscreen)
-                    {
-                        ExitFullscreen();
-                        return true;
-                    }
-                    break;
+
+                // ---- 歌词偏移：Ctrl+] 提前、Ctrl+[ 延后（正负号与 LRC 的 [offset:] 一致）----
+                case Keys.Control | Keys.OemCloseBrackets:
+                    AdjustLyricsOffset(1);
+                    return true;
+                case Keys.Control | Keys.OemOpenBrackets:
+                    AdjustLyricsOffset(-1);
+                    return true;
             }
 
             return base.ProcessCmdKey(ref msg, keyData);

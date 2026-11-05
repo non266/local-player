@@ -140,10 +140,12 @@ namespace 播放器
             var save = new ToolStripMenuItem("保存当前列表为歌单…")
             {
                 Enabled = _playlist.Count > 0,
-                ShortcutKeyDisplayString = "Ctrl+S",
                 ToolTipText = "存进歌单库（数据目录的「播放列表」文件夹），以后在这里点一下就切回来"
             };
-            save.Click += (s, e) => SaveCurrentListAsPlaylist();
+
+            // 动态重建的菜单项直接绑到命令（不登记进 _commandBindings：这一份每次下拉都会重建，
+            // 登记下来会把已经释放的项越攒越多）。
+            CommandBinder.Bind(save, PlayerCommandId.SaveAsPlaylist, ExecuteCommand);
             items.Add(save);
 
             if (_playlists.CurrentName.Length > 0)
@@ -214,10 +216,10 @@ namespace 播放器
             // 而歌单那一行是替换，菜单上却都叫"载入"——点错一次就少一个列表。
             var appendFile = new ToolStripMenuItem("从 m3u 文件追加…")
             {
-                ShortcutKeyDisplayString = "Ctrl+L",
                 ToolTipText = "选一个 m3u / m3u8，把里面的条目并进当前列表（已有的那些不动）"
             };
-            appendFile.Click += (s, e) => OpenPlaylistFileDialog(replace: false);
+
+            CommandBinder.Bind(appendFile, PlayerCommandId.LoadPlaylistFile, ExecuteCommand);
             items.Add(appendFile);
 
             var replaceFile = new ToolStripMenuItem("从 m3u 文件替换当前列表…")
@@ -230,10 +232,10 @@ namespace 播放器
             var exportFile = new ToolStripMenuItem("另存为 m3u 文件…")
             {
                 Enabled = _playlist.Count > 0,
-                ShortcutKeyDisplayString = "Ctrl+Shift+S",
                 ToolTipText = "把当前列表写成一个 m3u 文件，放在你自己挑的位置（给别人、拷进别的播放器）"
             };
-            exportFile.Click += (s, e) => ExportPlaylistDialog();
+
+            CommandBinder.Bind(exportFile, PlayerCommandId.ExportPlaylist, ExecuteCommand);
             items.Add(exportFile);
 
             items.Add(new ToolStripSeparator());

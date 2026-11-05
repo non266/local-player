@@ -154,13 +154,6 @@ namespace 播放器
         /// <summary>桌面歌词解锁热键（Ctrl+Alt+D）是否注册上了。</summary>
         private bool _desktopLyricsHotKeyRegistered;
 
-        private FullscreenState? _fullscreenState;
-
-        private bool _isFullscreen;
-
-        /// <summary>测试用：现在是不是全屏（"双击画面"那条判据要它）。</summary>
-        internal bool IsFullscreen => _isFullscreen;
-
         private bool _userSeeking;
 
         private bool _suppressSeekEvent;
@@ -214,6 +207,12 @@ namespace 播放器
             _playingItemFont = new Font(listViewPlaylist.Font, FontStyle.Bold);
 
             ConfigureToolStrips();
+
+            // 窗口形态控制器：音频 / 迷你 / 全屏三件事都从它走。
+            // 要在 ApplyTheme 之前建好（换主题时卡片与全屏进度条要跟着换色），
+            // 也要在 ConfigureMetadataMenus 之前（窗口模式菜单的勾选要读当前形态）。
+            AttachWindowSurfaceController();
+
             ConfigureMetadataMenus();
             ConfigureSettingsProfileMenu();
 

@@ -41,6 +41,9 @@ namespace 播放器.Ui
         private Color _buttonBack = Color.Transparent;
         private Color _hoverBack = Color.Transparent;
 
+        /// <summary>接上命令层之后的执行入口（未接时退回下面那四个事件）。</summary>
+        private Action<PlayerCommandId>? _execute;
+
         public PlaybackControls()
         {
             DoubleBuffered = true;
@@ -51,10 +54,27 @@ namespace 播放器.Ui
             _next = CreateButton("pcNext", "下一首");
             _stop = CreateButton("pcStop", "停止");
 
-            _previous.Click += (s, e) => PreviousRequested?.Invoke(this, EventArgs.Empty);
-            _playPause.Click += (s, e) => PlayPauseRequested?.Invoke(this, EventArgs.Empty);
-            _next.Click += (s, e) => NextRequested?.Invoke(this, EventArgs.Empty);
-            _stop.Click += (s, e) => StopRequested?.Invoke(this, EventArgs.Empty);
+            _previous.Click += (s, e) => Invoke(PlayerCommandId.Previous, PreviousRequested);
+            _playPause.Click += (s, e) => Invoke(PlayerCommandId.PlayPause, PlayPauseRequested);
+            _next.Click += (s, e) => Invoke(PlayerCommandId.Next, NextRequested);
+            _stop.Click += (s, e) => Invoke(PlayerCommandId.Stop, StopRequested);
+        }
+
+        /// <summary>
+        /// 接到命令层：四个按钮与菜单 / 快捷键 / 托盘 / 任务栏按钮走同一个执行入口。
+        /// <para>没有接的时候退回原来的四个事件——控件的单测与独立复用不必依赖主窗体。</para>
+        /// </summary>
+        public void BindCommands(Action<PlayerCommandId> execute) => _execute = execute;
+
+        private void Invoke(PlayerCommandId id, EventHandler? fallback)
+        {
+            if (_execute != null)
+            {
+                _execute(id);
+                return;
+            }
+
+            fallback?.Invoke(this, EventArgs.Empty);
         }
 
         internal event EventHandler? PlayPauseRequested;

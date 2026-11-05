@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using 播放器.Ui;
 
 namespace 播放器
 {
@@ -66,10 +67,10 @@ namespace 播放器
             _videoMenu = new ContextMenuStrip { ShowImageMargin = false };
 
             _videoPlayPause = new ToolStripMenuItem("播放");
-            _videoPlayPause.Click += (s, e) => TogglePlayPause();
+            _videoPlayPause.Click += (s, e) => ExecuteCommand(PlayerCommandId.PlayPause);
 
             _videoStop = new ToolStripMenuItem("停止");
-            _videoStop.Click += (s, e) => StopPlayback();
+            _videoStop.Click += (s, e) => ExecuteCommand(PlayerCommandId.Stop);
 
             _videoSubtitle = new ToolStripMenuItem("字幕轨道");
             _videoSubtitle.DropDownOpening += (s, e) => FillSubtitleTrackMenu(_videoSubtitle.DropDownItems);
@@ -78,7 +79,7 @@ namespace 播放器
             _videoAudio.DropDownOpening += (s, e) => FillAudioTrackMenu(_videoAudio.DropDownItems);
 
             _videoFullscreen = new ToolStripMenuItem("全屏");
-            _videoFullscreen.Click += (s, e) => ToggleFullscreen();
+            _videoFullscreen.Click += (s, e) => ExecuteCommand(PlayerCommandId.ToggleFullscreen);
 
             _videoMenu.Items.AddRange(new ToolStripItem[]
             {
@@ -112,21 +113,16 @@ namespace 播放器
         /// <summary>
         /// 全屏进度条：视频区收不到 WinForms 的鼠标消息，只能靠这里每 30 ms 看一眼光标。
         /// <para>
-        /// 只在"真的动了"时点亮；不动就什么都不做（收起由进度条自己的空闲计时器负责）。
-        /// 主窗口不在前台时<b>不点亮</b>——它是置顶窗口，在别的程序里动鼠标不该把它弹出来。
-        /// "离开前台就收起"由 <see cref="OnDeactivate"/> 负责（那里是唯一可靠的事件）。
+        /// "只在真的动了时点亮"与"主窗口不在前台就不点亮"都在
+        /// <see cref="Ui.FullscreenModule.PollPointer"/> 里；这里只做粗筛，省得每拍都进模块。
         /// </para>
         /// </summary>
         private void PollFullscreenBar()
         {
-            if (!_isFullscreen || !_engine.HasMedia) return;
+            if (!IsFullscreen || !_engine.HasMedia) return;
             if (Form.ActiveForm != this) return;
 
-            var cursor = Cursor.Position;
-            if (cursor == _lastFullscreenPointer) return;
-
-            _lastFullscreenPointer = cursor;
-            NotifyFullscreenPointer(cursor);
+            _surfaces.PollPointer(Cursor.Position);
         }
 
         private void PollRightClick()
@@ -250,7 +246,7 @@ namespace 播放器
             }
 
             if (_videoStop != null) _videoStop.Enabled = hasMedia;
-            if (_videoFullscreen != null) _videoFullscreen.Text = _isFullscreen ? "退出全屏" : "全屏";
+            if (_videoFullscreen != null) _videoFullscreen.Text = IsFullscreen ? "退出全屏" : "全屏";
 
             FillSubtitleTrackMenu(_videoSubtitle!.DropDownItems);
             FillAudioTrackMenu(_videoAudio!.DropDownItems);

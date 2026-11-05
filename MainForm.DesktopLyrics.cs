@@ -805,19 +805,19 @@ namespace 播放器
             switch (control)
             {
                 case DesktopLyricsWindow.LyricsControl.PlayPause:
-                    TogglePlayPause();
+                    ExecuteCommand(PlayerCommandId.PlayPause);
                     break;
 
                 case DesktopLyricsWindow.LyricsControl.Previous:
-                    PlayPrevious();
+                    ExecuteCommand(PlayerCommandId.Previous);
                     break;
 
                 case DesktopLyricsWindow.LyricsControl.Next:
-                    PlayNext(true);
+                    ExecuteCommand(PlayerCommandId.Next);
                     break;
 
                 case DesktopLyricsWindow.LyricsControl.Stop:
-                    StopPlayback();
+                    ExecuteCommand(PlayerCommandId.Stop);
                     break;
             }
 

@@ -386,7 +386,7 @@ namespace 播放器
         private void OnFloatingWindowGeometryChanged(object? sender, EventArgs e)
         {
             if (_adjustingFloating || sender is not Form window) return;
-            if (_isFullscreen || !window.Visible) return;
+            if (IsFullscreen || !window.Visible) return;
             if (window.WindowState != FormWindowState.Normal) return;
 
             var isSidebar = IsSidebarWindow(window);
@@ -429,7 +429,7 @@ namespace 播放器
         /// <summary>主窗口移动 / 缩放后，把所有吸附中的悬浮窗带过去。</summary>
         private void LayoutAttachedWindows()
         {
-            if (_adjustingFloating || _isFullscreen) return;
+            if (_adjustingFloating || IsFullscreen) return;
             if (WindowState == FormWindowState.Minimized) return;
 
             var hasAttached = false;

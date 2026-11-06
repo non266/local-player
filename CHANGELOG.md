@@ -51,6 +51,8 @@
   SHA256 `1A2E636B3F1EEDFF6FE62C4BF74905C7EDA3C62B7A2B0E0CCCE5EED8B5F1F55C`。
 - 干净树验收（删 `bin` / `obj` 后先 `dotnet restore`）：`release-check` **226 秒**，
   Debug / Release 均 0 警告 0 错误，全量冒烟 **209.2 秒**全绿。
+  （第一次删完直接跑 `release-check` 红了三项 `NETSDK1004`：缺 `project.assets.json`；
+  先 restore 再跑才绿——和维护手册坑表里「换过 SDK / 目标框架后先 restore」是同一条。）
 - 便携载荷 **646 个文件 / 240.8 MB**：`7z t` 全绿；载荷目录里跑全量 **25/25（183.3 秒）**，
   并验到 `光盘真盘检查正常：DVD 光盘 (L:) 开播成功，总时长 00:23:49`；
   `播放器.exe` 版本 **1.13.0.0**、ProductVersion `1.13.0+57a1f78…`。

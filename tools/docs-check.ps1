@@ -221,6 +221,31 @@ Assert-Absent "README.md" $readme "全能本地播放器-1." "发行资产名统
 Assert-Absent "docs\介绍.md" $intro ".NET 8 + Windows Forms" ("技术栈已经换成 .NET " + $sdkMajor)
 Assert-Absent "docs\介绍.md" $intro ".NET 8 Desktop Runtime" ("运行时要写 .NET " + $sdkMajor + " Desktop Runtime，或者写明发行包是自包含的")
 
+# 冒烟口径（1.13.0 起）：步骤数来自 Program.cs 里的 SmokeStep 列表，
+# 检查编号上限来自 StepCount；四个文档必须用同一句话，避免再出现"24 步 / 20 项"各说各的。
+$program = Read-Text "tools\SmokeTest\Program.cs"
+$checkCount = [regex]::Match($program, 'private const int StepCount = (\d+);').Groups[1].Value
+$runnerCount = ([regex]::Matches($program, 'new SmokeStep\(')).Count
+$manual = Read-Lines "docs\维护手册.md"
+$smokePhrase = "$runnerCount 个运行步骤 / $checkCount 项检查"
+
+if ($checkCount -eq "" -or $runnerCount -eq 0)
+{
+    throw "没能从 tools\SmokeTest\Program.cs 读出步骤数 / 检查数（是不是改了 const 的名字？）"
+}
+
+Assert-Contains "README.md" $readme $smokePhrase "冒烟口径要以 Program.cs 为准（现在是 $runnerCount 个运行步骤 / $checkCount 项检查）"
+Assert-Contains "docs\介绍.md" $intro $smokePhrase "冒烟口径要以 Program.cs 为准（现在是 $runnerCount 个运行步骤 / $checkCount 项检查）"
+Assert-Contains "docs\ARCHITECTURE.md" $architecture $smokePhrase "冒烟口径要以 Program.cs 为准（现在是 $runnerCount 个运行步骤 / $checkCount 项检查）"
+Assert-Contains "docs\维护手册.md" $manual $smokePhrase "冒烟口径要以 Program.cs 为准（现在是 $runnerCount 个运行步骤 / $checkCount 项检查）"
+
+# 1.13.0 之前四份文档各说各的；把当时那几句**具体旧话**钉成"不许回来"，
+# 否则只查"新句子在不在"仍可能同一份文档里新旧并存。
+Assert-Absent "README.md" $readme "全量 24 步冒烟" "1.13.0 已统一为 21 个运行步骤 / 25 项检查"
+Assert-Absent "docs\ARCHITECTURE.md" $architecture "第 18～20 步" "1.13.0 已改成第 22～24 项检查 / 第 18～20 个运行步骤"
+Assert-Absent "docs\维护手册.md" $manual "全量 21 步冒烟" "1.13.0 已统一为 21 个运行步骤 / 25 项检查"
+Assert-Absent "docs\介绍.md" $intro "一共 20 项检查" "1.13.0 已统一为 21 个运行步骤 / 25 项检查"
+
 # ---------------------------------------------------------------- 摘要
 
 Write-Host ""

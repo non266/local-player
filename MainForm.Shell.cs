@@ -143,6 +143,18 @@ namespace 播放器
 
         private void ShowAbout()
         {
+            MessageBox.Show(this, BuildAboutText(), "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// 「关于」里那一整段文字（单独抽出来，冒烟测试才不用弹框就能核对内容）。
+        /// <para>
+        /// 运行环境<b>从进程里现读</b>，不再手写 ".NET 8"——1.12.0 的关于框还写着 8，
+        /// 而构建基线早就是 .NET 10 了；手写的版本号迟早再对不上。
+        /// </para>
+        /// </summary>
+        internal string BuildAboutText()
+        {
             string libVlcVersion;
             try
             {
@@ -157,17 +169,16 @@ namespace 播放器
             // 不要在这里再写一个数字——那种兜底值迟早和 csproj 对不上（还很难发现）。
             var version = typeof(MainForm).Assembly.GetName().Version?.ToString() ?? "未知版本";
 
-            var text =
-                $"全能本地播放器  {version}\n\n" +
-                "运行环境：.NET 8 / Windows Forms\n" +
+            return
+                $"全能本地播放器  {version}\n" +
+                "项目主页：https://github.com/non266/local-player\n\n" +
+                $"运行环境：.NET {Environment.Version.Major} / Windows Forms\n" +
                 $"播放内核：LibVLC {libVlcVersion}\n\n" +
                 "支持格式由 VLC 内核决定，涵盖绝大多数常见音视频\n" +
                 "容器与编码，并支持外挂字幕、多音轨切换与网络串流。\n\n" +
                 "设置文件：\n" + AppSettings.SettingsFilePath + "\n\n" +
                 SettingsProfileLine() +
                 "诊断日志：\n" + AppLog.FilePath;
-
-            MessageBox.Show(this, text, "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         /// <summary>

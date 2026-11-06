@@ -145,11 +145,56 @@ namespace 播放器.Core
         /// </summary>
         public static bool IsLocationUri(string? path) => IsStreamUri(path) || IsDiscLocation(path);
 
+        /// <summary>
+        /// 判断是否为<b>网络位置</b>：UNC 路径（<c>\\server\share</c>）或映射到网络盘的盘符。
+        /// <para>
+        /// 只看路径本身，<b>一次磁盘都不碰</b>：UNC 前缀直接认，盘符走
+        /// <see cref="DriveInfo.DriveType"/>（GetDriveType，不会去连服务器）。
+        /// </para>
+        /// <para>
+        /// 为什么要单独判它：网络盘离线时，一次 <c>File.Exists</c> 要等满 SMB 超时（几十秒），
+        /// 而播放那一路是在界面线程上跑的——列表里几百条就能把窗口冻死。判断"在不在"必须
+        /// 交给后台（见 <c>PlaybackCoordinator</c> 的网络路径探测）。
+        /// </para>
+        /// </summary>
+        public static bool IsNetworkPath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+
+            // UNC：\\server\share 与 //server/share（Win32 路径两种都认）
+            if (path.StartsWith(@"\\", StringComparison.Ordinal) ||
+                path.StartsWith("//", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            // 盘符：C:\... / Z:/...
+            if (path.Length < 2 || path[1] != ':' || !char.IsLetter(path[0])) return false;
+
+            try
+            {
+                return new DriveInfo(char.ToUpperInvariant(path[0]) + ":\\").DriveType == DriveType.Network;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }
+
         /// <summary>判断路径是否为可打开的目标：本地存在的文件、网络流地址，或光盘位置。</summary>
+        /// <remarks>
+        /// 网络位置（UNC / 网络盘）这里<b>只按"可能打开"返回 true，不同步查磁盘</b>：
+        /// 真正在不在由播放前的后台探测决定（离线的条目要留在列表里，不能悄悄丢掉）。
+        /// </remarks>
         public static bool IsOpenable(string? path)
         {
             if (string.IsNullOrWhiteSpace(path)) return false;
             if (IsLocationUri(path)) return true;
+            if (IsNetworkPath(path)) return true;
             return File.Exists(path);
         }
 

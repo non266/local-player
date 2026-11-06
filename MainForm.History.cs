@@ -150,7 +150,9 @@ namespace 播放器
 
         private void OpenRecentFile(string path)
         {
-            if (!File.Exists(path))
+            // 本地文件先看一眼在不在；网络位置不查（离线时 File.Exists 会卡满超时），
+            // 交给播放前的后台探测——真不在会标出来，条目还在。
+            if (!MediaFormats.IsNetworkPath(path) && !File.Exists(path))
             {
                 SetStatus("文件已不存在：" + path);
                 return;

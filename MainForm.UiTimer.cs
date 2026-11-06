@@ -13,6 +13,9 @@ namespace 播放器
         // =====================================================================
         private void OnUiTimerTick(object? sender, EventArgs e)
         {
+            // 网络路径的存在性检查在后台跑，回到这里收尾：事件、引擎调用都留在界面线程。
+            _playback.PumpPendingProbe();
+
             // 时长扫描逐条置位"待更新"，这里按计时器节流统一重算一次标题里的总时长。
             if (_playlistSummaryDirty)
             {

@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Threading.Tasks;
 
 namespace 播放器.Core
 {
@@ -59,6 +61,13 @@ namespace 播放器.Core
         /// </summary>
         public const string MissingFileMessage = "文件不存在或无法访问";
 
+        /// <summary>
+        /// 网络位置在 <see cref="ProbeTimeout"/> 之内没回结果时的标记。
+        /// 与 <see cref="MissingFileMessage"/> 刻意分开：超时只是"这次没问到"，
+        /// 下次点这一项还要再试，不能当成永久缺失直接跳过。
+        /// </summary>
+        public const string NetworkTimeoutMessage = "网络位置响应超时";
+
         private readonly PlayerEngine _engine;
         private readonly Playlist _playlist;
         private readonly PlaybackQueue _queue;
@@ -73,6 +82,64 @@ namespace 播放器.Core
         /// <summary>排定的续播位置（还没等到"媒体播起来 + 总时长已知"）。</summary>
         private TimeSpan? _pendingResume;
 
+        /// <summary>网络路径的存在性探测（默认在线程池里做 <c>File.Exists</c>；测试可替换）。</summary>
+        private Func<string, Task<bool>> _pathProbe = DefaultPathProbe;
+
+        /// <summary>
+        /// 播放请求的代际号：每次 <see cref="PlayIndex"/> / <see cref="Stop"/> 都 +1。
+        /// 后台探测回来时号码对不上，就直接丢掉——用户已经点了别的（或同一项又点了一次）。
+        /// </summary>
+        private int _playGeneration;
+
+        /// <summary>正在后台探测的那一条（同一时刻最多一条：探测按播放顺序串行做）。</summary>
+        private PendingProbe? _pendingProbe;
+
+        /// <summary>一次播放请求从哪个索引开始、要不要顺延、是不是重载。</summary>
+        private sealed class PlayRun
+        {
+            public PlayRun(int generation, int index, bool keepCurrent, bool allowFallback, bool suppressResume)
+            {
+                Generation = generation;
+                Index = index;
+                KeepCurrent = keepCurrent;
+                AllowFallback = allowFallback;
+                SuppressResume = suppressResume;
+            }
+
+            public int Generation { get; }
+
+            public int Index { get; }
+
+            public bool KeepCurrent { get; }
+
+            public bool AllowFallback { get; }
+
+            /// <summary>重载当前媒体：不要接上"上次播到哪"（否则看起来像没重载）。</summary>
+            public bool SuppressResume { get; }
+
+            /// <summary>这一轮有没有把条目标成"打不开"（标过就要刷列表）。</summary>
+            public bool Marked { get; set; }
+
+            /// <summary>最后一条失败原因（整轮都失败时用来说清为什么）。</summary>
+            public string? LastError { get; set; }
+        }
+
+        /// <summary>一条还在后台查"在不在"的网络路径。</summary>
+        private sealed class PendingProbe
+        {
+            public PlayRun Run = null!;
+
+            public int Candidate;
+
+            public int Offset;
+
+            public string Path = string.Empty;
+
+            public DateTime StartedUtc;
+
+            public Task<bool> Task = null!;
+        }
+
         public PlaybackCoordinator(
             PlayerEngine engine,
             Playlist playlist,
@@ -86,6 +153,27 @@ namespace 播放器.Core
             _settings = settings;
             _resumeLookup = resumeLookup;
         }
+
+        /// <summary>
+        /// 网络路径"在不在"的探测方式。默认在线程池里调 <c>File.Exists</c>；
+        /// 冒烟测试换成可控的假探测，才好在"结果还没回来"的那一刻做断言。
+        /// </summary>
+        internal Func<string, Task<bool>> PathProbe
+        {
+            get => _pathProbe;
+            set => _pathProbe = value ?? throw new ArgumentNullException(nameof(value));
+        }
+
+        /// <summary>
+        /// 单条网络路径最多等多久（默认 8 秒）。超时不等于"文件不存在"：
+        /// 这一项只标"超时"、保留在列表里，下次点它还会再试。
+        /// </summary>
+        internal TimeSpan ProbeTimeout { get; set; } = TimeSpan.FromSeconds(8);
+
+        /// <summary>现在有没有一条网络路径正在后台探测（冒烟测试用）。</summary>
+        internal bool HasPendingProbe => _pendingProbe != null;
+
+        private static Task<bool> DefaultPathProbe(string path) => Task.Run(() => File.Exists(path));
 
         /// <summary>马上要打开这一份（宿主在这里落历史、设置会话路径、摆画面旋转）。</summary>
         public event EventHandler<PlaybackOpeningEventArgs>? Opening;
@@ -124,101 +212,273 @@ namespace 播放器.Core
         /// 例如「打开光盘」，不该被顺手换成列表里别的歌）。
         /// </para>
         /// </summary>
-        public void PlayIndex(int index, bool keepCurrent = false, bool allowFallback = true)
+        public void PlayIndex(int index, bool keepCurrent = false, bool allowFallback = true) =>
+            StartPlayRequest(index, keepCurrent, allowFallback, suppressResume: false);
+
+        /// <summary>
+        /// 开始一轮"放这一项（打不开就顺延）"。网络位置不在这里查磁盘：
+        /// 起一个后台探测、马上返回，等 <see cref="PumpPendingProbe"/> 收尾。
+        /// </summary>
+        private void StartPlayRequest(int index, bool keepCurrent, bool allowFallback, bool suppressResume)
         {
             if (_playlist.Count == 0) return;
             if (index < 0 || index >= _playlist.Count) index = 0;
 
-            // 顺延时只记标记、不刷列表。
-            // 宿主重建列表是整体重建，放在这个循环里就会变成"跳过一个重建一次"——
-            // 整份列表都失效时要重建上千次，窗口直接假死。
-            var marked = false;
-            string? lastError = null;
+            // 上一轮还在后台探测的路径作废：用户已经换了目标（或同一项又点了一次）。
+            _pendingProbe = null;
 
-            for (var offset = 0; offset < _playlist.Count; offset++)
+            var run = new PlayRun(++_playGeneration, index, keepCurrent, allowFallback, suppressResume);
+
+            PlayFrom(run, 0);
+        }
+
+        /// <summary>
+        /// 从 <paramref name="offset"/> 起试这一项、打不开就往后顺延。
+        /// <para>
+        /// 顺延时只记标记、不刷列表：宿主重建列表是整体重建，放在这个循环里就会变成
+        /// "跳过一个重建一次"——整份列表都失效时要重建上千次，窗口直接假死。
+        /// </para>
+        /// <para>
+        /// 碰到网络位置就起后台探测并<b>先返回</b>；探测结果由
+        /// <see cref="PumpPendingProbe"/> 接上，从下一项继续。
+        /// </para>
+        /// </summary>
+        private void PlayFrom(PlayRun run, int offset)
+        {
+            for (; offset < _playlist.Count; offset++)
             {
-                var candidate = (index + offset) % _playlist.Count;
+                if (run.Generation != _playGeneration) return;
+
+                var candidate = (run.Index + offset) % _playlist.Count;
                 var item = _playlist.Items[candidate];
 
-                // 启动时后台核对已经标成"打不开"的条目直接跳过：网络盘离线时，
-                // 每个 File.Exists 都可能卡到 SMB 超时，列表里几百条的时候
-                // 按一次播放能把界面冻住好几分钟。网络流 / 光盘不适用（它们本来就不查磁盘）。
+                // 启动时后台核对已经标成"打不开"的条目直接跳过：再问一次只会再等一遍
+                // SMB 超时。网络流 / 光盘不适用（它们本来就不查磁盘）。
                 if (!item.IsLocation && item.HasError && item.ErrorMessage == MissingFileMessage)
                 {
-                    lastError = item.ErrorMessage;
+                    run.LastError = item.ErrorMessage;
 
-                    if (!allowFallback) break;
+                    if (!run.AllowFallback) break;
 
                     continue;
+                }
+
+                // 网络位置：界面线程一个字节都不读盘，交给后台探测。
+                if (MediaFormats.IsNetworkPath(item.FilePath))
+                {
+                    StartProbe(run, candidate, offset);
+                    return;
                 }
 
                 if (!MediaFormats.IsOpenable(item.FilePath))
                 {
-                    if (!item.HasError || item.ErrorMessage != MissingFileMessage)
-                    {
-                        item.HasError = true;
-                        item.ErrorMessage = MissingFileMessage;
-                        marked = true;
-                    }
+                    MarkMissing(run, item);
 
-                    lastError = item.ErrorMessage;
-
-                    if (!allowFallback) break;
+                    if (!run.AllowFallback) break;
 
                     continue;
                 }
 
-                var wasMarked = item.HasError;
-
-                item.HasError = false;
-                item.ErrorMessage = null;
-
-                try
-                {
-                    // 排定这一首的续播位置（等媒体真的播起来、总时长已知才 seek）。
-                    ScheduleResume(item.FilePath);
-
-                    // 插播（「下一首播放」）刻意不动列表当前项：播完还要回到原来的位置继续。
-                    if (!keepCurrent) _playlist.SetCurrent(candidate);
-
-                    Opening?.Invoke(this, new PlaybackOpeningEventArgs(item.FilePath, candidate));
-
-                    // 手动播到的这一项如果本来排着队，就从队里去掉：它已经不是"下一首"了。
-                    if (_queue.Remove(item.FilePath))
-                    {
-                        item.Queued = false;
-                        QueueChanged?.Invoke(this, EventArgs.Empty);
-                    }
-
-                    // A-B 循环的点是"给这一首设的"：换到别的文件就清掉。
-                    ClearAbLoopForOtherFile(item.FilePath);
-
-                    _engine.Open(item.FilePath);
-
-                    Opened?.Invoke(this, new PlaybackOpenedEventArgs(item.FilePath, candidate, item.DisplayName));
-
-                    if (marked || wasMarked) ListInvalidated?.Invoke(this, EventArgs.Empty);
-
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    item.HasError = true;
-                    item.ErrorMessage = ex.Message;
-                    marked = true;
-                    lastError = ex.Message;
-
-                    if (!allowFallback) break;
-                }
+                if (TryOpen(run, candidate, item)) return;
             }
 
-            if (marked) ListInvalidated?.Invoke(this, EventArgs.Empty);
+            Finish(run);
+        }
+
+        /// <summary>真正把这一项交给引擎。失败时标红并返回 false（由调用方决定要不要顺延）。</summary>
+        private bool TryOpen(PlayRun run, int candidate, PlaylistItem item)
+        {
+            var wasMarked = item.HasError;
+
+            item.HasError = false;
+            item.ErrorMessage = null;
+
+            try
+            {
+                // 排定这一首的续播位置（等媒体真的播起来、总时长已知才 seek）。
+                if (run.SuppressResume) _pendingResume = null;
+                else ScheduleResume(item.FilePath);
+
+                // 插播（「下一首播放」）刻意不动列表当前项：播完还要回到原来的位置继续。
+                if (!run.KeepCurrent) _playlist.SetCurrent(candidate);
+
+                Opening?.Invoke(this, new PlaybackOpeningEventArgs(item.FilePath, candidate));
+
+                // 手动播到的这一项如果本来排着队，就从队里去掉：它已经不是"下一首"了。
+                if (_queue.Remove(item.FilePath))
+                {
+                    item.Queued = false;
+                    QueueChanged?.Invoke(this, EventArgs.Empty);
+                }
+
+                // A-B 循环的点是"给这一首设的"：换到别的文件就清掉。
+                ClearAbLoopForOtherFile(item.FilePath);
+
+                _engine.Open(item.FilePath);
+
+                Opened?.Invoke(this, new PlaybackOpenedEventArgs(item.FilePath, candidate, item.DisplayName));
+
+                if (run.Marked || wasMarked) ListInvalidated?.Invoke(this, EventArgs.Empty);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                item.HasError = true;
+                item.ErrorMessage = ex.Message;
+
+                run.Marked = true;
+                run.LastError = ex.Message;
+
+                return false;
+            }
+        }
+
+        private static void MarkMissing(PlayRun run, PlaylistItem item)
+        {
+            if (!item.HasError || item.ErrorMessage != MissingFileMessage)
+            {
+                item.HasError = true;
+                item.ErrorMessage = MissingFileMessage;
+            }
+
+            run.Marked = true;
+            run.LastError = MissingFileMessage;
+        }
+
+        /// <summary>给这一项起后台探测；结果没回来之前什么都不做。</summary>
+        private void StartProbe(PlayRun run, int candidate, int offset)
+        {
+            var path = _playlist.Items[candidate].FilePath;
+
+            var pending = new PendingProbe
+            {
+                Run = run,
+                Candidate = candidate,
+                Offset = offset,
+                Path = path,
+                StartedUtc = DateTime.UtcNow
+            };
+
+            try
+            {
+                pending.Task = _pathProbe(path);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Swallowed("探测网络路径失败，按打不开处理：" + path, ex);
+                pending.Task = Task.FromResult(false);
+            }
+
+            _pendingProbe = pending;
+
+            StatusChanged?.Invoke(this, "正在检查网络位置：" + Path.GetFileName(path));
+        }
+
+        /// <summary>
+        /// 收一条后台探测的结果（界面计时器每拍调一次，必须在界面线程上）。
+        /// <para>
+        /// 结果回来时先看代际号：用户可能已经点了别的，这一次的结果就该丢掉。
+        /// 超时不当"不存在"：只标超时、保留条目，下次点它还会再试。
+        /// </para>
+        /// </summary>
+        internal void PumpPendingProbe()
+        {
+            var pending = _pendingProbe;
+            if (pending == null) return;
+
+            // 列表被清空 / 这一项被删掉 / 换了位置：这条结果已经没有意义了。
+            if (_playlist.Count == 0 ||
+                pending.Candidate >= _playlist.Count ||
+                !string.Equals(_playlist.Items[pending.Candidate].FilePath, pending.Path,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _pendingProbe = null;
+                return;
+            }
+
+            if (pending.Run.Generation != _playGeneration)
+            {
+                _pendingProbe = null;
+                return;
+            }
+
+            if (!pending.Task.IsCompleted)
+            {
+                if (DateTime.UtcNow - pending.StartedUtc < ProbeTimeout) return;
+
+                _pendingProbe = null;
+
+                var item = _playlist.Items[pending.Candidate];
+
+                // 不判"文件不存在"：超时只说明这次没问到。条目留着，下次点还会再试。
+                item.HasError = true;
+                item.ErrorMessage = NetworkTimeoutMessage;
+
+                pending.Run.Marked = true;
+                pending.Run.LastError = NetworkTimeoutMessage;
+
+                AppLog.Info("网络位置探测超时，先跳过这一项：" + pending.Path);
+                StatusChanged?.Invoke(this, "网络位置响应超时，先跳过这一项：" + item.DisplayName);
+
+                if (pending.Run.AllowFallback) PlayFrom(pending.Run, pending.Offset + 1);
+                else Finish(pending.Run);
+
+                return;
+            }
+
+            _pendingProbe = null;
+
+            bool exists;
+
+            try
+            {
+                exists = pending.Task.GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Swallowed("探测网络路径失败，按打不开处理：" + pending.Path, ex);
+                exists = false;
+            }
+
+            if (pending.Run.Generation != _playGeneration) return;
+
+            var probed = _playlist.Items[pending.Candidate];
+
+            if (!exists)
+            {
+                MarkMissing(pending.Run, probed);
+
+                if (pending.Run.AllowFallback) PlayFrom(pending.Run, pending.Offset + 1);
+                else Finish(pending.Run);
+
+                return;
+            }
+
+            if (TryOpen(pending.Run, pending.Candidate, probed)) return;
+
+            if (pending.Run.AllowFallback) PlayFrom(pending.Run, pending.Offset + 1);
+            else Finish(pending.Run);
+        }
+
+        /// <summary>整轮都没打开：刷一次列表、停下、说清原因。</summary>
+        private void Finish(PlayRun run)
+        {
+            if (run.Generation != _playGeneration) return;
+
+            if (run.Marked) ListInvalidated?.Invoke(this, EventArgs.Empty);
 
             Stop();
 
-            StatusChanged?.Invoke(this, allowFallback
+            var message = run.AllowFallback
                 ? "播放列表中没有可播放的媒体"
-                : "打不开这一项：" + (lastError ?? "没有可播放的内容"));
+                : "打不开这一项：" + (run.LastError ?? "没有可播放的内容");
+
+            // 整轮只卡在"网络位置超时"时，说清是超时而不是"列表里什么都没有"。
+            if (run.AllowFallback && run.LastError == NetworkTimeoutMessage)
+                message = "网络位置响应超时，没有可播放的内容";
+
+            StatusChanged?.Invoke(this, message);
         }
 
         /// <summary>没有当前项时从第一项开始（列表空时由界面决定要不要弹"打开文件"）。</summary>
@@ -283,6 +543,10 @@ namespace 播放器.Core
         /// <summary>停止（清掉续播、A-B 与连续失败计数）；界面清理由 <see cref="Stopping"/> / <see cref="Stopped"/> 负责。</summary>
         public void Stop()
         {
+            // 停下也把正在后台探测的那条作废：它回来时不该再把媒体打开。
+            _playGeneration++;
+            _pendingProbe = null;
+
             Stopping?.Invoke(this, EventArgs.Empty);
 
             // 停止也清循环点：停完再点播放是从头开始，留着 A-B 只会让人以为它还在起作用。
@@ -331,7 +595,8 @@ namespace 播放器.Core
         {
             if (!_engine.HasMedia || _playlist.CurrentIndex < 0) return false;
 
-            PlayIndex(_playlist.CurrentIndex);
+            StartPlayRequest(_playlist.CurrentIndex, keepCurrent: false, allowFallback: true,
+                suppressResume: true);
             _pendingResume = null;
             return true;
         }

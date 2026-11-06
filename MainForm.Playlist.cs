@@ -414,6 +414,15 @@ namespace 播放器
 
             foreach (var path in list)
             {
+                // 网络位置不在这里问 Directory.Exists：离线 NAS / SMB 上它会卡满超时，
+                // 而这一段在界面线程上。按"直接给出的文件"处理（扩展名不认识的会被标出来，
+                // 但至少不会把窗口冻住）；网络目录的递归扫描暂不支持。
+                if (MediaFormats.IsNetworkPath(path))
+                {
+                    direct.Add(path);
+                    continue;
+                }
+
                 if (Directory.Exists(path)) folders.Add(path);
                 else direct.Add(path);
             }
@@ -506,6 +515,17 @@ namespace 播放器
                 if (string.IsNullOrWhiteSpace(raw)) continue;
 
                 var path = raw.Trim('"', ' ');
+
+                // 网络位置：一次磁盘都不碰（File.Exists / Directory.Exists 都可能等满 SMB 超时）。
+                // 按扩展名分类，剩下的交给播放前的后台探测判定"在不在"。
+                if (MediaFormats.IsNetworkPath(path))
+                {
+                    if (MediaFormats.IsSubtitleFile(path)) subtitles.Add(path);
+                    else if (MediaFormats.IsPlaylistFile(path)) playlists.Add(path);
+                    else media.Add(path);
+
+                    continue;
+                }
 
                 if (Directory.Exists(path))
                 {
@@ -681,7 +701,10 @@ namespace 播放器
             if (selected.Count == 0) return;
 
             var path = _playlist.Items[selected[0]].FilePath;
-            if (!File.Exists(path))
+
+            // 网络位置不在这里查存在性（离线时 File.Exists 会卡满超时）；
+            // 交给资源管理器自己试，失败它会弹自己的提示。
+            if (!MediaFormats.IsNetworkPath(path) && !File.Exists(path))
             {
                 SetStatus("文件不存在：" + path);
                 return;

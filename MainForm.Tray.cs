@@ -213,7 +213,8 @@ namespace 播放器
 
             if (files.Count == 0) return;
 
-            RememberDirectory(files.FirstOrDefault(File.Exists));
+            // 网络位置不在这里查存在性（离线网络盘会卡满超时）。
+            RememberDirectory(files.FirstOrDefault(p => !MediaFormats.IsNetworkPath(p) && File.Exists(p)));
 
             // 用户明确指定了要放的东西，直接切过去（而不是只入列表）。
             AddPathsWithFolders(files, AddPlayback.Always);

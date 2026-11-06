@@ -264,7 +264,8 @@ namespace 播放器
             if (e.Data?.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0)
                 return;
 
-            RememberDirectory(paths.FirstOrDefault(p => File.Exists(p)));
+            // 网络位置不在这里查存在性（离线网络盘会卡满超时）；它是否可用交给播放前的后台探测。
+            RememberDirectory(paths.FirstOrDefault(p => !MediaFormats.IsNetworkPath(p) && File.Exists(p)));
 
             // 拖进来的可能是文件夹，展开走后台，别把窗口卡住。
             AddPathsWithFolders(paths, AddPlayback.IfIdle);

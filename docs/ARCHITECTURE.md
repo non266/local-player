@@ -11,18 +11,21 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 38,157 行 / **166 个文件** |
-| `Core/` | 12,543 行 / 70 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 38,513 行 / **166 个文件** |
+| `Core/` | 12,858 行 / 70 个文件 |
 | `Ui/` | 12,795 行 / 58 个文件 |
-| `MainForm*` 这一族 partial | 12,742 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 20,931 行 / 69 个文件 |
+| `MainForm*` 这一族 partial | 12,783 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 21,157 行 / 70 个文件 |
 
-> 数字最后一次量是在 **2026-11-05（1.12.0：音频迷你模式 + 命令层 / 窗口模块 / 播放业务与所有权收敛）**：
-> 产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、`Core/HistoryService`、
-> `Core/MediaSession`（由 `TrackLyricsSession` 改名）、`Ui/PlayerCommand`、`Ui/CommandBinder`、
-> `Ui/IWindowSurfaceHost`、`Ui/WindowSurfaceController`、`Ui/VideoWindowModule`、`Ui/AudioWindowModule`、
-> `Ui/MiniPlayerView`、`Ui/FullscreenModule`、`MainForm.Commands`、`MainForm.SurfaceHost`；
-> 冒烟多出 `Program.Commands`、`Program.MiniPlayer`、`Program.Ownership`（第 18～20 步）。
+> 数字最后一次量是在 **2026-11-06（1.13.0：网络位置后台探测 + 关于页项目地址）**。
+> 1.12.0 那轮产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、
+> `Core/HistoryService`、`Core/MediaSession`（由 `TrackLyricsSession` 改名）、`Ui/PlayerCommand`、
+> `Ui/CommandBinder`、`Ui/IWindowSurfaceHost`、`Ui/WindowSurfaceController`、`Ui/VideoWindowModule`、
+> `Ui/AudioWindowModule`、`Ui/MiniPlayerView`、`Ui/FullscreenModule`、`MainForm.Commands`、
+> `MainForm.SurfaceHost`；冒烟多出 `Program.Commands`、`Program.MiniPlayer`、`Program.Ownership`
+> （第 22～24 项检查，住在第 18～20 个运行步骤）。
+> 1.13.0 产品侧没有新增文件（改的是 `MediaFormats` / `PlaybackCoordinator` / `MainForm` 那几处），
+> 冒烟多出 `Program.Network`（第 25 项检查，第 21 个运行步骤）。
 > 数行数用 `[IO.File]::ReadAllLines`——本机的 `Get-Content` 会把无 BOM 的 UTF-8 按 GBK 读，
 > 行数是错的（见维护手册坑表）。
 
@@ -693,11 +696,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 20 步 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 21 个运行步骤 / 25 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（20 步，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（21 个运行步骤 / 25 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -709,6 +712,7 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
    - 记完延迟不落盘 → `按文件调整：改了延迟没有马上落盘（等定时器的话，用户当场关程序就丢了）`
    - 让「另存为 m3u」在空列表时也点得动 → `列表空着，「保存为歌单 / 另存为 m3u」还能点`
    - 把 m3u 的追加与替换语义对调 → `追加没把条目并进来（5 项，期望 10…）`
+   - 让网络路径在探测回来之前就打开 → `探测还没回来就已经打开了媒体——等于没等结果`
 4. **发版前做一次干净树验证**：删掉 `bin` / `obj` 从零构建 + 全量跑一遍。
    本次就是它抓到了"某条检查偷偷依赖上一步留下的目录"（见第 11 节）。
 5. **外部输入不假装通过**：环境做不到的事情（合成不了鼠标输入、连不上外网）
@@ -929,3 +933,30 @@ F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.c
 - 没有引 DI / MVVM；模块用接口（`IWindowSurfaceHost`）拿依赖，而不是容器。
 - 没有把 `MainForm.Floating.cs`（悬浮侧栏 / 播放列表窗口）拆成模块：它只通过回调配合全屏隐藏 / 恢复。
 - 没有改任何既有快捷键，也没有改菜单文字（测试与用户都按文字找菜单项）。
+
+## 19. 1.13.0：网络位置探测（异步的边界）
+
+### 19.1 为什么单独一层
+
+对离线的 UNC / SMB 路径，一次 `File.Exists` 要等满超时（本机实测 **68 秒**，见
+`docs/1.13.0计划.md` 的变异记录）。这个调用原来散在播放、加列表、拖放、最近播放、
+「在资源管理器中显示」、外挂封面六处，且都在界面线程上。
+
+现在的规则只有一条：**界面线程不对网络位置做存在性检查**。
+
+- `MediaFormats.IsNetworkPath`：UNC 前缀 / `DriveInfo.DriveType`，只读路径元数据，不连服务器。
+- `MediaFormats.IsOpenable` 对网络位置返回"可能打开"；离线条目因此能留在列表里。
+- `PlaybackCoordinator`：网络路径起后台探测（默认 `Task.Run(File.Exists)`），
+  `PlayIndex` 立刻返回；`PumpPendingProbe` 由 200 ms 界面计时器收尾。所有事件、引擎调用仍回 UI 线程。
+- 代际号：`PlayIndex` / `Stop` 都 +1；旧探测回来时号码对不上就丢掉。
+- 超时 8 秒：只标 `网络位置响应超时`，**不判缺失**、不打开，下次点它还会再试。
+- 探测说"不存在"：标 `文件不存在或无法访问`、保留条目、顺延下一项（`allowFallback` 语义不变）。
+
+### 19.2 边界
+
+- 网络**目录**不递归枚举（拖入会按文件收下）；网络 `.m3u` 仍同步读取。
+- libvlc 自己的 `Play` 对不可达地址是否阻塞没有单独量；这层只保证"我们不再同步读盘"。
+- 同一时刻只探测一条；8 秒是经验值，没在真实慢速 NAS 上标定。
+- 测试（`Program.Network`）用 RFC 5737 地址 + 假探测，不碰真实网络；判据是
+  "探测没回来前不打开 + 调用立刻返回 + 离线保留 + 迟到不覆盖 + 超时不判缺失"。
+

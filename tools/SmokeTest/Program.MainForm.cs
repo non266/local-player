@@ -57,6 +57,7 @@ namespace SmokeTest
                     if (!CheckDurationsBeforeHandle()) return false;
                     if (!CheckThemes(form)) return false;
                     if (!CheckDeinterlaceMenu(form)) return false;
+                    if (!CheckAbout(form)) return false;
 
                     // 1.11.0 B11：任务栏缩略图按钮（必须在窗口显示着的时候验）
                     if (!CheckTaskbarThumbnailButtons(form)) return false;
@@ -387,6 +388,38 @@ namespace SmokeTest
             }
 
             Log(6, $"去隔行菜单正常：{menu.DropDownItems.Count} 项（关闭 + 7 个滤镜），没有那个不起作用的「自动」");
+            return true;
+        }
+
+        /// <summary>
+        /// 1.13.0：「关于」里要有项目主页；运行环境要跟构建基线一致（不能还写着 .NET 8）。
+        /// 只读 <c>BuildAboutText()</c>，不弹框。
+        /// </summary>
+        private static bool CheckAbout(播放器.MainForm form)
+        {
+            var text = form.BuildAboutText();
+
+            const string url = "https://github.com/non266/local-player";
+
+            if (!text.Contains(url, StringComparison.Ordinal))
+            {
+                Log(6, "「关于」里没有项目主页地址（用户找不到源码 / 问题反馈入口）");
+                return false;
+            }
+
+            if (text.Contains(".NET 8", StringComparison.Ordinal))
+            {
+                Log(6, "「关于」还写着 .NET 8（构建基线已经是 .NET " + Environment.Version.Major + "）");
+                return false;
+            }
+
+            if (!text.Contains("运行环境：.NET " + Environment.Version.Major, StringComparison.Ordinal))
+            {
+                Log(6, "「关于」里的运行时主版本与当前进程不一致（现在 " + Environment.Version + "）");
+                return false;
+            }
+
+            Log(6, "「关于」含项目主页，运行环境是 .NET " + Environment.Version.Major);
             return true;
         }
     }

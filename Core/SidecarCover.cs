@@ -32,6 +32,11 @@ namespace 播放器.Core
         {
             if (string.IsNullOrEmpty(folder)) return null;
 
+            // 网络目录不在这里枚举：离线时一次 Directory.Exists 就能卡满 SMB 超时，
+            // 而这条路是界面线程（侧栏封面、系统媒体控件）在走。外挂封面是"锦上添花"，
+            // 宁可没有也不冻窗口；网络文件只认内嵌图。
+            if (MediaFormats.IsNetworkPath(folder)) return null;
+
             try
             {
                 if (!Directory.Exists(folder)) return null;

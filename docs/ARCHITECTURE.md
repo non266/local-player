@@ -11,13 +11,13 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 38,513 行 / **166 个文件** |
-| `Core/` | 12,858 行 / 70 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 38,804 行 / **167 个文件** |
+| `Core/` | 13,024 行 / 71 个文件 |
 | `Ui/` | 12,795 行 / 58 个文件 |
-| `MainForm*` 这一族 partial | 12,783 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 21,157 行 / 70 个文件 |
+| `MainForm*` 这一族 partial | 12,904 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 21,504 行 / 71 个文件 |
 
-> 数字最后一次量是在 **2026-11-06（1.13.0：网络位置后台探测 + 关于页项目地址）**。
+> 数字最后一次量是在 **2026-11-07（1.14.0：网络目录导入 + 网络 m3u 异步读取）**。
 > 1.12.0 那轮产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、
 > `Core/HistoryService`、`Core/MediaSession`（由 `TrackLyricsSession` 改名）、`Ui/PlayerCommand`、
 > `Ui/CommandBinder`、`Ui/IWindowSurfaceHost`、`Ui/WindowSurfaceController`、`Ui/VideoWindowModule`、
@@ -26,6 +26,8 @@
 > （第 22～24 项检查，住在第 18～20 个运行步骤）。
 > 1.13.0 产品侧没有新增文件（改的是 `MediaFormats` / `PlaybackCoordinator` / `MainForm` 那几处），
 > 冒烟多出 `Program.Network`（第 25 项检查，第 21 个运行步骤）。
+> 1.14.0 产品侧多出 `Core/NetworkPathImport`（含结果类型，一个文件两块），`MainForm.Playlist` 只是接线；
+> 冒烟多出 `Program.NetworkFolders`（第 26 项检查，第 22 个运行步骤）。
 > 数行数用 `[IO.File]::ReadAllLines`——本机的 `Get-Content` 会把无 BOM 的 UTF-8 按 GBK 读，
 > 行数是错的（见维护手册坑表）。
 
@@ -696,11 +698,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 21 个运行步骤 / 25 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 22 个运行步骤 / 26 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（21 个运行步骤 / 25 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（22 个运行步骤 / 26 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -954,9 +956,41 @@ F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.c
 
 ### 19.2 边界
 
-- 网络**目录**不递归枚举（拖入会按文件收下）；网络 `.m3u` 仍同步读取。
+- 网络**目录**不递归枚举（拖入会按文件收下）；网络 `.m3u` 仍同步读取。→ **1.14.0 已补**，见 §20。
 - libvlc 自己的 `Play` 对不可达地址是否阻塞没有单独量；这层只保证"我们不再同步读盘"。
 - 同一时刻只探测一条；8 秒是经验值，没在真实慢速 NAS 上标定。
 - 测试（`Program.Network`）用 RFC 5737 地址 + 假探测，不碰真实网络；判据是
   "探测没回来前不打开 + 调用立刻返回 + 离线保留 + 迟到不覆盖 + 超时不判缺失"。
 
+## 20. 1.14.0：网络目录导入（后台枚举的边界）
+
+### 20.1 为什么还要一层
+
+1.13.0 只做到"界面线程不对网络位置查存在性"，但拖进来的网络**目录**仍然被当成一个文件：
+扩展名不认识 → 进列表 → 点播时探测失败标缺。网络 `.m3u` 也还在界面线程上读。
+两件都是同一类问题：**网络 I/O 不能发生在界面线程**。
+
+### 20.2 规则
+
+- 分流在 `MainForm.AddPathsWithFolders`，仍然先看路径、不碰磁盘：
+  - 网络 **m3u / m3u8** → `NetworkPathImport`（后台读条目）；
+  - 网络**媒体 / 字幕**扩展名 → 直接按文件收下（同步，但一次磁盘都不碰）；
+  - 网络**其它**（可能是目录）→ `NetworkPathImport`（后台判目录 + 递归枚举）。
+- `Core/NetworkPathImport`（不引 WinForms）只做三件事，全部阻塞式：
+  `IsDirectory`（默认 `Directory.Exists`）/ `EnumerateFolder`（默认 `MediaFormats.EnumerateMediaFiles`）/
+  `ReadPlaylist`（默认 `PlaylistFile.Load`）。三个都是可替换的委托，测试注入假实现。
+- 结果按桶返回：`Items`（按输入顺序的媒体 + 直接给出的文件）、`Folders`、`FromPlaylists`、
+  `EmptyPlaylists`、`UnreadablePlaylists`、`Unreachable`、`Failures`。界面只负责"把这些加进列表"。
+- 状态栏把"加了几项"与"哪条没成"一次说清；`Directory.Exists` 返回 false 分不清"离线"和
+  "真不是目录"，所以文案只写"**可能离线**"，不假装知道原因。
+- 扩展名分流优先于判目录：一个叫 `music.flac` 的目录会被当文件——这是刻意的取舍，
+  否则每个网络媒体文件都要先白等一次 SMB 超时。
+
+### 20.3 边界
+
+- 没有"取消扫描"按钮；离线时后台线程会等满 SMB 超时（本机实测一次网络查询 >25 秒，变异时量到 68 秒），
+  界面不受影响。
+- 网络目录里的内容一次性 `AddRange` 进列表；几万条时仍是 O(n) 刷新（与本地大目录一致）。
+- m3u 里指向网络目录的条目只按文件收下，不展开；网络字幕仍是同步挂载。
+- 判据看**线程号**而不是计时：`Program.NetworkFolders` 断言探测 / 枚举 / 读 m3u 的
+  `ManagedThreadId` ≠ 界面线程，再用闸门证明调用立刻返回。

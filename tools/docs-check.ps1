@@ -241,10 +241,16 @@ Assert-Contains "docs\维护手册.md" $manual $smokePhrase "冒烟口径要以 
 
 # 1.13.0 之前四份文档各说各的；把当时那几句**具体旧话**钉成"不许回来"，
 # 否则只查"新句子在不在"仍可能同一份文档里新旧并存。
-Assert-Absent "README.md" $readme "全量 24 步冒烟" "1.13.0 已统一为 21 个运行步骤 / 25 项检查"
+Assert-Absent "README.md" $readme "全量 24 步冒烟" "1.13.0 已统一为 21 个运行步骤 / 25 项检查，1.14.0 是 22 / 26"
 Assert-Absent "docs\ARCHITECTURE.md" $architecture "第 18～20 步" "1.13.0 已改成第 22～24 项检查 / 第 18～20 个运行步骤"
-Assert-Absent "docs\维护手册.md" $manual "全量 21 步冒烟" "1.13.0 已统一为 21 个运行步骤 / 25 项检查"
-Assert-Absent "docs\介绍.md" $intro "一共 20 项检查" "1.13.0 已统一为 21 个运行步骤 / 25 项检查"
+Assert-Absent "docs\维护手册.md" $manual "全量 21 步冒烟" "1.14.0 统一为 22 个运行步骤 / 26 项检查"
+Assert-Absent "docs\介绍.md" $intro "一共 20 项检查" "1.13.0 已统一为 21 个运行步骤 / 25 项检查，1.14.0 是 22 / 26"
+
+# 1.14.0 起网络目录与网络 m3u 都走后台。README 里这几句是当时的"当前状态"，
+# 已经不对了；钉成"不许回来"，免得下次改文档又抄回旧结论。
+Assert-Absent "README.md" $readme 'IsOpenable` 仍是同步的' "1.14.0 起网络位置不在界面线程查存在性，这句是 1.13.0 之前的旧说法"
+Assert-Absent "README.md" $readme "网络目录的拖入暂不支持" "1.14.0 已支持网络目录（判目录 / 枚举都在后台）"
+Assert-Absent "README.md" $readme "第 25 步" "筛跑示例里写的是检查编号，要写「第 25 项检查」（或「第 21 个运行步骤」）"
 
 # ---------------------------------------------------------------- 摘要
 

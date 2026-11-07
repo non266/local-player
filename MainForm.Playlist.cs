@@ -26,6 +26,16 @@ namespace 播放器
             new Dictionary<int, ListViewItem>();
 
         /// <summary>
+        /// 网络位置的解析（判目录 / 递归枚举 / 读网络 m3u）。界面线程把它丢到线程池上跑，
+        /// 自己一次磁盘都不碰。<b>测试钩子</b>：三个 I/O 委托可以换成假的，
+        /// 和 <see cref="PlaybackCoordinator.PathProbe"/> 是同一种做法。
+        /// </summary>
+        private readonly NetworkPathImport _networkImport = new NetworkPathImport();
+
+        /// <summary>只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。</summary>
+        internal NetworkPathImport NetworkImport => _networkImport;
+
+        /// <summary>
         /// 现在挂着"正在播"标记（加粗 + 在播色）的那一行。
         /// <para>
         /// 换歌时只改这一行和新的一行，不重建整个列表（见 <see cref="UpdateNowPlayingRow"/>）。
@@ -391,12 +401,18 @@ namespace 播放器
         }
 
         /// <summary>
-        /// 把一批路径加入播放列表。<b>文件夹会在后台线程递归展开。</b>
+        /// 把一批路径加入播放列表。<b>本地文件夹与网络位置都在后台线程展开 / 解析。</b>
         /// <para>
         /// 以前这里对目录直接同步调用 <see cref="MediaFormats.EnumerateMediaFiles(string, bool)"/>，
         /// 于是在 UI 线程上枚举 + 排序整个目录树。拖进来一个音乐库或者一个盘符，
         /// 窗口会白屏几秒到几十秒，且没有任何提示。现在只把"取出路径列表"放到后台，
         /// 真正改动播放列表仍然回到 UI 线程做。
+        /// </para>
+        /// <para>
+        /// <b>网络位置单独一路</b>（1.14.0）：UNC / 网络盘上的路径在界面线程上一次磁盘都不碰。
+        /// 扩展名已经说明是媒体 / 字幕的直接收下；m3u 与"可能是目录"的路径交给
+        /// <see cref="NetworkPathImport"/> 在线程池上判目录、递归枚举、读条目。
+        /// 离线时这一步会等满 SMB 超时，但等的是后台线程，窗口照常能用。
         /// </para>
         /// </summary>
         private void AddPathsWithFolders(IEnumerable<string> paths, AddPlayback playback)
@@ -411,15 +427,30 @@ namespace 播放器
 
             var folders = new List<string>();
             var direct = new List<string>();
+            var network = new List<string>();
 
             foreach (var path in list)
             {
                 // 网络位置不在这里问 Directory.Exists：离线 NAS / SMB 上它会卡满超时，
-                // 而这一段在界面线程上。按"直接给出的文件"处理（扩展名不认识的会被标出来，
-                // 但至少不会把窗口冻住）；网络目录的递归扫描暂不支持。
+                // 而这一段在界面线程上。
                 if (MediaFormats.IsNetworkPath(path))
                 {
-                    direct.Add(path);
+                    // 扩展名已经说明是媒体 / 字幕的，直接按文件收下（一次磁盘都不碰，也省掉一次
+                    // 后台往返）；m3u 要读里面的条目，和"可能是个目录"的一起交给后台。
+                    if (MediaFormats.IsPlaylistFile(path))
+                    {
+                        network.Add(path);
+                    }
+                    else if (MediaFormats.IsMediaFile(path) || MediaFormats.IsSubtitleFile(path))
+                    {
+                        direct.Add(path);
+                    }
+                    else
+                    {
+                        // 扩展名不认识：可能是网络目录，也可能离线——只有后台能问出来（1.14.0）。
+                        network.Add(path);
+                    }
+
                     continue;
                 }
 
@@ -427,18 +458,16 @@ namespace 播放器
                 else direct.Add(path);
             }
 
-            // 直接给出的文件（以及网络串流、字幕）本来就不需要枚举，同步处理即可。
+            // 直接给出的本地文件（以及网络串流、字幕）本来就不需要枚举，同步处理即可。
             if (direct.Count > 0)
             {
                 var addedNow = AddPathsToPlaylist(direct, distinct: true);
                 if (ShouldAutoPlay(playback, addedNow.Count > 0)) PlayIndex(addedNow[0]);
             }
 
-            if (folders.Count == 0) return;
+            if (folders.Count == 0 && network.Count == 0) return;
 
-            SetStatus(folders.Count == 1
-                ? "正在扫描文件夹…"
-                : $"正在扫描 {folders.Count} 个文件夹…");
+            SetStatus(DescribeScanStart(folders.Count, network.Count));
 
             Task.Run(() =>
             {
@@ -455,12 +484,30 @@ namespace 播放器
                         AppLog.Swallowed("个别子目录没有权限就跳过，不要让整批失败。", ex);
                     }
                 }
-                return found;
+
+                // 网络这一路自己吞异常（逐条 try/catch），这里不会因为一条离线路径整批失败。
+                var imported = _networkImport.Run(network);
+
+                return (Local: found, Network: imported);
             }).ContinueWith(
                 task => PostScannedFiles(task, playback),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
+        }
+
+        /// <summary>扫描开始时的状态栏：本地文件夹与网络位置分开说，别让用户以为只是本地目录慢。</summary>
+        private static string DescribeScanStart(int folders, int network)
+        {
+            if (network == 0)
+                return folders == 1 ? "正在扫描文件夹…" : $"正在扫描 {folders} 个文件夹…";
+
+            var networkText = network == 1 ? "1 个网络位置" : $"{network} 个网络位置";
+
+            if (folders == 0) return $"正在扫描{networkText}…";
+
+            var folderText = folders == 1 ? "1 个文件夹" : $"{folders} 个文件夹";
+            return $"正在扫描{folderText} / {networkText}…";
         }
 
         private bool ShouldAutoPlay(AddPlayback playback, bool addedSomething)
@@ -470,8 +517,10 @@ namespace 播放器
             return playback == AddPlayback.Always || !_engine.HasMedia;
         }
 
-        /// <summary>后台枚举结束，回到 UI 线程把结果补进播放列表。</summary>
-        private void PostScannedFiles(Task<List<string>> task, AddPlayback playback)
+        /// <summary>后台扫描结束，回到 UI 线程把结果补进播放列表。</summary>
+        private void PostScannedFiles(
+            Task<(List<string> Local, NetworkPathImportResult Network)> task,
+            AddPlayback playback)
         {
             try
             {
@@ -481,14 +530,38 @@ namespace 播放器
                 {
                     if (IsDisposed) return;
 
-                    var files = task.IsCompletedSuccessfully ? task.Result : new List<string>();
-                    if (files.Count == 0)
+                    if (!task.IsCompletedSuccessfully)
                     {
-                        SetStatus("文件夹里没有找到可播放的媒体文件");
+                        // 到这里只可能是本地目录那一段抛了（网络那一段逐条吞异常）。
+                        AppLog.Swallowed("扫描文件夹失败，这一批没有加进列表。", task.Exception!);
+                        SetStatus("扫描文件夹失败，请看日志");
                         return;
                     }
 
-                    var added = AddPathsToPlaylist(files, distinct: true);
+                    var (localFiles, imported) = task.Result;
+                    var added = new List<int>();
+
+                    // 本地目录里找到的文件先加：和以前一样走 AddPathsToPlaylist 的分类（媒体 / 字幕）。
+                    if (localFiles.Count > 0)
+                        added.AddRange(AddPathsToPlaylist(localFiles, distinct: true));
+
+                    // 网络目录里找到的文件 / 直接给出的网络文件（顺序由 NetworkPathImport 保证）。
+                    if (imported.Items.Count > 0)
+                        added.AddRange(AddPathsToPlaylist(imported.Items, distinct: true));
+
+                    // 网络 m3u 的条目录「追加」语义：不去重（和本地 m3u 的拖入完全一致）。
+                    if (imported.FromPlaylists.Count > 0)
+                    {
+                        var first = _playlist.Count;
+                        _playlist.AddRange(imported.FromPlaylists);
+                        _scanner.Enqueue(imported.FromPlaylists);
+
+                        for (var i = 0; i < imported.FromPlaylists.Count; i++)
+                            added.Add(first + i);
+                    }
+
+                    SetStatus(DescribeScanResult(added.Count, imported, localFiles.Count));
+
                     if (ShouldAutoPlay(playback, added.Count > 0)) PlayIndex(added[0]);
                 }));
             }
@@ -500,9 +573,61 @@ namespace 播放器
         }
 
         /// <summary>
-        /// 把一批路径加入播放列表：目录会递归展开，字幕文件会直接挂到当前媒体上。
+        /// 扫描结束后的状态栏：把"加了几项"与"哪几条没成"一次说清。
+        /// <para>
+        /// 网络位置离线时 <c>Directory.Exists</c> 只能返回 false，和"真的不是目录"分不开，
+        /// 所以文案写"可能离线"——不假装我们知道原因。
+        /// </para>
+        /// </summary>
+        private static string DescribeScanResult(int addedCount, NetworkPathImportResult imported, int localFilesFound)
+        {
+            var parts = new List<string>();
+
+            if (addedCount > 0) parts.Add($"已添加 {addedCount} 项");
+
+            if (imported.Unreachable.Count > 0)
+                parts.Add($"{imported.Unreachable.Count} 个网络位置没能当文件夹打开（可能离线），"
+                          + "已按单个文件收下：" + imported.Unreachable[0]);
+
+            if (imported.UnreadablePlaylists.Count > 0)
+                parts.Add($"{imported.UnreadablePlaylists.Count} 个网络 m3u 读不出来（可能离线）："
+                          + imported.UnreadablePlaylists[0]);
+
+            if (imported.EmptyPlaylists.Count > 0)
+                parts.Add($"{imported.EmptyPlaylists.Count} 个网络 m3u 里没有可用的条目："
+                          + imported.EmptyPlaylists[0]);
+
+            if (imported.Failures.Count > 0)
+                parts.Add($"{imported.Failures.Count} 个网络位置读不出来（详情见日志）："
+                          + imported.Failures[0]);
+
+            if (imported.FromPlaylists.Count > 0)
+                parts.Add($"从网络 m3u 追加 {imported.FromPlaylists.Count} 项");
+
+            if (parts.Count == 0)
+            {
+                // 什么都没加：分三种情形说清楚，别停在一句"正在扫描…"上。
+                if (imported.Folders.Count > 0 && imported.Items.Count == 0)
+                    parts.Add("网络位置里没有找到可播放的媒体文件");
+                else if (localFilesFound == 0 && imported.Items.Count == 0 && imported.Folders.Count == 0)
+                    parts.Add("文件夹里没有找到可播放的媒体文件");
+                else
+                    parts.Add("没有新增条目（可能已经在列表里）");
+            }
+
+            return string.Join("；", parts);
+        }
+
+        /// <summary>
+        /// 把一批路径加入播放列表：<b>本地</b>目录会递归展开，字幕文件会直接挂到当前媒体上。
         /// 返回新增条目的索引。
-        /// <para>调用方请用 <see cref="AddPathsWithFolders"/>：本方法遇到目录会<b>同步</b>枚举。</para>
+        /// <para>调用方请用 <see cref="AddPathsWithFolders"/>：本方法遇到本地目录会<b>同步</b>枚举。</para>
+        /// <para>
+        /// 网络位置不在这里展开目录（也不问存在性）：路径的判定与枚举在
+        /// <see cref="NetworkPathImport"/> 里、后台线程上做完了，这里只按扩展名分类。
+        /// 网络 m3u 在那一边就已经读成条目，正常情况下不会再走到下面那条
+        /// <c>LoadPlaylistFromFile</c> 分支——留着是给"别的入口直接传网络 m3u 进来"兜底。
+        /// </para>
         /// </summary>
         private List<int> AddPathsToPlaylist(IEnumerable<string> paths, bool distinct)
         {

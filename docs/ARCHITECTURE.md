@@ -15,7 +15,7 @@
 | `Core/` | 13,024 行 / 71 个文件 |
 | `Ui/` | 12,795 行 / 58 个文件 |
 | `MainForm*` 这一族 partial | 12,989 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 21,805 行 / 72 个文件 |
+| `tools/SmokeTest/` | 21,835 行 / 72 个文件 |
 
 > 数字最后一次量是在 **2026-11-09（1.15.0：大列表探针 + 末尾追加增量）**。
 > 1.12.0 那轮产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、

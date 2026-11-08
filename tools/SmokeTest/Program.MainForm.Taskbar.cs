@@ -51,6 +51,36 @@ namespace SmokeTest
             }
 
             // ---- 点击：喂一条和系统完全一样的 WM_COMMAND ----
+            // 这条验的是"按钮接线"，不是"启动时自动播放"：慢环境（安装目录、Defender 正在扫）
+            // 里启动那一两秒的样本可能已经放完，wasPlaying 一直是 false，点击就被误判成"没反应"。
+            // 先确保有东西在放；起不来才判失败。
+            if (!main.Engine.HasMedia || !main.Engine.IsPlaying)
+            {
+                var first = main.Playlist.Items.FirstOrDefault();
+
+                if (first == null)
+                {
+                    Log(6, "任务栏按钮：没有可播放的条目，验不了点击");
+                    return false;
+                }
+
+                main.Engine.Open(first.FilePath);
+
+                if (!main.Engine.HasMedia)
+                {
+                    Log(6, "任务栏按钮：起播失败，验不了点击");
+                    return false;
+                }
+
+                main.Engine.Play();
+
+                if (!PumpUntil(() => main.Engine.IsPlaying, 15000))
+                {
+                    Log(6, "任务栏按钮：起播失败，验不了点击");
+                    return false;
+                }
+            }
+
             var wasPlaying = main.Engine.IsPlaying;
 
             SendThumbButtonClick(main, TaskbarThumbnailButtons.ButtonPlayPause);

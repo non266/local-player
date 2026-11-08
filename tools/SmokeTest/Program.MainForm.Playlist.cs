@@ -416,6 +416,167 @@ namespace SmokeTest
             return true;
         }
 
+        /// <summary>
+        /// 末尾追加只补新行、不重建整张表（1.15.0）。
+        /// <para>
+        /// 判据是控件的**对象引用**：追加之后第 1 行必须还是原来那个 <see cref="ListViewItem"/>。
+        /// 计时的红会看机器心情，引用不会——整建一次，所有行都会换新对象。
+        /// </para>
+        /// </summary>
+        private static bool CheckPlaylistAppendIncremental(播放器.MainForm form)
+        {
+            var view = form.PlaylistView;
+            var folder = AppContext.BaseDirectory;
+
+            var a = Path.Combine(folder, "append-a.wav");
+            var b = Path.Combine(folder, "append-b.wav");
+            var c = Path.Combine(folder, "append-c.wav");
+            var d = Path.Combine(folder, "append-d.wav");
+            var e = Path.Combine(folder, "append-e.wav");
+            var f = Path.Combine(folder, "append-f.wav");
+
+            try
+            {
+                form.Playlist.Clear();
+                form.Playlist.AddRange(new[] { a, b, c });
+                PumpMessages(80);
+
+                if (view.Items.Count != 3)
+                {
+                    Log(6, $"末尾追加检查：准备阶段列表里应该有 3 行（现在 {view.Items.Count} 行）");
+                    return false;
+                }
+
+                var firstRow = view.Items[0];
+                var thirdRow = view.Items[2];
+                view.Items[1].Selected = true;
+
+                form.Playlist.Add(d);
+                PumpMessages(30);
+
+                if (!ReferenceEquals(view.Items[0], firstRow))
+                {
+                    Log(6, "在列表末尾追加 1 项时整张列表被重建了（第 1 行换了新对象）");
+                    return false;
+                }
+
+                if (!ReferenceEquals(view.Items[2], thirdRow))
+                {
+                    Log(6, "在列表末尾追加 1 项时整张列表被重建了（第 3 行换了新对象）");
+                    return false;
+                }
+
+                if (view.Items.Count != 4)
+                {
+                    Log(6, $"末尾追加之后行数不对（{view.Items.Count}，期望 4）");
+                    return false;
+                }
+
+                if (view.Items[3].Tag is not int appendedTag || appendedTag != 3)
+                {
+                    Log(6, $"末尾追加的那一行 Tag 不对（{view.Items[3].Tag}，期望 3）");
+                    return false;
+                }
+
+                if (view.Items[3].SubItems[1].Text != "append-d")
+                {
+                    Log(6, $"末尾追加的那一行标题不对（「{view.Items[3].SubItems[1].Text}」，期望「append-d」）");
+                    return false;
+                }
+
+                if (!view.Items[1].Selected)
+                {
+                    Log(6, "末尾追加之后选中项丢了");
+                    return false;
+                }
+
+                // 切歌（只改"当前项"）也必须只挪加粗那一行，不重建整张表
+                var beforeSwitchFirst = view.Items[0];
+                var beforeSwitchThird = view.Items[2];
+
+                form.Playlist.SetCurrent(1);
+                PumpMessages(30);
+
+                if (!ReferenceEquals(view.Items[0], beforeSwitchFirst) ||
+                    !ReferenceEquals(view.Items[2], beforeSwitchThird))
+                {
+                    Log(6, "切歌（只改当前项）时整张列表被重建了（行换了新对象）");
+                    return false;
+                }
+
+                // 筛选状态下追加必须整建：筛出来的只有 a，再追加一条不匹配的 d/e 不能冒出来
+                form.ApplyPlaylistFilterForTest("append-a");
+                PumpMessages(30);
+
+                if (view.Items.Count != 1)
+                {
+                    Log(6, $"末尾追加检查：筛选「append-a」之后应该只剩 1 行（现在 {view.Items.Count} 行）");
+                    return false;
+                }
+
+                form.Playlist.Add(e);
+                PumpMessages(30);
+
+                if (view.Items.Count != 1)
+                {
+                    Log(6, "筛选状态下追加的条目没有被筛掉（列表多出 1 行）");
+                    return false;
+                }
+
+                form.ApplyPlaylistFilterForTest("");
+                PumpMessages(30);
+
+                if (view.Items.Count != 5)
+                {
+                    Log(6, $"清空筛选之后行数不对（{view.Items.Count}，期望 5）");
+                    return false;
+                }
+
+                // 中间插入必须整建：新行插在第 2 行，序号列跟着模型索引走
+                var beforeInsert = view.Items[0];
+
+                form.Playlist.Insert(1, f);
+                PumpMessages(30);
+
+                if (view.Items.Count != 6)
+                {
+                    Log(6, $"中间插入之后行数不对（{view.Items.Count}，期望 6）");
+                    return false;
+                }
+
+                if (view.Items[1].Tag is not int insertedTag || insertedTag != 1)
+                {
+                    Log(6, "在中间插入一项时列表没有整建，顺序 / 序号对不上"
+                            + $"（第 2 行是「{view.Items[1].SubItems[1].Text}」，Tag {view.Items[1].Tag}）");
+                    return false;
+                }
+
+                if (ReferenceEquals(view.Items[0], beforeInsert))
+                {
+                    Log(6, "在中间插入一项时列表没有整建（第 1 行还是旧对象）");
+                    return false;
+                }
+
+                if (view.Items[1].Text != "2" || view.Items[1].SubItems[1].Text != "append-f")
+                {
+                    Log(6, "中间插入之后序号 / 标题不对（"
+                            + $"序号「{view.Items[1].Text}」、标题「{view.Items[1].SubItems[1].Text}」）");
+                    return false;
+                }
+
+                Log(6, "播放列表末尾追加正常：只补新行、不重建整表；筛选下追加会被筛掉；中间插入仍整建");
+                return true;
+            }
+            finally
+            {
+                // 后面还有"搜索打字"检查，它要求列表非空——留下 3 项。
+                form.ApplyPlaylistFilterForTest("");
+                form.Playlist.Clear();
+                form.Playlist.AddRange(new[] { a, b, c });
+                PumpMessages(50);
+            }
+        }
+
         private static List<string> ReadTitles(ListView listView)
         {
             var titles = new List<string>();

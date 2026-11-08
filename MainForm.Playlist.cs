@@ -35,6 +35,22 @@ namespace 播放器
         /// <summary>只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。</summary>
         internal NetworkPathImport NetworkImport => _networkImport;
 
+        /// <summary>只读入口（给冒烟测试 / 大列表探针用）：播放列表控件即使被分离到悬浮窗也还是它。</summary>
+        internal ListView PlaylistView => listViewPlaylist;
+
+        /// <summary>
+        /// "视图里的行 ↔ 模型路径"的快照（1.15.0），只在**无筛选**时维护。
+        /// <para>
+        /// 末尾追加靠它判断"前缀没变、只是多了几条"；切歌靠它判断"行没变、只有当前项变了"。
+        /// 一旦对不上（插入 / 移动 / 删除 / 排序 / 替换 / 换主题）就退回整建。
+        /// 重建一开始就置 <c>null</c>，中途出问题也不会让下一次走快路。
+        /// </para>
+        /// </summary>
+        private List<string>? _renderedPaths;
+
+        /// <summary>上次整建 / 追加 / 切歌之后，模型里的"当前项"索引（1.15.0 的切歌快路用）。</summary>
+        private int _renderedCurrentIndex = -1;
+
         /// <summary>
         /// 现在挂着"正在播"标记（加粗 + 在播色）的那一行。
         /// <para>
@@ -71,12 +87,23 @@ namespace 播放器
             colTitle.Width = Math.Max(60, titleWidth);
         }
 
-        /// <summary>按模型重建列表视图（应用当前筛选，保留滚动位置与选中项）。</summary>
+        /// <summary>
+        /// 按模型刷新列表视图。
+        /// <para>
+        /// 末尾追加走 <see cref="TryAppendPlaylistView"/>（只给新增条目造行）；
+        /// 其它变更（筛选 / 插入 / 删除 / 移动 / 排序 / 清空）照旧整建，保留滚动位置与选中项。
+        /// </para>
+        /// </summary>
         private void RefreshPlaylistView()
         {
+            if (TryRefreshPlaylistViewIncrementally()) return;
+
             var selected = GetSelectedPlaylistIndices();
             var topIndex = listViewPlaylist.TopItem?.Index ?? 0;
             var visible = new List<int>();
+
+            // 重建期间快照作废：中途出任何问题，下一次追加都必须退回整建。
+            _renderedPaths = null;
 
             listViewPlaylist.BeginUpdate();
             try
@@ -93,33 +120,10 @@ namespace 播放器
 
                 for (var i = 0; i < _playlist.Count; i++)
                 {
-                    var source = _playlist.Items[i];
-
-                    if (!MatchesFilter(source)) continue;
+                    if (!MatchesFilter(_playlist.Items[i])) continue;
 
                     visible.Add(i);
-
-                    // 序号用模型索引 + 1：筛选时编号保持稳定，不会跳来跳去。
-                    var row = new ListViewItem((i + 1).ToString()) { Tag = i };
-
-                    // 「下一首播放」排进队的行在标题前挂个 ▶（标记只存在内存里，见 PlaylistItem.Queued）。
-                    row.SubItems.Add(source.Queued ? "▶ " + source.DisplayName : source.DisplayName);
-                    row.SubItems.Add(source.DurationText);
-                    row.ToolTipText = source.HasError && !string.IsNullOrEmpty(source.ErrorMessage)
-                        ? source.FilePath + Environment.NewLine + "无法播放：" + source.ErrorMessage
-                        : source.FilePath;
-
-                    if (source.HasError)
-                    {
-                        row.ForeColor = _palette.ErrorFore;
-                    }
-                    else if (IsNowPlayingRow(source, i))
-                    {
-                        row.Font = _playingItemFont;
-                        row.ForeColor = _palette.PlayingFore;
-                        _nowPlayingRow = row;
-                    }
-
+                    var row = CreatePlaylistRow(i);
                     listViewPlaylist.Items.Add(row);
                     _rowByPlaylistIndex[i] = row;
                 }
@@ -141,7 +145,114 @@ namespace 播放器
                 if (row != null) row.Selected = true;
             }
 
+            // 只有"无筛选"时行与模型才一一对应；下一次追加靠它判断能不能只补新行。
+            _renderedPaths = _workspace.Filter.Length == 0 ? _playlist.GetPaths() : null;
+            _renderedCurrentIndex = _playlist.CurrentIndex;
+
             UpdateTransportState();
+        }
+
+        /// <summary>
+        /// 造一行：序号 / ▶ 标记 / 时长 / 提示 / 错误色 / 在播加粗。
+        /// <para>整建与末尾追加共用这一处，免得两条路的行内容慢慢漂开。</para>
+        /// </summary>
+        private ListViewItem CreatePlaylistRow(int index)
+        {
+            var source = _playlist.Items[index];
+
+            // 序号用模型索引 + 1：筛选时编号保持稳定，不会跳来跳去。
+            var row = new ListViewItem((index + 1).ToString()) { Tag = index };
+
+            // 「下一首播放」排进队的行在标题前挂个 ▶（标记只存在内存里，见 PlaylistItem.Queued）。
+            row.SubItems.Add(source.Queued ? "▶ " + source.DisplayName : source.DisplayName);
+            row.SubItems.Add(source.DurationText);
+            row.ToolTipText = source.HasError && !string.IsNullOrEmpty(source.ErrorMessage)
+                ? source.FilePath + Environment.NewLine + "无法播放：" + source.ErrorMessage
+                : source.FilePath;
+
+            if (source.HasError)
+            {
+                row.ForeColor = _palette.ErrorFore;
+            }
+            else if (IsNowPlayingRow(source, index))
+            {
+                row.Font = _playingItemFont;
+                row.ForeColor = _palette.PlayingFore;
+                _nowPlayingRow = row;
+            }
+
+            return row;
+        }
+
+        /// <summary>
+        /// 增量刷新的两条快路（1.15.0），不重建整张表：
+        /// <list type="number">
+        ///   <item><b>切歌</b>：条数没变、只有"当前项"变了 → 只挪在播加粗那一行（O(1)）；</item>
+        ///   <item><b>末尾追加</b>：条数变多、前缀逐条相同 → 只给新增条目造行。</item>
+        /// </list>
+        /// <para>
+        /// 判定条件是"视图里的行与模型逐条对得上"：<see cref="_renderedPaths"/> 只在无筛选的整建
+        /// （或上一次快路）之后维护；插入 / 移动 / 删除 / 排序 / 替换 / 换主题都会在前缀、条数或
+        /// "当前项没变"这三道关上失配，自动退回整建。<b>宁可慢，不可错</b>。
+        /// </para>
+        /// </summary>
+        private bool TryRefreshPlaylistViewIncrementally()
+        {
+            if (_workspace.Filter.Length > 0) return false;
+
+            var rendered = _renderedPaths;
+            if (rendered == null) return false;
+
+            // 条数没变：只有"当前项"变了才值得走快路。
+            // 换主题 / 队列标记 / 排序这些也是条数不变，但它们要么根本没改当前项（换主题），
+            // 要么前缀对不上（排序 / 移动），必须整建。
+            if (_playlist.Count == rendered.Count)
+            {
+                if (_playlist.CurrentIndex == _renderedCurrentIndex) return false;
+                if (!RenderedPrefixMatches(rendered)) return false;
+
+                UpdateNowPlayingRow();
+                UpdateTransportState();
+                _renderedCurrentIndex = _playlist.CurrentIndex;
+                return true;
+            }
+
+            if (_playlist.Count < rendered.Count) return false;
+            if (!RenderedPrefixMatches(rendered)) return false;
+
+            listViewPlaylist.BeginUpdate();
+            try
+            {
+                for (var i = rendered.Count; i < _playlist.Count; i++)
+                {
+                    var row = CreatePlaylistRow(i);
+                    listViewPlaylist.Items.Add(row);
+                    _rowByPlaylistIndex[i] = row;
+                    rendered.Add(_playlist.Items[i].FilePath);
+                }
+            }
+            finally
+            {
+                listViewPlaylist.EndUpdate();
+            }
+
+            // 无筛选时汇总只扫一遍时长（50k 约 1～2 ms），不重建任何行。
+            UpdatePlaylistSummary();
+            UpdateTransportState();
+            _renderedCurrentIndex = _playlist.CurrentIndex;
+            return true;
+        }
+
+        /// <summary>快照与模型的前缀是否逐条相同（行与模型一一对应的判据）。</summary>
+        private bool RenderedPrefixMatches(List<string> rendered)
+        {
+            for (var i = 0; i < rendered.Count; i++)
+            {
+                if (!string.Equals(_playlist.Items[i].FilePath, rendered[i], StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            return true;
         }
 
         /// <summary>

@@ -38,6 +38,9 @@ namespace 播放器
                 SetStatus($"筛选「{filter}」，匹配 {listViewPlaylist.Items.Count}/{_playlist.Count} 项");
         }
 
+        /// <summary>给冒烟测试 / 大列表探针用的入口：等价于在搜索框里输入这段文字。</summary>
+        internal void ApplyPlaylistFilterForTest(string text) => ApplyPlaylistFilter(text);
+
         private void ClearPlaylistFilter()
         {
             if (_workspace.Filter.Length == 0) return;

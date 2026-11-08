@@ -62,6 +62,9 @@ namespace SmokeTest
                     // 1.11.0 B11：任务栏缩略图按钮（必须在窗口显示着的时候验）
                     if (!CheckTaskbarThumbnailButtons(form)) return false;
 
+                    // 1.15.0：末尾追加只补新行（放在任务栏按钮之后：它会清空列表，不能影响"播放 / 暂停"那条检查）
+                    if (!CheckPlaylistAppendIncremental(form)) return false;
+
                     // 放在最后：它按 Delete 会真的把列表项删掉一项，别影响前面的检查
                     if (!CheckSearchTyping(form)) return false;
 

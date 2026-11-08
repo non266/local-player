@@ -11,13 +11,13 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 38,804 行 / **167 个文件** |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 38,918 行 / **167 个文件** |
 | `Core/` | 13,024 行 / 71 个文件 |
 | `Ui/` | 12,795 行 / 58 个文件 |
-| `MainForm*` 这一族 partial | 12,904 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 21,504 行 / 71 个文件 |
+| `MainForm*` 这一族 partial | 12,989 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 21,805 行 / 72 个文件 |
 
-> 数字最后一次量是在 **2026-11-07（1.14.0：网络目录导入 + 网络 m3u 异步读取）**。
+> 数字最后一次量是在 **2026-11-09（1.15.0：大列表探针 + 末尾追加增量）**。
 > 1.12.0 那轮产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、
 > `Core/HistoryService`、`Core/MediaSession`（由 `TrackLyricsSession` 改名）、`Ui/PlayerCommand`、
 > `Ui/CommandBinder`、`Ui/IWindowSurfaceHost`、`Ui/WindowSurfaceController`、`Ui/VideoWindowModule`、
@@ -28,6 +28,8 @@
 > 冒烟多出 `Program.Network`（第 25 项检查，第 21 个运行步骤）。
 > 1.14.0 产品侧多出 `Core/NetworkPathImport`（含结果类型，一个文件两块），`MainForm.Playlist` 只是接线；
 > 冒烟多出 `Program.NetworkFolders`（第 26 项检查，第 22 个运行步骤）。
+> 1.15.0 产品侧没有新增文件（`MainForm.Playlist` 里多了"整建 / 追加"两条路），
+> 冒烟多出 `Program.BigList`（**探针**，不占检查编号：`播放器_TEST_BIGLIST=1` 才跑）。
 > 数行数用 `[IO.File]::ReadAllLines`——本机的 `Get-Content` 会把无 BOM 的 UTF-8 按 GBK 读，
 > 行数是错的（见维护手册坑表）。
 
@@ -994,3 +996,34 @@ F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.c
 - m3u 里指向网络目录的条目只按文件收下，不展开；网络字幕仍是同步挂载。
 - 判据看**线程号**而不是计时：`Program.NetworkFolders` 断言探测 / 枚举 / 读 m3u 的
   `ManagedThreadId` ≠ 界面线程，再用闸门证明调用立刻返回。
+
+## 21. 1.15.0：大列表（整建与追加是两条路）
+
+### 21.1 为什么是"追加"而不是 `VirtualMode`
+
+先造了量表（`Program.BigList.cs` 的探针，`播放器_TEST_BIGLIST=1`）：50,000 条整建 **1.5 秒**、
+筛选一次约 **0.5 秒**、按名称排序约 **4 秒**，都低于"非虚拟不可"的量级；
+但**末尾追加 1 项要 1.9 秒**——因为它复用了整建那条路，而大列表里"加一首"是常事。
+所以本轮只把这条路拆出来，`VirtualMode` 留给下一轮（要重做自绘 / 选择 / 拖动 / 列宽）。
+
+### 21.2 规则
+
+- `_renderedPaths`：无筛选时"行 ↔ 模型路径"的快照；`_renderedCurrentIndex`：上次整建 / 追加 / 切歌时的当前项。
+- `RefreshPlaylistView` 先试 `TryRefreshPlaylistViewIncrementally()`：
+  - 筛选非空、快照为 `null` → 整建；
+  - **条数相同**：只有当前项变了才走快路——`UpdateNowPlayingRow()` + `UpdateTransportState()`；
+    换主题 / 队列标记这类"条数没变、当前项也没变"的刷新仍整建（否则配色与 `▶` 不会更新）；
+  - **条数变多且前缀逐条相同**：只给新增条目造行（`CreatePlaylistRow`，与整建共用一处）、
+    写 `_rowByPlaylistIndex`、扩快照，再汇总 + 更新传输状态；
+  - 条数变少、或前缀对不上（插入 / 移动 / 排序 / 替换）→ 整建。
+- 选中项 / 滚动位置 / `_nowPlayingRow` 在快路上都不动；整建一开始把快照置 `null`（fail-safe）。
+- 行为断言不看计时，看**对象引用**：追加或切歌之后旧行必须还是原来那个 `ListViewItem`。
+
+### 21.3 数字与边界
+
+- 10,000 条：切歌 421 → 1 ms、追加 378 → 6 ms；50,000 条：切歌 1,844 → 1 ms、追加 1,929 → 5 ms。
+- 整建（约 1.4～1.5 秒）/ 筛选（约 0.5 秒）/ 排序（约 4 秒）在噪声内不变，都低于 D1 的 2 秒阈值。
+- 批量插入（`Items.AddRange`）量过：50k 1,454 ms vs 1,486 ms，噪声内 → **没有保留**；
+  瓶颈是"建 50,000 个 `ListViewItem`"，不是逐条 `Items.Add`。
+- 快照 50k 约 400 KB（字符串引用与模型共享）。
+- 探针只量不判；阈值（D1 的 2 秒）由人看数字决定，不进断言。

@@ -8,6 +8,9 @@ namespace 播放器
     /// <summary>界面计时器：进度条与音量条的同步、拖动进度时的行为。</summary>
     public partial class MainForm : Form
     {
+        /// <summary>测试用：进度条现在能不能拖（DVD 菜单上是关着的）。</summary>
+        internal bool SeekBarEnabled => trackSeek.Enabled;
+
         // =====================================================================
         // 进度条与音量条
         // =====================================================================
@@ -25,6 +28,9 @@ namespace 播放器
 
             UpdateProgress();
 
+            // 光盘的位置说明（"菜单" / "标题 2 / 12 · 第 3 章"）只在变化时刷一次状态栏。
+            UpdateDiscStatus();
+
             // 音频窗口里顺手对一下卡片尺寸：事件顺序不可控（启动就播、最大化后还原、换 DPI），
             // 尺寸已经对的时候这里只做一次比较（见 docs/1.10.0计划.md 的 B9）
             HealAudioCardLayout();
@@ -36,6 +42,21 @@ namespace 播放器
         private void UpdateProgress()
         {
             if (!_engine.HasMedia) return;
+
+            // 1.16.0：DVD 菜单自己那条 title 只有几百毫秒（本机那张盘 466 ms），按"进度"画出来
+            // 会一直是 0:00、拖到哪儿都在菜单里跳，看着像坏了。菜单上没有"进度"可言：
+            // 时间标签与进度条一起置灰，等进了正片再恢复。
+            if (IsDiscMenuOnScreen)
+            {
+                if (trackSeek.Enabled) trackSeek.Enabled = false;
+
+                lblCurrentTime.Text = "--:--:--";
+                lblTotalTime.Text = "--:--:--";
+                _surfaces.UpdateProgress(0, 0);
+                return;
+            }
+
+            if (!trackSeek.Enabled) trackSeek.Enabled = true;
 
             var length = _engine.Length;
             var time = _engine.Time;

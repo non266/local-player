@@ -5,7 +5,7 @@
     1. 核对「当前状态」文档里的数字（tools\docs-check.ps1，只读；可 -SkipDocs 跳过）
     2. 构建主工程（Debug；默认还构建 Release）
     3. 构建冒烟测试工程
-    4. 从输出目录跑全量 22 个运行步骤 / 26 项检查，打印摘要与失败原因
+    4. 从输出目录跑全量 22 个运行步骤 / 27 项检查，打印摘要与失败原因
 
   零警告是硬条件：出现「N 个警告」且 N > 0 就判失败（这个项目一直按 0 警告 0 错误要求自己）。
 
@@ -196,7 +196,7 @@ if ($failures.Count -eq 0)
 
 if (-not $SkipSmoke -and $failures.Count -eq 0)
 {
-    $title = if ($Filter.Length -gt 0) { "冒烟测试（筛选：" + $Filter + "）" } else { "冒烟测试（全量 22 个运行步骤 / 26 项检查）" }
+    $title = if ($Filter.Length -gt 0) { "冒烟测试（筛选：" + $Filter + "）" } else { "冒烟测试（全量 22 个运行步骤 / 27 项检查）" }
     Write-Section $title
 
     Push-Location $outputDirectory

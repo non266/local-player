@@ -20,6 +20,9 @@ namespace 播放器
             _menuChapter = new ToolStripMenuItem("章节");
             menuPlayback.DropDownItems.Add(_menuChapter);
 
+            // 每次下拉都重建：换标题 / 换盘之后章数不一样，冻结一次就会点错。
+            _menuChapter.DropDownOpening += (s, e) => RebuildChapterMenu();
+
             RebuildChapterMenu();
         }
 
@@ -27,6 +30,7 @@ namespace 播放器
         {
             if (_menuChapter == null) return;
 
+            _menuChapter.Text = DescribeChapterMenuCaption();
             _menuChapter.DropDownItems.Clear();
 
             var chapters = _engine.HasMedia
@@ -72,6 +76,23 @@ namespace 播放器
                 item.Click += (s, e) => { _engine.SetChapter(index); RebuildChapterMenu(); };
                 _menuChapter.DropDownItems.Add(item);
             }
+        }
+
+        /// <summary>
+        /// 「章节」这一项的字：DVD 正片里带上"第几章 / 共几章"（菜单上不带——菜单 title 的章数是
+        /// 菜单自己那几格，和正片无关，写出来反而误导）。
+        /// </summary>
+        private string DescribeChapterMenuCaption()
+        {
+            if (!DvdMenu.IsMenuMrl(_engine.CurrentPath)) return "章节";
+
+            var title = _engine.Title;
+            var chapter = _engine.CurrentChapter;
+            var count = _engine.ChapterCount;
+
+            if (title <= 0 || chapter < 0 || count <= 0) return "章节";
+
+            return "章节（第 " + (chapter + 1) + " 章 / 共 " + count + " 章）";
         }
     }
 }

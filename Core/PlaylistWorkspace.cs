@@ -58,6 +58,9 @@ namespace 播放器.Core
 
         public void SetCurrent(int index) => List.SetCurrent(index);
 
+        /// <summary>就地换掉某一项的地址（DVD 在菜单 / 主标题之间切换用，见 <see cref="Playlist.SetPath"/>）。</summary>
+        public void SetPath(int index, string filePath) => List.SetPath(index, filePath);
+
         /// <summary>应用搜索关键字；空格分隔的多个词之间是"与"的关系。</summary>
         public void SetFilter(string? text)
         {

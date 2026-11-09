@@ -42,6 +42,7 @@ namespace 播放器
         private ToolStripMenuItem? _videoStop;
         private ToolStripMenuItem? _videoSubtitle;
         private ToolStripMenuItem? _videoAudio;
+        private ToolStripMenuItem? _videoDisc;
         private ToolStripMenuItem? _videoFullscreen;
 
         /// <summary>30 ms 一次：200 ms 的界面计时器会漏掉又快又短的点击。</summary>
@@ -62,6 +63,9 @@ namespace 播放器
         /// <summary>测试用：右键菜单里的「音轨」。</summary>
         internal ToolStripMenuItem? VideoAudioMenu => _videoAudio;
 
+        /// <summary>测试用：右键菜单里的「光盘菜单」。</summary>
+        internal ToolStripMenuItem? VideoDiscMenu => _videoDisc;
+
         private void ConfigureVideoMenu()
         {
             _videoMenu = new ContextMenuStrip { ShowImageMargin = false };
@@ -78,6 +82,10 @@ namespace 播放器
             _videoAudio = new ToolStripMenuItem("音轨");
             _videoAudio.DropDownOpening += (s, e) => FillAudioTrackMenu(_videoAudio.DropDownItems);
 
+            // 1.16.0：全屏时菜单栏收起来了，回光盘菜单 / 切主标题只剩这一个入口
+            _videoDisc = new ToolStripMenuItem("光盘菜单") { Name = "videoDiscMenu" };
+            _videoDisc.DropDownOpening += (s, e) => FillDiscMenuItems(_videoDisc.DropDownItems);
+
             _videoFullscreen = new ToolStripMenuItem("全屏");
             _videoFullscreen.Click += (s, e) => ExecuteCommand(PlayerCommandId.ToggleFullscreen);
 
@@ -88,6 +96,7 @@ namespace 播放器
                 new ToolStripSeparator(),
                 _videoSubtitle,
                 _videoAudio,
+                _videoDisc,
                 new ToolStripSeparator(),
                 _videoFullscreen
             });
@@ -247,6 +256,13 @@ namespace 播放器
 
             if (_videoStop != null) _videoStop.Enabled = hasMedia;
             if (_videoFullscreen != null) _videoFullscreen.Text = IsFullscreen ? "退出全屏" : "全屏";
+
+            // 1.16.0：只有光盘才显示这一项（普通文件上点了也没东西可选）
+            if (_videoDisc != null)
+            {
+                _videoDisc.Visible = hasMedia && Core.OpticalDisc.LetterOfMrl(_engine.CurrentPath).Length > 0;
+                FillDiscMenuItems(_videoDisc.DropDownItems);
+            }
 
             FillSubtitleTrackMenu(_videoSubtitle!.DropDownItems);
             FillAudioTrackMenu(_videoAudio!.DropDownItems);

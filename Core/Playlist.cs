@@ -125,6 +125,32 @@ namespace 播放器.Core
         }
 
         /// <summary>
+        /// 把某一项的地址换成另一个，**条目的位置与"加入顺序"都不变**。
+        /// <para>
+        /// 用途只有一个：DVD 在 <c>dvd://</c>（菜单）与 <c>dvdsimple://</c>（直接放主标题）之间切换时，
+        /// 就地改当前那一行——不能 <see cref="Add"/> 一条新的，否则列表里会出现两行「DVD 光盘 (L:)」，
+        /// 上一首 / 下一首也会莫名其妙地停在同一个盘上。
+        /// </para>
+        /// <para>
+        /// <see cref="PlaylistItem.FilePath"/> 是只读的，所以这里是**换一个新条目对象**、把
+        /// <see cref="PlaylistItem.AddedOrder"/> 带过去；条目上的时长 / 错误标记不保留（光盘本来也没有）。
+        /// 会触发一次 <see cref="ContentChanged"/>（"列表内容变了"的那一类）。
+        /// </para>
+        /// </summary>
+        public void SetPath(int index, string filePath)
+        {
+            if (index < 0 || index >= _items.Count) return;
+            if (string.IsNullOrWhiteSpace(filePath)) return;
+
+            var old = _items[index];
+            if (string.Equals(old.FilePath, filePath, StringComparison.OrdinalIgnoreCase)) return;
+
+            _items[index] = new PlaylistItem(filePath) { AddedOrder = old.AddedOrder };
+            RebuildIndex();
+            OnContentChanged();
+        }
+
+        /// <summary>
         /// 移除指定索引。若移除的是当前项，则当前索引回到 -1（由调用方决定是否停止播放）。
         /// </summary>
         public void RemoveAt(int index)

@@ -161,8 +161,13 @@ namespace 播放器.Core
         /// <summary>
         /// 这一盘该给 libvlc 的 MRL；数据盘（按文件加进列表）返回空串。
         /// <para>
-        /// DVD 用 <c>dvdsimple://</c> 而不是 <c>dvd://</c>：后者会停在 DVD 菜单上，
-        /// 而本程序没有菜单导航（方向键 / 回车选菜单）——<b>能显示却点不动的菜单是死路</b>。
+        /// 1.16.0 起 DVD 用 <c>dvd://</c>：停在菜单上，由 <see cref="DvdMenu"/> 负责方向键导航
+        /// （真盘实测：菜单能显示、高亮能移动、能进子菜单）。只想直接看正片时用
+        /// <see cref="BuildSimpleMrl"/>——那是 1.11.0 的老口径 <c>dvdsimple://</c>。
+        /// </para>
+        /// <para>
+        /// ⚠ 两种 MRL 的标题编号不一样：<c>dvd://</c> 的 title 0 是菜单、正片从 1 开始；
+        /// <c>dvdsimple://</c> 的 title 0 就是正片。别把两边的编号混着用。
         /// </para>
         /// </summary>
         public static string BuildMrl(DiscKind kind, string root)
@@ -172,10 +177,43 @@ namespace 播放器.Core
 
             switch (kind)
             {
-                case DiscKind.DvdVideo: return "dvdsimple:///" + letter;
+                case DiscKind.DvdVideo: return "dvd:///" + letter;
                 case DiscKind.AudioCd: return "cdda:///" + letter;
                 case DiscKind.BluRay: return "bluray:///" + letter;
                 default: return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// "直接播放主标题"的 MRL（<c>dvdsimple://</c>）：跳过菜单，也不用菜单导航。
+        /// <para>菜单打不开时自动退回的也是这一条（见 <see cref="DvdMenu.ShouldFallBack"/>）。</para>
+        /// </summary>
+        public static string BuildSimpleMrl(DiscKind kind, string root)
+        {
+            var letter = LetterOf(root);
+            if (letter.Length == 0) return string.Empty;
+
+            return kind == DiscKind.DvdVideo ? "dvdsimple:///" + letter : string.Empty;
+        }
+
+        /// <summary>
+        /// 从光盘 MRL 里取盘符（<c>dvd:///L:</c> → <c>L:</c>），取不到返回空串。
+        /// <para>"回到菜单 / 直接播放主标题"要把当前条目换一种 MRL，得先从它身上认出是哪张盘。</para>
+        /// </summary>
+        public static string LetterOfMrl(string? location)
+        {
+            if (string.IsNullOrWhiteSpace(location)) return string.Empty;
+            if (!MediaFormats.IsDiscLocation(location)) return string.Empty;
+
+            try
+            {
+                var uri = new Uri(location);
+                var letter = uri.AbsolutePath.Trim('/');
+                return LetterOf(letter);
+            }
+            catch (Exception)
+            {
+                return string.Empty;
             }
         }
 

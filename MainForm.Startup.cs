@@ -51,6 +51,9 @@ namespace 播放器
             // 1.11.0 F13：「打开光盘」的子菜单在每次下拉时按本机光驱重建
             ConfigureDiscMenu();
 
+            // 1.16.0：「播放 → 光盘」（标题 / 回到菜单 / 直接播放主标题），没有光盘时整项隐藏
+            ConfigureDiscPlaybackMenu();
+
             // ---- 播放菜单 ----
             menuRateHalf.Click += (s, e) => SetRate(0.5f);
             menuRate075.Click += (s, e) => SetRate(0.75f);

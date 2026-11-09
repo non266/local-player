@@ -54,6 +54,9 @@ namespace 播放器
                 case PlayerState.Playing:
                     // 按"引擎真正在播的那一份"报，而不是列表的当前项：插播时两者不是同一项。
                     SetStatus("正在播放：" + NowPlayingDisplayName() + QueueStatusSuffix());
+
+                    // 1.16.0：停在 DVD 菜单上时，方向键现在归 libvlc，状态栏得把这件事说出来
+                    AnnounceDiscMenuIfNeeded();
                     break;
                 case PlayerState.Paused:
                     SetStatus("已暂停");
@@ -89,6 +92,10 @@ namespace 播放器
 
         private void OnEngineError(object? sender, string message)
         {
+            // 1.16.0：DVD 菜单打不开时先就地退回主标题（同一张盘只退一次）。
+            // 这条错误是"这张盘的菜单这条路不通"，不是"文件坏了"，不该标红、也不该自动跳过。
+            if (TryFallBackDiscMenu(message)) return;
+
             SetStatus("播放错误：" + message);
 
             var item = _playlist.Current;

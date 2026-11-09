@@ -44,6 +44,10 @@ namespace 播放器
             if (IsTypingTarget(msg) && !IsCommandKeyWhileTyping(keyData))
                 return base.ProcessCmdKey(ref msg, keyData);
 
+            // 1.16.0：DVD 菜单在屏上时，方向键 / 回车先交给 libvlc 的菜单导航。
+            // 平时它们仍是快退 / 快进 / 音量（由下面的命令目录处理），所以这里必须**先判菜单**。
+            if (TryNavigateDiscMenu(keyData)) return true;
+
             // 命令目录里认得的键（Space / S / 方向键 / Ctrl+O / F9 / F11 …）统一走命令层。
             // 目录是唯一来源：改一个键只需要改目录，帮助文本与菜单提示会跟着变。
             if (PlayerCommandCatalog.TryMap(keyData, out var command))

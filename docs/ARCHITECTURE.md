@@ -11,13 +11,13 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 39,572 行 / **171 个文件** |
-| `Core/` | 13,024 行 / 71 个文件 |
-| `Ui/` | 12,795 行 / 58 个文件 |
-| `MainForm*` 这一族 partial | 12,989 行 / **37 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 22,247 行 / 73 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 40,250 行 / **173 个文件** |
+| `Core/` | 13,658 行 / 74 个文件 |
+| `Ui/` | 12,826 行 / 59 个文件 |
+| `MainForm*` 这一族 partial | 13,689 行 / **39 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 22,716 行 / 75 个文件 |
 
-> 数字最后一次量是在 **2026-11-09（1.15.0：大列表探针 + 末尾追加增量）**。
+> 数字最后一次量是在 **2026-11-10（1.17.0：网络 I/O 的取消与资源管理）**。
 > 1.12.0 那轮产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、
 > `Core/HistoryService`、`Core/MediaSession`（由 `TrackLyricsSession` 改名）、`Ui/PlayerCommand`、
 > `Ui/CommandBinder`、`Ui/IWindowSurfaceHost`、`Ui/WindowSurfaceController`、`Ui/VideoWindowModule`、
@@ -30,6 +30,10 @@
 > 冒烟多出 `Program.NetworkFolders`（第 26 项检查，第 22 个运行步骤）。
 > 1.15.0 产品侧没有新增文件（`MainForm.Playlist` 里多了"整建 / 追加"两条路），
 > 冒烟多出 `Program.BigList`（**探针**，不占检查编号：`播放器_TEST_BIGLIST=1` 才跑）。
+> 1.16.0 产品侧多出 `Core/DvdMenu`、`Core/PlayerEngine.Titles`、`Ui/DvdMenuInput`、`MainForm.DiscMenu`
+> （`MainForm*` 37 → 38 个文件）；冒烟多出 `Program.Disc.Menu`（第 27 项检查）。
+> 1.17.0 产品侧多出 `Core/MediaScan`、`MainForm.Scan`（`MainForm*` 38 → 39 个文件）；
+> 冒烟多出 `Program.Scan` / `Program.Probe`（**第 28 / 29 项检查**，第 23 / 24 个运行步骤）。
 > 数行数用 `[IO.File]::ReadAllLines`——本机的 `Get-Content` 会把无 BOM 的 UTF-8 按 GBK 读，
 > 行数是错的（见维护手册坑表）。
 
@@ -700,11 +704,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 22 个运行步骤 / 27 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 24 个运行步骤 / 29 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（22 个运行步骤 / 27 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（24 个运行步骤 / 29 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -1080,3 +1084,70 @@ F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.c
   `Navigate` 空操作而不是快退；手边没有这种盘，如实记着，逃生口是「直接播放主标题」。
 - 蓝光仍只识别、不支持；CSS 加密 DVD 仍失败（不随包分发 libdvdcss）。
 - 本程序的「播放 → 章节」与 DVD 菜单里的章节缩略图是两套入口，互不同步。
+
+---
+
+## 23. 网络 I/O 的取消与有界（1.17.0）
+
+1.13.0 把"网络位置在不在"丢到后台、1.14.0 把"网络目录展开"丢到后台，两次都只解决了
+**界面不等**：后台那条 I/O 没人管。1.17.0 把两条后台路径都改成"有界、可取消、看得见进度"。
+
+### 23.1 先量（本机，2026-11-10）
+
+| 量 | 结果 |
+| --- | --- |
+| 不可达 UNC 上一次 `File.Exists` | **82.4 / 82.7 / 83.1 / 83.4 / 92.5 秒**（5 条并发，各在自己的进程里） |
+| 8 秒 `ProbeTimeout` 之后 | 界面不再等，但那条线程还要再卡约 **75 秒** |
+| 线程池余量被吃掉之后的排队延迟 | 基线空任务 **11 ms**；占满 12 条最小工作线程后第一个空任务 **312 ms**，随后 ~0 ms |
+
+结论：探测的代价是**几十秒级的线程占用**；界面不会卡（1.13.0 已经保证），真正的问题是
+**后台在攒线程**，而且同一路径重复点会重复起。
+
+### 23.2 扫描：`Core/MediaScan`
+
+- `MediaScanner.Walk(folder, limits, token, onFile)`：显式栈 DFS，`MaxDepth`（默认 16 层）、
+  `MaxFiles`（默认 100,000 个）、每个文件之后看一次 token、每找到一个就回调 `onFile`。
+- 取消 / 触到上限时**保留已经找到的**：`MediaScanResult.Cancelled` / `.Truncated` 交给宿主说话。
+- 单层读不出来（无权限 / 掉线 / 目录消失）只跳过这一层——比旧实现"整棵树放弃"宽容，是有意的。
+- `MediaFormats.EnumerateMediaFiles(folder, recursive)` 改成调 `Walk` 的无限参数：
+  顺序、异常口径、排序都不变，本地那一侧一行没改。
+- `NetworkPathImport.Run(paths, token, onFound)`：取消时当前这一条就地停、后面的路径一条都不碰
+  （循环顶部与 `Import` 各有一道检查，互为冗余）；m3u 的条目也走 `onFound`，进度才看着涨。
+- 界面在 `MainForm.Scan` 分部：状态栏插一个 `IsLink` 的「取消扫描」标签（**不写进 Designer**），
+  文字由界面计时器每拍刷一次（`取消扫描 · 已找到 1,234 项`），**不跨线程 `BeginInvoke`**——
+  每找到一个就 Post 一次的话，本地大目录扫得越快界面越卡。
+- 取消之后已扫到的条目照常加入，状态栏说「已取消扫描：已加入前 N 项」，并且**不自动开播**。
+
+### 23.3 探测：`PlaybackCoordinator` 的注册表
+
+- `_probes`（路径 → 在飞的 Task）与 `_probeCooldowns`（路径 → 超时时刻）：
+  ① 冷却内（默认 30 秒）不再真的去问；② 同一路径在飞就复用；③ 在飞满 4 条不再新起。
+- 探测跑在 `TaskCreationOptions.LongRunning` 的**专用线程**上：卡住时占的是一个专用线程，
+  不是线程池的工作线程（不然读标签 / 扫目录都得排队）。
+- `DefaultPathProbe` 从 `Task.Run(() => File.Exists(path))` 改成同步的
+  `Task.FromResult(File.Exists(path))`：真正的调用发生在上面那条专用线程上。
+- 为什么不给 `File.Exists` 一个 `CancellationToken`：它本身不可取消，给 token 只是"不再等结果"，
+  线程照样要跑到 OS 超时。所以这里的"取消"是**有界**，不是"立刻停"。
+
+### 23.4 测试
+
+- **第 28 项检查**（`Program.Scan.cs`，第 23 个运行步骤）：真实临时目录三层小树——
+  深度 / 条数上限各自置 `Truncated`、取消拿到前 N 个并且不抛、`EnumerateMediaFiles` 与 `Walk`
+  逐项一致、取消之后第二条路径的 `IsDirectory` 一次都没调；最后在主窗体上注入一个慢的
+  `WalkFolder`，验链接可见 / 进度在涨 / 取消之后列表里是已找到的那几个。
+- **第 29 项检查**（`Program.Probe.cs`，第 24 个运行步骤）：同一路径两次点击只起一条、
+  冷却期内不再问（并说「刚试过」）、冷却过去会重问、在飞上限 4 条、探测跑在非线程池线程上。
+- gated 段（`播放器_TEST_NETSLOW=1`）：用**真的** `\\192.0.2.1\share\probe.wav` 验
+  "两次点击只起 1 条、界面计时器没停、8 秒后标超时、冷却期内不再问"。
+- 8 条变异（去重 / 冷却 / 上限 / LongRunning / 三处取消短路 / 条数上限 / 深度上限 /
+  取消丢结果）各红一次。**其中"取消短路"是两处互为冗余**：只去掉一处不会变红，
+  要去掉全部才红——这是设计如此，不是断言太松。
+
+### 23.5 边界
+
+- `File.Exists` 不可取消：冷却 + 上限让卡住的线程有界（最多 4 条），但不能提前结束。
+- 冷却期内不真的去问：文件在这 30 秒里出现了也要等过去。
+- 上限会在超大目录上少加文件：状态栏必须明说「已达扫描上限」，不能静默截断。
+- 本地目录扫描**仍然无上限**（1.17.0 只收口网络那一侧）。
+- 取消只对枚举有效：正在返回的那一次 `Directory.GetFiles` 要等系统自己回来。
+- 进度是"已找到多少"，不是"还剩多久"（总条数事先不知道）。

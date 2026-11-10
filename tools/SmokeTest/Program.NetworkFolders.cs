@@ -55,7 +55,7 @@ namespace SmokeTest
                     probeCalls.Add(path);
                     return false;
                 };
-                form.NetworkImport.EnumerateFolder = _ => new List<string>();
+                form.NetworkImport.WalkFolder = (_, _, _, _) => ScanResultOf();
                 form.NetworkImport.ReadPlaylist = _ => new List<string>();
 
                 form.Playlist.Clear();
@@ -96,10 +96,10 @@ namespace SmokeTest
                     return false;
                 };
 
-                form.NetworkImport.EnumerateFolder = _ =>
+                form.NetworkImport.WalkFolder = (_, _, _, _) =>
                 {
                     enumerateThread = Environment.CurrentManagedThreadId;
-                    return new List<string> { first, second };
+                    return ScanResultOf(first, second);
                 };
 
                 form.NetworkImport.ReadPlaylist = _ => new List<string>();
@@ -173,7 +173,7 @@ namespace SmokeTest
 
                 // ---- 3) 打不开的网络位置：保留一项，并说明"可能离线" ----
                 form.NetworkImport.IsDirectory = _ => false;
-                form.NetworkImport.EnumerateFolder = _ => new List<string>();
+                form.NetworkImport.WalkFolder = (_, _, _, _) => ScanResultOf();
 
                 form.Playlist.Clear();
                 form.AddPathsForTest(new[] { offlineFolder });
@@ -305,7 +305,7 @@ namespace SmokeTest
 
                 // ---- 5) 空的网络目录：说清楚"没有找到"，不静默 ----
                 form.NetworkImport.IsDirectory = _ => true;
-                form.NetworkImport.EnumerateFolder = _ => new List<string>();
+                form.NetworkImport.WalkFolder = (_, _, _, _) => ScanResultOf();
 
                 form.Playlist.Clear();
                 form.AddPathsForTest(new[] { networkFolder });

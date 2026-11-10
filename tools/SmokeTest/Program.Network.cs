@@ -19,6 +19,7 @@ namespace SmokeTest
             // 测试里所有探测都由假委托接管，这两个地址一次都不会真的被访问。
             const string offline = @"\\192.0.2.1\share\offline.wav";
             const string late = @"\\192.0.2.2\share\late.wav";
+            const string stale = @"\\192.0.2.3\share\stale.wav";
 
             WriteWav(local, seconds: 5, frequency: 520);
 
@@ -139,7 +140,7 @@ namespace SmokeTest
                 form.Playback.ProbeTimeout = TimeSpan.FromMilliseconds(150);
 
                 form.Playlist.Clear();
-                form.AddPathsForTest(new[] { late });
+                form.AddPathsForTest(new[] { stale });
 
                 form.Playback.PlayIndex(0);
                 Thread.Sleep(220);

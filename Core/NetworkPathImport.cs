@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 
 // 网络位置的批量解析：把"拖进来的一批网络路径"分成目录（递归展开）、单个文件、
 // 网络 m3u（读里面的条目）三类。所有 I/O 都是阻塞的，调用方负责丢到线程池。
@@ -11,8 +12,8 @@ namespace 播放器.Core
     /// 把一批<b>网络位置</b>（UNC / 网络盘上的路径）解析成可以加进播放列表的条目。
     /// <para>
     /// 为什么单独一层：网络位置的存在性检查会等满 SMB 超时（1.13.0 实测一次
-    /// <c>File.Exists</c> 阻塞 68 秒），而"这是不是一个目录"只有问过磁盘才知道。
-    /// 这一层只做判定与枚举，<b>不碰任何控件</b>，由界面把它丢到线程池上跑
+    /// <c>File.Exists</c> 阻塞 68 秒，1.17.0 复测不可达地址 82～93 秒），而"这是不是一个目录"
+    /// 只有问过磁盘才知道。这一层只做判定与枚举，<b>不碰任何控件</b>，由界面把它丢到线程池上跑
     /// （和 <see cref="PlaybackCoordinator"/> 的 <c>PathProbe</c> 同一套做法）。
     /// </para>
     /// <para>
@@ -23,6 +24,12 @@ namespace 播放器.Core
     /// ③ 扩展名不认识 → 才问"是不是目录"，是就递归枚举，不是就按一个条目收下
     /// （可能离线，也可能是没有扩展名的文件，播放前还会再探测一次）。
     /// </para>
+    /// <para>
+    /// 1.17.0：目录枚举换成 <see cref="MediaScanner.Walk"/>，带<b>深度 / 条数上限、取消、进度</b>。
+    /// 取消时已经找到的条目照常返回（<see cref="NetworkPathImportResult.Cancelled"/>），
+    /// 后面的路径一条都不再碰；触到上限时 <see cref="NetworkPathImportResult.Truncated"/> 为真，
+    /// 宿主必须把"只加了一部分"说出来。
+    /// </para>
     /// </summary>
     internal sealed class NetworkPathImport
     {
@@ -32,9 +39,18 @@ namespace 播放器.Core
         /// </summary>
         internal Func<string, bool> IsDirectory { get; set; } = Directory.Exists;
 
-        /// <summary>枚举一个目录里的媒体文件（默认递归）。测试可以替换。</summary>
-        internal Func<string, List<string>> EnumerateFolder { get; set; } =
-            folder => MediaFormats.EnumerateMediaFiles(folder, true);
+        /// <summary>
+        /// 枚举一个目录里的媒体文件。默认走 <see cref="MediaScanner.Walk"/>（有界、可取消）；
+        /// 测试可以替换掉，避免真的去连不可达的地址。
+        /// </summary>
+        internal Func<string, MediaScanLimits, CancellationToken, Action<string>?, MediaScanResult> WalkFolder
+        {
+            get;
+            set;
+        } = (folder, limits, token, onFile) => MediaScanner.Walk(folder, limits, token, onFile);
+
+        /// <summary>递归枚举的上限。<b>只对网络路径生效</b>（本地目录沿用无限的那条路）。</summary>
+        internal MediaScanLimits Limits { get; set; } = new MediaScanLimits();
 
         /// <summary>读一个 m3u / m3u8（默认走 <see cref="PlaylistFile.Load"/>）。测试可以替换。</summary>
         internal Func<string, List<string>> ReadPlaylist { get; set; } = PlaylistFile.Load;
@@ -42,13 +58,24 @@ namespace 播放器.Core
         /// <summary>
         /// 解析一批网络路径。<b>阻塞调用</b>：只做磁盘 I/O，不抛异常、不碰控件。
         /// </summary>
-        internal NetworkPathImportResult Run(IEnumerable<string> paths)
+        /// <param name="token">取消：<b>当前这一条</b>的枚举会就地停，后面的路径不再处理。</param>
+        /// <param name="onFound">每收下一条（枚举到的文件 / 直给的文件 / m3u 的条目）调一次，做进度用。</param>
+        internal NetworkPathImportResult Run(
+            IEnumerable<string> paths,
+            CancellationToken token = default,
+            Action<string>? onFound = null)
         {
             var result = new NetworkPathImportResult();
             if (paths == null) return result;
 
             foreach (var raw in paths)
             {
+                if (token.IsCancellationRequested)
+                {
+                    result.Cancelled = true;
+                    break;
+                }
+
                 if (string.IsNullOrWhiteSpace(raw)) continue;
 
                 var path = raw.Trim('"', ' ');
@@ -56,7 +83,7 @@ namespace 播放器.Core
 
                 try
                 {
-                    Import(path, result);
+                    Import(path, result, token, onFound);
                 }
                 catch (Exception ex)
                 {
@@ -65,12 +92,18 @@ namespace 播放器.Core
                     result.Items.Add(path);
                     result.Failures.Add(path);
                 }
+
+                if (result.Cancelled) break;
             }
 
             return result;
         }
 
-        private void Import(string path, NetworkPathImportResult result)
+        private void Import(
+            string path,
+            NetworkPathImportResult result,
+            CancellationToken token,
+            Action<string>? onFound)
         {
             // ① m3u / m3u8：读它的条目。它自己绝不能变成列表里的一条媒体。
             if (MediaFormats.IsPlaylistFile(path))
@@ -79,8 +112,17 @@ namespace 播放器.Core
                 {
                     var entries = ReadPlaylist(path) ?? new List<string>();
 
-                    if (entries.Count == 0) result.EmptyPlaylists.Add(path);
-                    else result.FromPlaylists.AddRange(entries);
+                    if (entries.Count == 0)
+                    {
+                        result.EmptyPlaylists.Add(path);
+                    }
+                    else
+                    {
+                        result.FromPlaylists.AddRange(entries);
+
+                        // 条目也是"找到的东西"：进度要跟着涨，不能等整批结束才动一下。
+                        foreach (var entry in entries) onFound?.Invoke(entry);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -95,10 +137,17 @@ namespace 播放器.Core
             if (MediaFormats.IsMediaFile(path) || MediaFormats.IsSubtitleFile(path))
             {
                 result.Items.Add(path);
+                onFound?.Invoke(path);
                 return;
             }
 
             // ③ 扩展名不认识：可能是目录，也可能是一个没有扩展名的文件（或离线路径）。
+            if (token.IsCancellationRequested)
+            {
+                result.Cancelled = true;
+                return;
+            }
+
             bool isDirectory;
 
             try
@@ -119,23 +168,20 @@ namespace 播放器.Core
                 // 照样收下一条：播放前的后台探测还会再试一次，条目不会丢。
                 result.Items.Add(path);
                 result.Unreachable.Add(path);
+                onFound?.Invoke(path);
                 return;
             }
 
             result.Folders.Add(path);
 
-            try
-            {
-                var files = EnumerateFolder(path);
-                if (files is { Count: > 0 }) result.Items.AddRange(files);
-            }
-            catch (Exception ex)
-            {
-                // 目录探到了、枚举却失败（权限 / 中途掉线）：这条路径本身已经记进 Folders，
-                // 不再补一条"按文件收下"——它确实是目录，加一条只会让用户看到一条打不开的目录。
-                AppLog.Swallowed("枚举网络目录失败（可能离线或没有权限）：" + path, ex);
-                result.Failures.Add(path);
-            }
+            // 目录探到了、枚举却失败（权限 / 中途掉线）：这条路径本身已经记进 Folders，
+            // 不再补一条"按文件收下"——它确实是目录，加一条只会让用户看到一条打不开的目录。
+            // 单层失败由 MediaScanner 自己跳过并记日志。
+            var scan = WalkFolder(path, Limits, token, onFound);
+
+            if (scan.Files.Count > 0) result.Items.AddRange(scan.Files);
+            if (scan.Truncated) result.Truncated = true;
+            if (scan.Cancelled) result.Cancelled = true;
         }
     }
 
@@ -162,5 +208,11 @@ namespace 播放器.Core
 
         /// <summary>解析时抛过异常的路径（它们也在 <see cref="Items"/> 里）。</summary>
         internal List<string> Failures { get; } = new();
+
+        /// <summary>被取消了：<see cref="Items"/> 里是取消之前已经找到的那些。</summary>
+        internal bool Cancelled { get; set; }
+
+        /// <summary>触到了深度 / 条数上限：结果不完整，宿主必须把这件事说出来。</summary>
+        internal bool Truncated { get; set; }
     }
 }

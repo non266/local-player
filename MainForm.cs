@@ -229,6 +229,9 @@ namespace 播放器
 
             ConfigureToolStrips();
 
+            // 扫描进度那条链接要在 ApplyTheme 之前建好（换主题只给"已经在"的项上色）。
+            InitScanUi();
+
             // 窗口形态控制器：音频 / 迷你 / 全屏三件事都从它走。
             // 要在 ApplyTheme 之前建好（换主题时卡片与全屏进度条要跟着换色），
             // 也要在 ConfigureMetadataMenus 之前（窗口模式菜单的勾选要读当前形态）。

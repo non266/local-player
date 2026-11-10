@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace 播放器.Core
@@ -94,6 +96,60 @@ namespace 播放器.Core
         /// <summary>正在后台探测的那一条（同一时刻最多一条：探测按播放顺序串行做）。</summary>
         private PendingProbe? _pendingProbe;
 
+        /// <summary>
+        /// 在飞的探测，按路径记（1.17.0）：同一路径只起一条，被放弃的结果还能给下一次点击复用。
+        /// 完成 / 超时的从表里删掉——留在表里的都是"真的还在跑"的。
+        /// </summary>
+        private readonly Dictionary<string, ProbeTicket> _probes =
+            new Dictionary<string, ProbeTicket>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>超时冷却：这个路径什么时候"刚试过没响应"。冷却期内不再真的去问。</summary>
+        private readonly Dictionary<string, DateTime> _probeCooldowns =
+            new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>探测起了几次（冒烟测试用：去重 / 冷却 / 上限都靠它断言）。</summary>
+        internal int ProbeStarts { get; private set; }
+
+        /// <summary>同时在飞的探测最多几条（默认 4）。超了就按"这次问不到"处理，不再新起线程。</summary>
+        internal int MaxConcurrentProbes { get; set; } = 4;
+
+        /// <summary>超时之后多久内不再真的去问同一个路径（默认 30 秒）。</summary>
+        internal TimeSpan ProbeCooldown { get; set; } = TimeSpan.FromSeconds(30);
+
+        /// <summary>现在有几条探测还在跑（冒烟测试用）。</summary>
+        internal int ProbeInFlight => _probes.Count;
+
+        /// <summary>一条在飞的探测：结果 Task 与它是什么时候起的（8 秒的等待从那一刻算）。</summary>
+        private sealed class ProbeTicket
+        {
+            internal ProbeTicket(Task<bool> task, DateTime startedUtc)
+            {
+                Task = task;
+                StartedUtc = startedUtc;
+            }
+
+            internal Task<bool> Task { get; }
+
+            internal DateTime StartedUtc { get; }
+        }
+
+        /// <summary>这一次点网络条目有没有真的起探测。</summary>
+        private enum ProbeOutcome
+        {
+            /// <summary>起了（或复用了在飞的那条）：等 <see cref="PumpPendingProbe"/> 收尾。</summary>
+            Started,
+
+            /// <summary>没起（冷却中 / 在飞太多）：这一项按"这次问不到"跳过。</summary>
+            Skipped
+        }
+
+        /// <summary>日志里区分"为什么没去问"。</summary>
+        private enum ProbeSkipReason
+        {
+            Cooldown,
+            TooMany
+        }
+
         /// <summary>一次播放请求从哪个索引开始、要不要顺延、是不是重载。</summary>
         private sealed class PlayRun
         {
@@ -155,8 +211,9 @@ namespace 播放器.Core
         }
 
         /// <summary>
-        /// 网络路径"在不在"的探测方式。默认在线程池里调 <c>File.Exists</c>；
-        /// 冒烟测试换成可控的假探测，才好在"结果还没回来"的那一刻做断言。
+        /// 网络路径"在不在"的探测方式。默认是同步的 <c>File.Exists</c>——<b>它跑在
+        /// <see cref="StartProbeTask"/> 那条专用线程上</b>，不占线程池；冒烟测试换成可控的假探测，
+        /// 才好在"结果还没回来"的那一刻做断言。
         /// </summary>
         internal Func<string, Task<bool>> PathProbe
         {
@@ -173,7 +230,7 @@ namespace 播放器.Core
         /// <summary>现在有没有一条网络路径正在后台探测（冒烟测试用）。</summary>
         internal bool HasPendingProbe => _pendingProbe != null;
 
-        private static Task<bool> DefaultPathProbe(string path) => Task.Run(() => File.Exists(path));
+        private static Task<bool> DefaultPathProbe(string path) => Task.FromResult(File.Exists(path));
 
         /// <summary>马上要打开这一份（宿主在这里落历史、设置会话路径、摆画面旋转）。</summary>
         public event EventHandler<PlaybackOpeningEventArgs>? Opening;
@@ -266,8 +323,13 @@ namespace 播放器.Core
                 // 网络位置：界面线程一个字节都不读盘，交给后台探测。
                 if (MediaFormats.IsNetworkPath(item.FilePath))
                 {
-                    StartProbe(run, candidate, offset);
-                    return;
+                    // 冷却中 / 在飞太多时不起探测（1.17.0）：这一项按"这次问不到"处理，
+                    // 就地标一下继续往后顺延——不走递归，免得整列表都在冷却时把栈撑爆。
+                    if (StartProbe(run, candidate, offset) == ProbeOutcome.Started) return;
+
+                    if (!run.AllowFallback) break;
+
+                    continue;
                 }
 
                 if (!MediaFormats.IsOpenable(item.FilePath))
@@ -346,33 +408,158 @@ namespace 播放器.Core
             run.LastError = MissingFileMessage;
         }
 
-        /// <summary>给这一项起后台探测；结果没回来之前什么都不做。</summary>
-        private void StartProbe(PlayRun run, int candidate, int offset)
+        /// <summary>
+        /// 给这一项起后台探测；结果没回来之前什么都不做。
+        /// <para>
+        /// 1.17.0 的三条限制（都是"别让后台攒线程"）：
+        /// ① 这个路径刚超时过（<see cref="ProbeCooldown"/> 之内）→ 不再真的去问；
+        /// ② 同一路径已经在飞 → 复用那条 Task，不新起；
+        /// ③ 在飞已经 <see cref="MaxConcurrentProbes"/> 条 → 不再新起。
+        /// </para>
+        /// <para>
+        /// ②③ 在 <c>File.Exists</c> 面前是必须的：离线 SMB 上一次要卡 80 多秒（1.17.0 实测
+        /// 82～93 秒），而界面这边 8 秒就不等了——不作废的话，连点十几下就攒十几条卡住的线程。
+        /// </para>
+        /// </summary>
+        private ProbeOutcome StartProbe(PlayRun run, int candidate, int offset)
         {
             var path = _playlist.Items[candidate].FilePath;
 
-            var pending = new PendingProbe
+            if (TryGetCooldownRemaining(path, out var remaining))
+            {
+                var seconds = Math.Max(1, (int)Math.Ceiling(remaining.TotalSeconds));
+
+                return SkipProbe(run, candidate, ProbeSkipReason.Cooldown,
+                    $"这个网络位置刚试过没响应，{seconds} 秒内不再重试");
+            }
+
+            // 完成的留在表里只会挡着后面的探测（还白占名额）：每次起探测之前顺手清一遍。
+            PruneFinishedProbes();
+
+            ProbeTicket? ticket;
+
+            if (_probes.TryGetValue(path, out ticket))
+            {
+                // 复用：它可能已经跑了一会儿——8 秒的等待从它自己起算的那一刻算，
+                // 于是"点了两次"不会把等待时间重新拨回 0。
+            }
+            else
+            {
+                if (_probes.Count >= Math.Max(1, MaxConcurrentProbes))
+                {
+                    return SkipProbe(run, candidate, ProbeSkipReason.TooMany,
+                        "同时检查的网络位置太多，先跳过这一项");
+                }
+
+                ticket = new ProbeTicket(StartProbeTask(path), DateTime.UtcNow);
+                _probes[path] = ticket;
+
+                ProbeStarts++;
+            }
+
+            _pendingProbe = new PendingProbe
             {
                 Run = run,
                 Candidate = candidate,
                 Offset = offset,
                 Path = path,
-                StartedUtc = DateTime.UtcNow
+                StartedUtc = ticket.StartedUtc,
+                Task = ticket.Task
             };
 
-            try
-            {
-                pending.Task = _pathProbe(path);
-            }
-            catch (Exception ex)
-            {
-                AppLog.Swallowed("探测网络路径失败，按打不开处理：" + path, ex);
-                pending.Task = Task.FromResult(false);
-            }
-
-            _pendingProbe = pending;
-
             StatusChanged?.Invoke(this, "正在检查网络位置：" + Path.GetFileName(path));
+
+            return ProbeOutcome.Started;
+        }
+
+        /// <summary>
+        /// 真去问一次。跑在<b>专用线程</b>上（<c>LongRunning</c>）：<c>File.Exists</c> 卡住的
+        /// 时候占的是一个专用线程，不是线程池的工作线程——不然读标签 / 扫目录都得排队。
+        /// </summary>
+        private Task<bool> StartProbeTask(string path) =>
+            Task.Factory.StartNew(
+                () =>
+                {
+                    try
+                    {
+                        return _pathProbe(path);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog.Swallowed("探测网络路径失败，按打不开处理：" + path, ex);
+                        return Task.FromResult(false);
+                    }
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default).Unwrap();
+
+        /// <summary>
+        /// 这次没起探测：标成"这次问不到"、记冷却、说一句，交给调用方（<c>PlayFrom</c> 的循环）
+        /// 顺延或收尾。这里**不递归**：整列表都在冷却时也不会把栈撑爆。
+        /// </summary>
+        private ProbeOutcome SkipProbe(
+            PlayRun run,
+            int candidate,
+            ProbeSkipReason hint,
+            string message)
+        {
+            var item = _playlist.Items[candidate];
+            var path = item.FilePath;
+
+            // 与超时同一个标记：条目留着、下次点还会再试（冷却过去之后真的会再问）。
+            item.HasError = true;
+            item.ErrorMessage = NetworkTimeoutMessage;
+
+            run.Marked = true;
+            run.LastError = NetworkTimeoutMessage;
+
+            // 冷却只压住"重复问"：本来就是它刚超时过，这里续上时间，免得连点把冷却刷没。
+            _probeCooldowns[path] = DateTime.UtcNow;
+
+            AppLog.Info($"跳过网络位置探测（{hint}）：{path}");
+            StatusChanged?.Invoke(this, message + "：" + item.DisplayName);
+
+            return ProbeOutcome.Skipped;
+        }
+
+        /// <summary>冷却还剩多久；过期了就顺手把这条记录删掉。</summary>
+        private bool TryGetCooldownRemaining(string path, out TimeSpan remaining)
+        {
+            remaining = TimeSpan.Zero;
+
+            if (!_probeCooldowns.TryGetValue(path, out var at)) return false;
+
+            var elapsed = DateTime.UtcNow - at;
+
+            if (elapsed >= ProbeCooldown)
+            {
+                _probeCooldowns.Remove(path);
+                return false;
+            }
+
+            remaining = ProbeCooldown - elapsed;
+            return true;
+        }
+
+        /// <summary>把已经跑完的探测从表里摘掉（它们的结果已经没人等了）。</summary>
+        private void PruneFinishedProbes()
+        {
+            if (_probes.Count == 0) return;
+
+            List<string>? finished = null;
+
+            foreach (var pair in _probes)
+            {
+                if (!pair.Value.Task.IsCompleted) continue;
+
+                finished ??= new List<string>();
+                finished.Add(pair.Key);
+            }
+
+            if (finished == null) return;
+
+            foreach (var key in finished) _probes.Remove(key);
         }
 
         /// <summary>
@@ -409,6 +596,10 @@ namespace 播放器.Core
 
                 _pendingProbe = null;
 
+                // 这一次"没问到"：把在飞的那条摘掉（它自己的结果不再有人等），记冷却。
+                _probes.Remove(pending.Path);
+                _probeCooldowns[pending.Path] = DateTime.UtcNow;
+
                 var item = _playlist.Items[pending.Candidate];
 
                 // 不判"文件不存在"：超时只说明这次没问到。条目留着，下次点还会再试。
@@ -428,6 +619,9 @@ namespace 播放器.Core
             }
 
             _pendingProbe = null;
+
+            // 有结果了：这条探测不用再留着（成功 / 确定不存在都不冷却，下次点还会再问）。
+            _probes.Remove(pending.Path);
 
             bool exists;
 

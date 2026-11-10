@@ -498,7 +498,7 @@ namespace 播放器
                 ApplyScannedDuration(item);
         }
 
-        /// <summary>加入播放列表之后要不要顺手开始播放。</summary>
+        /// <summary>「加入播放列表」之后要不要顺手开始播放。</summary>
         private enum AddPlayback
         {
             /// <summary>只入列表，不自动播。</summary>
@@ -510,6 +510,24 @@ namespace 播放器
             /// <summary>总是播新加入的第一个（用户明确指定了要放的东西）。</summary>
             Always
         }
+
+        /// <summary>一批后台扫描的产物：本地目录找到的、网络那一路解析出来的、有没有被取消。</summary>
+        private readonly struct ScanOutcome
+        {
+            internal ScanOutcome(List<string> local, NetworkPathImportResult network, bool cancelled)
+            {
+                Local = local;
+                Network = network;
+                Cancelled = cancelled;
+            }
+
+            internal List<string> Local { get; }
+
+            internal NetworkPathImportResult Network { get; }
+
+            internal bool Cancelled { get; }
+        }
+
 
         /// <summary>
         /// 把一批路径加入播放列表。<b>本地文件夹与网络位置都在后台线程展开 / 解析。</b>
@@ -578,13 +596,24 @@ namespace 播放器
 
             if (folders.Count == 0 && network.Count == 0) return;
 
+            // 1.17.0：这一批扫描有把手（可以取消），状态栏也能显示"已经找到多少"。
+            var batch = BeginScan();
+            var token = batch.Token;
+
             SetStatus(DescribeScanStart(folders.Count, network.Count));
 
             Task.Run(() =>
             {
                 var found = new List<string>();
+
                 foreach (var folder in folders)
                 {
+                    // 本地目录没有条数上限（1.17.0 只给网络那一侧收口），但取消照样生效：
+                    // 在文件夹之间看一眼，不必把整棵树扫完才响应。
+                    if (token.IsCancellationRequested) break;
+
+                    var before = found.Count;
+
                     try
                     {
                         found.AddRange(MediaFormats.EnumerateMediaFiles(folder, true));
@@ -594,14 +623,17 @@ namespace 播放器
 // 个别子目录没有权限就跳过，不要让整批失败。
                         AppLog.Swallowed("个别子目录没有权限就跳过，不要让整批失败。", ex);
                     }
+
+                    // 本地找到的也算"已找到"：不然只有网络那一路时进度才动，看着像卡住了。
+                    if (found.Count > before) Interlocked.Add(ref _scanFound, found.Count - before);
                 }
 
                 // 网络这一路自己吞异常（逐条 try/catch），这里不会因为一条离线路径整批失败。
-                var imported = _networkImport.Run(network);
+                var imported = _networkImport.Run(network, token, _ => NoteScanFound());
 
-                return (Local: found, Network: imported);
+                return new ScanOutcome(found, imported, token.IsCancellationRequested);
             }).ContinueWith(
-                task => PostScannedFiles(task, playback),
+                task => PostScannedFiles(task, playback, batch),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
@@ -629,9 +661,7 @@ namespace 播放器
         }
 
         /// <summary>后台扫描结束，回到 UI 线程把结果补进播放列表。</summary>
-        private void PostScannedFiles(
-            Task<(List<string> Local, NetworkPathImportResult Network)> task,
-            AddPlayback playback)
+        private void PostScannedFiles(Task<ScanOutcome> task, AddPlayback playback, ScanBatch batch)
         {
             try
             {
@@ -641,39 +671,57 @@ namespace 播放器
                 {
                     if (IsDisposed) return;
 
-                    if (!task.IsCompletedSuccessfully)
+                    try
                     {
-                        // 到这里只可能是本地目录那一段抛了（网络那一段逐条吞异常）。
-                        AppLog.Swallowed("扫描文件夹失败，这一批没有加进列表。", task.Exception!);
-                        SetStatus("扫描文件夹失败，请看日志");
-                        return;
+                        if (!task.IsCompletedSuccessfully)
+                        {
+                            // 到这里只可能是本地目录那一段抛了（网络那一段逐条吞异常）。
+                            AppLog.Swallowed("扫描文件夹失败，这一批没有加进列表。", task.Exception!);
+                            SetStatus("扫描文件夹失败，请看日志");
+                            return;
+                        }
+
+                        var outcome = task.Result;
+                        var cancelled = outcome.Cancelled || outcome.Network.Cancelled;
+                        var imported = outcome.Network;
+                        var added = new List<int>();
+
+                        // 本地目录里找到的文件先加：和以前一样走 AddPathsToPlaylist 的分类（媒体 / 字幕）。
+                        if (outcome.Local.Count > 0)
+                            added.AddRange(AddPathsToPlaylist(outcome.Local, distinct: true));
+
+                        // 网络目录里找到的文件 / 直接给出的网络文件（顺序由 NetworkPathImport 保证）。
+                        if (imported.Items.Count > 0)
+                            added.AddRange(AddPathsToPlaylist(imported.Items, distinct: true));
+
+                        // 网络 m3u 的条目录「追加」语义：不去重（和本地 m3u 的拖入完全一致）。
+                        if (imported.FromPlaylists.Count > 0)
+                        {
+                            var first = _playlist.Count;
+                            _playlist.AddRange(imported.FromPlaylists);
+                            _scanner.Enqueue(imported.FromPlaylists);
+
+                            for (var i = 0; i < imported.FromPlaylists.Count; i++)
+                                added.Add(first + i);
+                        }
+
+                        if (cancelled)
+                        {
+                            // 取消之后不自动开播：用户按的是"停"，不是"放"。
+                            SetStatus(DescribeCancelledScan(added.Count, imported));
+                        }
+                        else
+                        {
+                            SetStatus(DescribeScanResult(added.Count, imported, outcome.Local.Count,
+                                _networkImport.Limits));
+
+                            if (ShouldAutoPlay(playback, added.Count > 0)) PlayIndex(added[0]);
+                        }
                     }
-
-                    var (localFiles, imported) = task.Result;
-                    var added = new List<int>();
-
-                    // 本地目录里找到的文件先加：和以前一样走 AddPathsToPlaylist 的分类（媒体 / 字幕）。
-                    if (localFiles.Count > 0)
-                        added.AddRange(AddPathsToPlaylist(localFiles, distinct: true));
-
-                    // 网络目录里找到的文件 / 直接给出的网络文件（顺序由 NetworkPathImport 保证）。
-                    if (imported.Items.Count > 0)
-                        added.AddRange(AddPathsToPlaylist(imported.Items, distinct: true));
-
-                    // 网络 m3u 的条目录「追加」语义：不去重（和本地 m3u 的拖入完全一致）。
-                    if (imported.FromPlaylists.Count > 0)
+                    finally
                     {
-                        var first = _playlist.Count;
-                        _playlist.AddRange(imported.FromPlaylists);
-                        _scanner.Enqueue(imported.FromPlaylists);
-
-                        for (var i = 0; i < imported.FromPlaylists.Count; i++)
-                            added.Add(first + i);
+                        EndScan(batch);
                     }
-
-                    SetStatus(DescribeScanResult(added.Count, imported, localFiles.Count));
-
-                    if (ShouldAutoPlay(playback, added.Count > 0)) PlayIndex(added[0]);
                 }));
             }
             catch (Exception ex)
@@ -690,11 +738,20 @@ namespace 播放器
         /// 所以文案写"可能离线"——不假装我们知道原因。
         /// </para>
         /// </summary>
-        private static string DescribeScanResult(int addedCount, NetworkPathImportResult imported, int localFilesFound)
+        private static string DescribeScanResult(
+            int addedCount,
+            NetworkPathImportResult imported,
+            int localFilesFound,
+            MediaScanLimits limits)
         {
             var parts = new List<string>();
 
             if (addedCount > 0) parts.Add($"已添加 {addedCount} 项");
+
+            // 触到上限必须说出来：不能让用户以为"这个目录就这么点东西"。
+            if (imported.Truncated)
+                parts.Add($"网络目录太大，已达扫描上限（{limits.MaxDepth} 层 / {limits.MaxFiles:N0} 个文件），"
+                          + "只扫了一部分");
 
             if (imported.Unreachable.Count > 0)
                 parts.Add($"{imported.Unreachable.Count} 个网络位置没能当文件夹打开（可能离线），"

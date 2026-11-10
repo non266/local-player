@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 
 namespace 播放器.Core
 {
@@ -216,26 +217,20 @@ namespace 播放器.Core
 
         /// <summary>
         /// 递归/非递归枚举目录下的媒体文件，返回按文件名排序的结果。
+        /// <para>
+        /// 真正的遍历在 <see cref="MediaScanner"/>（1.17.0）：这里给"无限"参数，
+        /// 行为与以前一致（顺序、异常口径、排序都不变）。网络那一路走
+        /// <see cref="MediaScanner.Walk"/> 的有限参数，本方法保持给本地目录用。
+        /// </para>
         /// </summary>
         public static List<string> EnumerateMediaFiles(string folder, bool recursive)
         {
-            var result = new List<string>();
-            if (!Directory.Exists(folder)) return result;
+            var limits = MediaScanLimits.Unlimited();
 
-            try
-            {
-                var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                foreach (var file in Directory.EnumerateFiles(folder, "*", option))
-                {
-                    if (IsMediaFile(file)) result.Add(file);
-                }
-            }
-            catch (UnauthorizedAccessException) { /* 忽略无权限的子目录 */ }
-            catch (DirectoryNotFoundException) { /* 目录在枚举过程中消失 */ }
-            catch (IOException) { /* 忽略个别读取失败 */ }
+            // 旧的 recursive=false 是"只看这一层"：根目录算第 0 层，不许往下。
+            if (!recursive) limits.MaxDepth = 0;
 
-            result.Sort(StringComparer.CurrentCultureIgnoreCase);
-            return result;
+            return MediaScanner.Walk(folder, limits, CancellationToken.None, null).Files;
         }
 
         private static string GetExtension(string? path)

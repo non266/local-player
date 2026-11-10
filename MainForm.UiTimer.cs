@@ -11,13 +11,27 @@ namespace 播放器
         /// <summary>测试用：进度条现在能不能拖（DVD 菜单上是关着的）。</summary>
         internal bool SeekBarEnabled => trackSeek.Enabled;
 
+        /// <summary>
+        /// 界面计时器跳了几拍（冒烟测试用）。
+        /// <para>
+        /// 探索针 / 扫描是不是把界面拖住了，最直接的判据就是"这段时间计时器还在不在跳"——
+        /// 比"操作耗时小于 N 毫秒"稳（后者的 N 没法定）。
+        /// </para>
+        /// </summary>
+        internal int UiTickCount { get; private set; }
+
         // =====================================================================
         // 进度条与音量条
         // =====================================================================
         private void OnUiTimerTick(object? sender, EventArgs e)
         {
+            UiTickCount++;
+
             // 网络路径的存在性检查在后台跑，回到这里收尾：事件、引擎调用都留在界面线程。
             _playback.PumpPendingProbe();
+
+            // 扫描进度（「取消扫描 · 已找到 N 项」）跟着这一拍刷：后台只动计数，不 Post。
+            UpdateScanProgress();
 
             // 时长扫描逐条置位"待更新"，这里按计时器节流统一重算一次标题里的总时长。
             if (_playlistSummaryDirty)

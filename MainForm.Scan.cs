@@ -163,18 +163,19 @@ namespace 播放器
 
         /// <summary>
         /// 取消之后的状态栏：说清"加了多少"与"剩下的没扫"，不要假装扫完了。
+        /// <para>
+        /// 刻意**不报"还有几个目录没扫"**：`Folders` 记的是"碰过的目录"（取消时那一只也在里面），
+        /// 拿它当"没扫完的个数"会多报一个。要报就必须在扫描里另记"完成了几只"，不值得。
+        /// </para>
         /// </summary>
         private static string DescribeCancelledScan(int addedCount, NetworkPathImportResult imported)
         {
             var parts = new List<string> { "已取消扫描" };
 
             if (addedCount > 0) parts.Add($"已加入前 {addedCount} 项");
+            else parts.Add("一条都没扫到");
 
-            if (imported.Folders.Count > 0)
-                parts.Add($"还有 {imported.Folders.Count} 个网络目录没扫完");
-
-            if (imported.Cancelled && addedCount == 0)
-                parts.Add("一条都没扫到");
+            if (imported.Truncated) parts.Add("这一批也触到了扫描上限，只扫了一部分");
 
             return string.Join("：", parts);
         }

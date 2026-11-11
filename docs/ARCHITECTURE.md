@@ -11,11 +11,11 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 40,429 行 / **173 个文件** |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 40,436 行 / **173 个文件** |
 | `Core/` | 13,658 行 / 74 个文件 |
 | `Ui/` | 12,983 行 / 59 个文件 |
 | `MainForm*` 这一族 partial | 13,704 行 / **39 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 23,059 行 / 77 个文件 |
+| `tools/SmokeTest/` | 23,153 行 / 78 个文件 |
 
 > 数字最后一次量是在 **2026-11-10（1.17.0：网络 I/O 的取消与资源管理）**。
 > 1.12.0 那轮产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、
@@ -1204,3 +1204,13 @@ F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.c
 - 断言里的两个坑：① 正序插入的 50k 按名称排是**空操作**，"当前项按引用找回"那条断言就抓不到变异
   （要倒序插入）；② `DrawToBitmap` 的第一帧 DPI / 尺寸还没定，计数会多一遍——所以先预热再清零，
   路径那条用"跨帧增量"而不是绝对次数。
+### 24.6 收尾顺序（1.18.0 的一处挂起）
+
+`ShutdownForm()` 原来的顺序是"先 `_engine.Dispose()`，窗体（连同 `videoView` 的 HWND）后销毁"。
+libvlc 的 vout 线程在 `MediaPlayer.Stop` 期间还在往那个 HWND 上画，窗口一销毁就成了
+"Stop 卡住"——Windows 记成 **Application Hang**，进程被关掉（退出码 `0xCFFFFFFF`）。
+它不是访问违例，所以日志里没有异常、事件日志里也没有 `0xC0000005`。
+
+现在的顺序是：**先 `videoView.MediaPlayer = null`**（把画面输出从 libvlc 摘下来），
+再 `_engine.Dispose()`。规矩写进维护手册坑表：收尾时先摘画面输出，再放引擎；
+冒烟里也不要直接调 `Engine.Stop()` 去模拟"收尾"——产品里没有那个顺序。

@@ -473,7 +473,11 @@ namespace SmokeTest
                 {
                     if (form != null)
                     {
-                        form.Engine.Stop();
+                        // 1.18.0：这里**不再**直接调 Engine.Stop()。那个调用顺序在产品里并不存在
+                        // （用户是关窗 → 产品自己停引擎），而"刚切到视频窗口就 Stop"正好踩在
+                        // vout 线程与 HWND 销毁的中间——会卡在 Stop 里被 Windows 判成挂起
+                        // （0xCFFFFFFF / Application Hang，1.18.0 验收时 6 次里 2 次）。
+                        // 交给产品自己的关窗路径去停（ShutdownForm 会先摘画面输出再放引擎）。
                         PumpMessages(250);
                         form.Close();
                         form.Dispose();

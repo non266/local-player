@@ -115,6 +115,9 @@ namespace SmokeTest
                 // 1.18.0：绘制基准（设 播放器_TEST_PAINT=1 才跑，只量不判）
                 if (!RunPaintProbe()) return false;
 
+                // 1.18.0：收尾压测（设 播放器_TEST_TEARDOWN=N 才跑；排 0xCFFFFFFF 用）
+                if (!RunTeardownStress()) return false;
+
                 Log(11, $"侧栏四页绘制正常，歌词链路打通（{document.Lines.Count} 行，来自 {document.Source}）");
                 return true;
             }

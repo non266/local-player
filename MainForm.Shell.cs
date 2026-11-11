@@ -367,6 +367,13 @@ namespace 播放器
             _smtc?.Dispose();
             _smtc = null;
 
+            // 先把画面输出摘下来，再放引擎：libvlc 的 vout 线程要往 videoView 的 HWND 上画，
+            // 而窗体随后就会把这个 HWND 销毁。实测（1.18.0 验收）在"刚切到视频窗口就关窗"的
+            // 时序下会卡在 MediaPlayer.Stop 里——Windows 记成 Application Hang、进程被关掉
+            // （退出码 0xCFFFFFFF，事件日志里是 Application Hang 而不是访问违例）。
+            // 摘下来之后 libvlc 不再持有我们的窗口句柄，引擎可以照常停、照常放。
+            videoView.MediaPlayer = null;
+
             _engine.Dispose();
             DisposeThemeResources();
 

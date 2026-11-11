@@ -40,6 +40,64 @@ namespace 播放器.Ui
         private Font? _iconFont;
         private float _iconFontPixelHeight;
 
+        // ---- 绘制缓存（1.18.0）-------------------------------------------------
+        // 反馈里的原话是"同一帧里 MeasureText 算了两遍"：量一遍算布局、画的时候又量一遍。
+        // 现在排版结果只算一次并缓存（宽度 / 文案 / 字体 / DPI 都不变就一直用），
+        // 绘制直接取缓存里的行高。圆角路径与两支笔也按"尺寸 / 颜色"缓存。
+
+        /// <summary>一次排版的结果：每行文案与高度。</summary>
+        private sealed class TextBlockLayout
+        {
+            internal static readonly TextBlockLayout Empty = new();
+
+            internal string[] Lines = Array.Empty<string>();
+            internal int[] Heights = Array.Empty<int>();
+            internal int Total;
+        }
+
+        private TextBlockLayout? _textLayout;
+        private int _textLayoutWidth = -1;
+        private float _textLayoutDpi;
+        private string? _textLayoutTitle;
+        private string? _textLayoutArtist;
+        private string? _textLayoutAlbum;
+        private Font? _textLayoutFont;
+        private Font? _textLayoutTitleFont;
+
+        private GraphicsPath? _squarePath;
+        private Rectangle _squarePathBounds;
+        private float _squarePathRadius = -1f;
+
+        /// <summary>上一次建路径用的矩形与半径（冒烟测试失败时打出来定位用）。</summary>
+        internal Rectangle LastPathSquare { get; private set; }
+
+        internal float LastPathRadius { get; private set; }
+
+        private SolidBrush? _placeholderBackBrush;
+        private SolidBrush? _placeholderForeBrush;
+        private Pen? _borderPen;
+        private Color _borderPenColor;
+        private Color _placeholderBackColor;
+
+        /// <summary>排版时量了几次字（冒烟测试用：一次绘制应该只有一次）。</summary>
+        internal int TextMeasureCount { get; private set; }
+
+        /// <summary>圆角路径建了几次（冒烟测试用：尺寸不变就该一直是 1）。</summary>
+        internal int PathBuildCount { get; private set; }
+
+        /// <summary>
+        /// 把两个计数清零（冒烟测试用）。
+        /// <para>
+        /// 为什么要这个：`DrawToBitmap` 会先把句柄建出来，那时 `DeviceDpi` 还没定，
+        /// 画的那一帧与之后尺寸 / DPI 都不同——不剔掉预热帧，计数就会多出一遍。
+        /// </para>
+        /// </summary>
+        internal void ResetPaintCounters()
+        {
+            TextMeasureCount = 0;
+            PathBuildCount = 0;
+        }
+
         private Color _placeholderBack = Color.FromArgb(0x28, 0x28, 0x2C);
         private Color _placeholderFore = Color.FromArgb(0x80, 0x80, 0x88);
         private Color _textColor = Color.White;
@@ -152,7 +210,7 @@ namespace 播放器.Ui
             var available = ClientSize.Width - padding * 2;
 
             // 只画封面的模式（迷你缩略图）不占文字块的高度
-            var textHeight = ShowText ? MeasureTextBlock(available) : 0;
+            var textHeight = ShowText ? BuildTextLayout(available).Total : 0;
             var maxSquare = ClientSize.Height - padding * 2 - textHeight - (int)Math.Round(10 * DpiScale);
             var side = Math.Max(0, Math.Min(available, maxSquare));
 
@@ -172,20 +230,63 @@ namespace 播放器.Ui
             return (square, textHeight);
         }
 
+        /// <summary>
+        /// 封面那个圆角方框的路径。**按尺寸缓存**：尺寸 / 半径 / DPI 不变就一直复用，
+        /// 变的时候才重建并释放旧的（每帧 new 一个 GraphicsPath 是白花的）。
+        /// </summary>
+        private GraphicsPath GetSquarePath(Rectangle square, float radius)
+        {
+            if (_squarePath != null && _squarePathBounds == square && Math.Abs(_squarePathRadius - radius) < 0.01f)
+                return _squarePath;
+
+            _squarePath?.Dispose();
+            _squarePath = GdiHelpers.RoundedRect(
+                new RectangleF(square.X, square.Y, square.Width, square.Height), radius);
+            _squarePathBounds = square;
+            _squarePathRadius = radius;
+            LastPathSquare = square;
+            LastPathRadius = radius;
+            PathBuildCount++;
+
+            return _squarePath;
+        }
+
+        private SolidBrush GetPlaceholderBackBrush()
+        {
+            if (_placeholderBackBrush != null && _placeholderBackColor == _placeholderBack)
+                return _placeholderBackBrush;
+
+            _placeholderBackBrush?.Dispose();
+            _placeholderBackBrush = new SolidBrush(_placeholderBack);
+            _placeholderBackColor = _placeholderBack;
+            return _placeholderBackBrush;
+        }
+
+        private SolidBrush GetPlaceholderForeBrush()
+        {
+            return _placeholderForeBrush ??= new SolidBrush(_placeholderFore);
+        }
+
+        private Pen GetBorderPen()
+        {
+            if (_borderPen != null && _borderPenColor == _borderColor) return _borderPen;
+
+            _borderPen?.Dispose();
+            _borderPen = new Pen(_borderColor);
+            _borderPenColor = _borderColor;
+            return _borderPen;
+        }
+
         private void DrawCover(Graphics g, Rectangle square)
         {
             if (square.Width <= 0 || square.Height <= 0) return;
 
-            var bounds = new RectangleF(square.X, square.Y, square.Width, square.Height);
-            using var path = GdiHelpers.RoundedRect(bounds, 8f * DpiScale);
+            var path = GetSquarePath(square, 8f * DpiScale);
 
             if (_cover == null)
             {
-                using (var back = new SolidBrush(_placeholderBack))
-                    g.FillPath(back, path);
-
-                using (var pen = new Pen(_borderColor))
-                    g.DrawPath(pen, path);
+                g.FillPath(GetPlaceholderBackBrush(), path);
+                g.DrawPath(GetBorderPen(), path);
 
                 // 用音符字符当占位图，比画矢量图标省事且各字体都有
                 TextRenderer.DrawText(
@@ -205,7 +306,8 @@ namespace 播放器.Ui
                 width,
                 height);
 
-            var previousClip = g.Clip;
+            // ⚠ Region 要自己释放：Graphics.Clip 的 getter 每次都 new 一个 Region。
+            using var previousClip = g.Clip;
             var previousInterpolation = g.InterpolationMode;
 
             g.SetClip(path);
@@ -214,8 +316,7 @@ namespace 播放器.Ui
             g.InterpolationMode = previousInterpolation;
             g.Clip = previousClip;
 
-            using (var pen = new Pen(_borderColor))
-                g.DrawPath(pen, path);
+            g.DrawPath(GetBorderPen(), path);
         }
 
         /// <summary>占位音符的字体；尺寸变了才重建。</summary>
@@ -240,49 +341,100 @@ namespace 播放器.Ui
             return _iconFont ?? Font;
         }
 
-        private int MeasureTextBlock(int width)
+        /// <summary>
+        /// 排版一次并缓存：每行文案 + 每行高度 + 总高。
+        /// <para>
+        /// 缓存键是「宽度 / DPI / 三行文案 / 字体」——**这些不变就一次都不再量**。
+        /// 以前这里是两处各量一遍（算布局一处、绘制一处），同一帧里同样的字量两次。
+        /// </para>
+        /// </summary>
+        private TextBlockLayout BuildTextLayout(int width)
         {
-            var lines = BuildTextLines();
-            if (lines.Length == 0) return 0;
+            var titleFont = TitleFont;
 
-            var total = 0;
-            for (var i = 0; i < lines.Length; i++)
+            if (_textLayout != null &&
+                _textLayoutWidth == width &&
+                Math.Abs(_textLayoutDpi - DpiScale) < 0.001f &&
+                ReferenceEquals(_textLayoutFont, Font) &&
+                ReferenceEquals(_textLayoutTitleFont, titleFont) &&
+                string.Equals(_textLayoutTitle, _title, StringComparison.Ordinal) &&
+                string.Equals(_textLayoutArtist, _artist, StringComparison.Ordinal) &&
+                string.Equals(_textLayoutAlbum, _album, StringComparison.Ordinal))
             {
-                var font = i == 0 ? TitleFont : Font;
-                var size = TextRenderer.MeasureText(
-                    lines[i], font, new Size(width, int.MaxValue),
-                    TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
-
-                total += Math.Max(font.Height, size.Height);
-                if (i > 0) total += (int)Math.Round(2 * DpiScale);
+                return _textLayout;
             }
 
-            return total;
-        }
-
-        private void DrawTextBlock(Graphics g, Rectangle area)
-        {
+            var layout = new TextBlockLayout();
             var lines = BuildTextLines();
-            if (lines.Length == 0) return;
 
-            var y = area.Y;
+            if (lines.Length == 0)
+            {
+                _textLayout = layout;
+                _textLayoutWidth = width;
+                _textLayoutDpi = DpiScale;
+                _textLayoutFont = Font;
+                _textLayoutTitleFont = titleFont;
+                _textLayoutTitle = _title;
+                _textLayoutArtist = _artist;
+                _textLayoutAlbum = _album;
+                return layout;
+            }
+
+            layout.Lines = lines;
+            layout.Heights = new int[lines.Length];
+
+            var total = 0;
 
             for (var i = 0; i < lines.Length; i++)
             {
-                var font = i == 0 ? TitleFont : Font;
-                var width = area.Width;
+                var font = i == 0 ? titleFont : Font;
+
+                TextMeasureCount++;
 
                 var size = TextRenderer.MeasureText(
                     lines[i], font, new Size(width, int.MaxValue),
                     TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
 
                 var height = Math.Max(font.Height, size.Height);
+                layout.Heights[i] = height;
+
+                total += height;
+                if (i > 0) total += (int)Math.Round(2 * DpiScale);
+            }
+
+            layout.Total = total;
+
+            _textLayout = layout;
+            _textLayoutWidth = width;
+            _textLayoutDpi = DpiScale;
+            _textLayoutFont = Font;
+            _textLayoutTitleFont = titleFont;
+            _textLayoutTitle = _title;
+            _textLayoutArtist = _artist;
+            _textLayoutAlbum = _album;
+
+            return layout;
+        }
+
+        private void DrawTextBlock(Graphics g, Rectangle area)
+        {
+            var layout = BuildTextLayout(area.Width);
+            if (layout.Lines.Length == 0) return;
+
+            var titleFont = TitleFont;
+            var y = area.Y;
+
+            for (var i = 0; i < layout.Lines.Length; i++)
+            {
+                var font = i == 0 ? titleFont : Font;
+                var height = layout.Heights[i];
+
                 if (y + height > area.Bottom) break;
 
                 var color = i == 0 ? _textColor : _subTextColor;
 
                 TextRenderer.DrawText(
-                    g, lines[i], font, new Rectangle(area.X, y, width, height), color,
+                    g, layout.Lines[i], font, new Rectangle(area.X, y, area.Width, height), color,
                     TextFormatFlags.WordBreak | TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPrefix);
 
                 y += height + (int)Math.Round(2 * DpiScale);
@@ -444,6 +596,18 @@ namespace 播放器.Ui
 
                 _iconFont?.Dispose();
                 _iconFont = null;
+
+                _squarePath?.Dispose();
+                _squarePath = null;
+
+                _placeholderBackBrush?.Dispose();
+                _placeholderBackBrush = null;
+
+                _placeholderForeBrush?.Dispose();
+                _placeholderForeBrush = null;
+
+                _borderPen?.Dispose();
+                _borderPen = null;
             }
 
             base.Dispose(disposing);

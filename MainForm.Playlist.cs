@@ -62,6 +62,15 @@ namespace 播放器
         /// <summary>标题里的总时长需要重算（由后台时长扫描逐条置位，界面计时器统一处理）。</summary>
         private bool _playlistSummaryDirty;
 
+        /// <summary>
+        /// 整建了几次（1.18.0，冒烟测试用）。
+        /// <para>
+        /// 一次用户动作（排序 / 筛选 / 换主题）应该只整建一次；模型事件与显式调用各刷一遍
+        /// 会白花一遍 50k 行的时间——这条计数就是用来钉住那种"刷两遍"的。
+        /// </para>
+        /// </summary>
+        internal int PlaylistRebuildCount { get; private set; }
+
         private void OnPlaylistModelChanged(object? sender, EventArgs e) => RefreshPlaylistView();
 
         /// <summary>
@@ -97,6 +106,8 @@ namespace 播放器
         private void RefreshPlaylistView()
         {
             if (TryRefreshPlaylistViewIncrementally()) return;
+
+            PlaylistRebuildCount++;
 
             var selected = GetSelectedPlaylistIndices();
             var topIndex = listViewPlaylist.TopItem?.Index ?? 0;

@@ -85,10 +85,13 @@ namespace SmokeTest
                     PumpMessages(20);
 
                     // 按名称排序，再复位成"原始顺序"。
+                    var rebuildsBefore = form.PlaylistRebuildCount;
+
                     watch.Restart();
                     form.ClickPlaylistColumn(1);
                     watch.Stop();
                     var sortMs = watch.ElapsedMilliseconds;
+                    var sortRebuilds = form.PlaylistRebuildCount - rebuildsBefore;
 
                     form.ClickPlaylistColumn(0);
 
@@ -105,7 +108,48 @@ namespace SmokeTest
 
                     Log(11, $"大列表基准 {count:N0} 项：模型 {modelMs} ms；整建 {buildMs} ms；"
                             + $"追加 1 项 {appendMs} ms；切歌 {switchMs} ms；筛选 {filterMs} ms（命中 {matched}）；"
-                            + $"按名称排序 {sortMs} ms；选中+滚动 {selectMs} ms；托管内存 {managedMb} MB");
+                            + $"按名称排序 {sortMs} ms（整建 {sortRebuilds} 次）；选中+滚动 {selectMs} ms；托管内存 {managedMb} MB");
+
+                    // ---- 1.18.0 拆量：把"按名称排序"拆成模型排序 / 建行两段 ----
+                    // 纯模型（没有视图订阅）：OrderBy + 文化比较 + 重排，量到的就是能挪到后台的那一段。
+                    var sortModel = new Playlist();
+                    sortModel.AddRange(paths);
+
+                    watch.Restart();
+                    sortModel.Sort(PlaylistSortField.Name, descending: false);
+                    watch.Stop();
+                    var modelSortMs = watch.ElapsedMilliseconds;
+
+                    // 只量"建行"：模型已经排好，再加进窗体（这一步逃不掉，必须留在界面线程）。
+                    form.Playlist.Clear();
+                    PumpMessages(50);
+                    sortModel.Clear();
+
+                    watch.Restart();
+                    form.Playlist.AddRange(paths);
+                    watch.Stop();
+                    var rebuildMs = watch.ElapsedMilliseconds;
+
+                    // ---- 复用行对象再重排（只量不改，留给下一版）----
+                    // 1.15.0 量到"瓶颈是建 50,000 个 ListViewItem 本身"，那这些行能不能直接换个次序塞回去？
+                    watch.Restart();
+                    view.BeginUpdate();
+                    try
+                    {
+                        var existing = view.Items.Cast<ListViewItem>().ToArray();
+                        view.Items.Clear();
+                        Array.Reverse(existing);
+                        view.Items.AddRange(existing);
+                    }
+                    finally
+                    {
+                        view.EndUpdate();
+                    }
+                    watch.Stop();
+                    var reorderRowsMs = watch.ElapsedMilliseconds;
+
+                    Log(11, $"大列表拆量 {count:N0} 项：模型排序 {modelSortMs} ms；建行 {rebuildMs} ms；"
+                            + $"复用行重排 {reorderRowsMs} ms（只量不改）");
 
                     form.Playlist.Clear();
                     PumpMessages(50);

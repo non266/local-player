@@ -64,8 +64,11 @@ namespace 播放器
 
         private void ApplySort(PlaylistSortField field, bool descending)
         {
+            // 1.18.0：这里**不再**显式调 RefreshPlaylistView。
+            // `List.Sort` 会发 ContentChanged → 已经整建一次；再显式刷一次就是白做一遍
+            // （50,000 条上量到 3,063 ms，其中约一半是这一下——见 docs/1.18.0计划.md §2）。
+            // 条数 ≤ 1 时 Sort 会直接返回、不发事件，那也没有值得重建的东西。
             _workspace.ApplySort(field, descending);
-            RefreshPlaylistView();
             ApplySortMenu();
 
             var name = SortFieldName(field);

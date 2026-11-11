@@ -112,6 +112,9 @@ namespace SmokeTest
                 // 1.15.0：大列表基准（设 播放器_TEST_BIGLIST=1 才跑，只量不判；自带窗体）
                 if (!RunBigListProbe()) return false;
 
+                // 1.18.0：绘制基准（设 播放器_TEST_PAINT=1 才跑，只量不判）
+                if (!RunPaintProbe()) return false;
+
                 Log(11, $"侧栏四页绘制正常，歌词链路打通（{document.Lines.Count} 行，来自 {document.Source}）");
                 return true;
             }

@@ -221,6 +221,47 @@ namespace SmokeTest
                             + "8 秒后标超时、冷却期内不再问");
                 }
 
+                // ---- 7：引擎自己打开不可达网络流，界面到底停没停（gated，只量不判） ----
+                // 反馈第 4 条从 1.13.0 一直留到现在：UNC 那一路已经交给后台探测（1.17.0），
+                // 但 http / rtsp 是**引擎自己在界面线程上打开**的（PlaybackCoordinator.TryOpen → Open）。
+                // libvlc 的 Play 理论上是异步的，这一段的数字就是把它钉住。
+                // 变量写成秒数（默认 10）：想看"libvlc 多久才放弃"就设 60。
+                if (Environment.GetEnvironmentVariable("播放器_TEST_NETOPEN") is { Length: > 0 } netOpenRaw)
+                {
+                    var waitSeconds = int.TryParse(netOpenRaw, out var parsedSeconds) && parsedSeconds > 0
+                        ? parsedSeconds
+                        : 10;
+
+                    using var streamForm = new 播放器.MainForm(Array.Empty<string>());
+                    streamForm.Show();
+                    PumpMessages(200);
+
+                    foreach (var uri in new[] { "http://192.0.2.1/probe.mp3", "rtsp://192.0.2.1/probe" })
+                    {
+                        streamForm.Playlist.Clear();
+                        streamForm.AddPathsForTest(new[] { uri });
+
+                        var ticksBefore = streamForm.UiTickCount;
+                        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+                        streamForm.Playback.PlayIndex(0, allowFallback: false);
+
+                        watch.Stop();
+                        PumpMessages(1000);
+
+                        var ticks = streamForm.UiTickCount - ticksBefore;
+                        var reachedError = PumpUntil(
+                            () => streamForm.Engine.State == 播放器.Core.PlayerState.Error,
+                            waitSeconds * 1000);
+
+                        Log(29, $"引擎打开不可达网络流（{uri}）：PlayIndex 用了 {watch.ElapsedMilliseconds} ms、"
+                                + $"之后 1 秒界面计时器跳了 {ticks} 拍、"
+                                + (reachedError
+                                    ? $"{waitSeconds} 秒内变成「播放出错」"
+                                    : $"{waitSeconds} 秒内状态还是「{streamForm.Engine.State}」"));
+                    }
+                }
+
                 Log(29, "探测正常：同一路径只起一条、冷却期内不再问、冷却过去会重问、"
                         + "在飞最多 4 条、跑在专用线程上");
                 return true;

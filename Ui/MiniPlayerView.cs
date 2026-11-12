@@ -156,13 +156,19 @@ namespace 播放器.Ui
         /// <summary>接命令层（与菜单 / 快捷键 / 任务栏按钮同一个入口）。</summary>
         public void BindCommands(Action<PlayerCommandId> execute) => _controls.BindCommands(execute);
 
-        /// <summary>换一首（或清空：传 <c>null</c>）。</summary>
-        public void ShowTrack(string? path, MediaTags? tags)
+        /// <summary>换一首（或清空：传 <c>null</c>）。<paramref name="pending"/> = 标签还在读（1.19.0）。</summary>
+        public void ShowTrack(string? path, MediaTags? tags, bool pending = false)
         {
-            _cover.ShowTrack(path, tags);
+            _cover.ShowTrack(path, tags, pending);
 
             var title = FirstNonEmpty(tags?.Title, path == null ? null : System.IO.Path.GetFileNameWithoutExtension(path));
             _title.Text = string.IsNullOrWhiteSpace(title) ? "没有在播放" : title;
+
+            if (pending)
+            {
+                _artist.Text = CoverView.PendingText;
+                return;
+            }
 
             var parts = new[] { tags?.Artist, tags?.Album }
                 .Where(value => !string.IsNullOrWhiteSpace(value))

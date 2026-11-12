@@ -30,9 +30,17 @@ namespace 播放器.Ui
         /// <summary>只读入口：现在挂着的封面（给冒烟测试用）。</summary>
         internal Image? Cover => _cover;
 
+        /// <summary>标签还在读时那一行提示（侧栏封面、音频卡片、信息页共用同一句）。</summary>
+        internal const string PendingText = "正在读取标签…";
+
         private string? _title;
         private string? _artist;
         private string? _album;
+
+        /// <summary>只读入口：现在画着的三行文字（给冒烟测试判"占位换没换掉"）。</summary>
+        internal string? TitleText => _title;
+        internal string? ArtistText => _artist;
+        internal string? AlbumText => _album;
 
         // 字体必须缓存：每次绘制都 new Font 的话，每帧都会漏一个 GDI 对象。
         private Font? _titleFont;
@@ -121,10 +129,25 @@ namespace 播放器.Ui
             System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         internal bool ShowText { get; set; } = true;
 
-        /// <summary>显示某个文件的封面与文字信息；传 <c>null</c> 清空。</summary>
-        public void ShowTrack(string? path, MediaTags? tags)
+        /// <summary>
+        /// 显示某个文件的封面与文字信息；传 <c>null</c> 清空。
+        /// </summary>
+        /// <param name="pending">
+        /// 标签还在读（1.19.0）：标题先显示文件名、副标题写 <see cref="PendingText"/>、封面留空，
+        /// 而且<b>不去找外挂封面</b>——占位要的是"把上一首那张摘掉"，不是切歌时枚举目录。
+        /// </param>
+        public void ShowTrack(string? path, MediaTags? tags, bool pending = false)
         {
             _title = FirstNonEmpty(tags?.Title, path == null ? null : Path.GetFileNameWithoutExtension(path));
+
+            if (pending)
+            {
+                _artist = PendingText;
+                _album = null;
+                SetCover(null);
+                return;
+            }
+
             _artist = tags?.Artist;
             _album = tags?.Album;
 

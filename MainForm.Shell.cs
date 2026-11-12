@@ -348,6 +348,12 @@ namespace 播放器
             _scanner.DurationFound -= OnDurationFound;
             _scanner.Dispose();
 
+            // 标签读取队列：只关掉（不再起新的、待读丢掉），**不等待**在飞的那条——
+            // 离线共享上一次读能卡几十秒，关窗不该陪着等。线程是后台线程，进程照常退。
+            _metadata.Dispose();
+            _metadataPendingTimer.Stop();
+            _metadataPendingTimer.Dispose();
+
             if (_registeredMediaKeys.Count > 0)
             {
                 MediaKeys.Unregister(Handle);

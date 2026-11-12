@@ -185,6 +185,15 @@ namespace 播放器
         {
             InitializeComponent();
 
+            // 标签读取队列要最先建好：构造函数里就可能开始播启动媒体（OnPlaybackOpened 会用它）。
+            _metadata = new MetadataLoadQueue(
+                path => MetadataLoad(path),
+                (path, token, result) => PostMetadata(path, token, result));
+
+            // 占位的宽限计时器：读得慢才把上一首的封面摘掉（见 MainForm.Metadata.cs）。
+            _metadataPendingTimer = new System.Windows.Forms.Timer { Interval = MetadataPendingGraceMs };
+            _metadataPendingTimer.Tick += OnMetadataPendingTimerTick;
+
             _startupArgs = startupArgs ?? Array.Empty<string>();
             _settings = AppSettings.Load();
 

@@ -224,11 +224,11 @@ namespace 播放器.Ui
         // 两张卡片共用的推送
         // =====================================================================
 
-        /// <summary>换一首（或清空：传 <c>null</c>）。</summary>
-        public void ShowTrack(string? path, MediaTags? tags)
+        /// <summary>换一首（或清空：传 <c>null</c>）。<paramref name="pending"/> = 标签还在读（1.19.0）。</summary>
+        public void ShowTrack(string? path, MediaTags? tags, bool pending = false)
         {
-            _card?.ShowTrack(path, tags);
-            _mini?.ShowTrack(path, tags);
+            _card?.ShowTrack(path, tags, pending);
+            _mini?.ShowTrack(path, tags, pending);
         }
 
         /// <summary>卡片底部那一行当前歌词；<c>null</c> / 空串 = 不显示（迷你卡片不显示歌词）。</summary>

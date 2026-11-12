@@ -63,8 +63,9 @@ namespace 播放器.Ui
             LayoutChildren();
         }
 
-        /// <summary>换一首（或清空：传 <c>null</c>）。</summary>
-        public void ShowTrack(string? path, MediaTags? tags) => _cover.ShowTrack(path, tags);
+        /// <summary>换一首（或清空：传 <c>null</c>）。<paramref name="pending"/> = 标签还在读（1.19.0）。</summary>
+        public void ShowTrack(string? path, MediaTags? tags, bool pending = false) =>
+            _cover.ShowTrack(path, tags, pending);
 
         /// <summary>底部那一行当前歌词；<c>null</c> / 空串 = 不显示（纯文本歌词与没有歌词都走这里）。</summary>
         public void SetLyricLine(string? text)

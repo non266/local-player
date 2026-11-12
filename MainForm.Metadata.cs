@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using LibVLCSharp.Shared;
 using Windows.Media;
@@ -17,8 +15,9 @@ namespace 播放器
     /// <summary>
     /// 曲目元数据：切歌之后读标签与歌词、把它们推到侧栏与桌面歌词，以及「媒体信息」页的内容。
     /// <para>
-    /// 读标签要真的读文件（内嵌封面动辄一两 MB），所以丢在线程池里做，靠
-    /// <see cref="MediaSession"/> 的版本号判断"这份结果还属于当前这首吗"。
+    /// 读标签要真的读文件（内嵌封面动辄一两 MB），所以交给
+    /// <see cref="MetadataLoadQueue"/> 在专用线程上读（有界、最新优先）；读回来之前界面先占位
+    /// （「正在读取标签…」），靠 <see cref="MediaSession"/> 的版本号判断"这份结果还属于当前这首吗"。
     /// </para>
     /// </summary>
     public partial class MainForm
@@ -26,6 +25,44 @@ namespace 播放器
         // =====================================================================
         // 曲目元数据
         // =====================================================================
+
+        /// <summary>
+        /// 读标签 / 歌词的队列（1.19.0）：最多两条在飞、只留一条"最新待读"，跑在专用线程上。
+        /// <para>
+        /// 为什么不就地 <c>Task.Run</c>：连切二十首就会在池上攒二十条并发读，而离线共享上
+        /// 一次读文件能卡几十秒（1.17.0 实测 <c>File.Exists</c> 82～93 秒）——被放弃的读取
+        /// 只是"结果丢掉"，线程照样占着池里的工作线程。细节见 <see cref="MetadataLoadQueue"/>。
+        /// </para>
+        /// <para>在构造函数里建（字段初始值设定项不能引用实例方法）。</para>
+        /// </summary>
+        private readonly MetadataLoadQueue _metadata;
+
+        /// <summary>
+        /// 真的去磁盘上读一份标签 + 歌词。
+        /// <para>冒烟测试换成受闸门控制的假读取，用来验"占位 / 有界 / 迟到的不覆盖"。</para>
+        /// </summary>
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        internal Func<string, MetadataResult> MetadataLoad { get; set; } = ReadMetadataFromDisk;
+
+        /// <summary>读完了、但已经切到别的歌（结果被丢掉）的次数。</summary>
+        internal int MetadataDiscards { get; private set; }
+
+        /// <summary>
+        /// 占位前的宽限（毫秒）：本地读标签通常几十毫秒，那么快就没必要把上一首的封面摘掉再放回来
+        /// （每切一首闪一下比"晚半拍"更碍眼）。超过了才换成「正在读取标签…」。
+        /// </summary>
+        private const int MetadataPendingGraceMs = 150;
+
+        /// <summary>宽限计时器：到点还在读就把界面换成占位（一次性，到点就停）。</summary>
+        private readonly System.Windows.Forms.Timer _metadataPendingTimer;
+
+        private string? _pendingMetadataPath;
+        private int _pendingMetadataToken;
+
+        /// <summary>测试用：读标签的队列本身（<c>Starts</c> / <c>Skips</c> / <c>InFlight</c> / <c>Pending</c>）。</summary>
+        internal MetadataLoadQueue Metadata => _metadata;
+
         /// <summary>切歌后加载标签、歌词、封面与媒体信息。传 <c>null</c> 表示清空。</summary>
         internal void LoadTrackMetadata(string? path)
         {
@@ -36,6 +73,8 @@ namespace 播放器
 
             if (string.IsNullOrEmpty(path))
             {
+                _metadata.Clear();
+                ClearPendingMetadataDisplay();
                 ApplyMetadata(null, new MediaTags(), LyricsDocument.Empty);
                 return;
             }
@@ -44,24 +83,76 @@ namespace 播放器
             // 直接给一份空的，别让 TagReader 对着 "dvdsimple:///L:" 去当文件读。
             if (MediaFormats.IsDiscLocation(path))
             {
+                _metadata.Clear();
+                ClearPendingMetadataDisplay();
                 ApplyMetadata(path, new MediaTags(), LyricsDocument.Empty, allowOnlineLookup: false);
                 return;
             }
 
-            // 读标签要真的读文件（内嵌封面动辄一两 MB），丢到线程池里做，
-            // 免得切歌时界面顿一下。
-            Task.Run(() =>
+            // 网络流（http / rtsp …）没有"文件里的标签"可读：以前会给它白开一次 FileStream
+            // 再失败（还顺带读一遍外挂歌词），现在直接按"没有标签"处理。
+            if (MediaFormats.IsStreamUri(path))
             {
-                var tags = TagReader.Read(path);
-                return (Tags: tags, Lyrics: LyricsLoader.Load(path, tags));
-            }).ContinueWith(
-                task => PostMetadata(path, token, task),
-                CancellationToken.None,
-                TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
+                _metadata.Clear();
+                ClearPendingMetadataDisplay();
+                ApplyMetadata(path, new MediaTags(), LyricsDocument.Empty);
+                return;
+            }
+
+            // 先去排队读；读得慢（超过宽限）才把上一首的封面 / 词曲摘掉、换成「正在读取标签…」。
+            // 读得快的时候界面根本不动——每切一首闪一下比"晚半拍"更碍眼。
+            ShowMetadataPendingSoon(path, token);
+            _metadata.Request(path, token);
         }
 
-        private void PostMetadata(string path, int token, Task<(MediaTags Tags, LyricsDocument Lyrics)> task)
+        /// <summary>记下"这一首还在读"，宽限到点之后再决定要不要占位。</summary>
+        private void ShowMetadataPendingSoon(string path, int token)
+        {
+            _pendingMetadataPath = path;
+            _pendingMetadataToken = token;
+
+            _metadataPendingTimer.Stop();
+            _metadataPendingTimer.Start();
+        }
+
+        /// <summary>撤掉"还在读"的标记（读完了 / 不读了 / 换形态了）。</summary>
+        private void ClearPendingMetadataDisplay()
+        {
+            _pendingMetadataPath = null;
+            _metadataPendingTimer.Stop();
+        }
+
+        private void OnMetadataPendingTimerTick(object? sender, EventArgs e)
+        {
+            _metadataPendingTimer.Stop();
+
+            var path = _pendingMetadataPath;
+            _pendingMetadataPath = null;
+
+            // 计时器到点时可能已经读回来了（或者用户又切走了）：那就不占位
+            if (path == null || !_track.IsCurrent(_pendingMetadataToken)) return;
+
+            ShowMetadataPending(path);
+        }
+
+        /// <summary>
+        /// 占位：这一首的标签还没读回来。
+        /// <para>
+        /// 走同一个 <see cref="ApplyMetadata"/>，只是 <c>pending: true</c> 时：信息页只写两行
+        /// （不调 <c>FormatFileSize</c>）、封面留空、系统媒体控件那边也不查外挂封面——
+        /// <b>占位期间一次磁盘都不碰</b>。
+        /// </para>
+        /// </summary>
+        private void ShowMetadataPending(string path) =>
+            ApplyMetadata(path, new MediaTags(), LyricsDocument.Empty, allowOnlineLookup: false, pending: true);
+
+        private static MetadataResult ReadMetadataFromDisk(string path)
+        {
+            var tags = TagReader.Read(path);
+            return new MetadataResult(tags, LyricsLoader.Load(path, tags));
+        }
+
+        private void PostMetadata(string path, int token, MetadataResult? result)
         {
             try
             {
@@ -69,10 +160,20 @@ namespace 播放器
 
                 BeginInvoke(new Action(() =>
                 {
-                    if (IsDisposed || !_track.IsCurrent(token)) return;
+                    if (IsDisposed) return;
 
-                    if (task.IsCompletedSuccessfully)
-                        ApplyMetadata(path, task.Result.Tags, task.Result.Lyrics);
+                    if (!_track.IsCurrent(token))
+                    {
+                        // 用户早切到别的歌了：这份结果直接丢掉（不碰界面、也不报错）
+                        MetadataDiscards++;
+                        return;
+                    }
+
+                    // 读回来了：别让宽限计时器到点再把占位盖上去
+                    ClearPendingMetadataDisplay();
+
+                    if (result is { } value)
+                        ApplyMetadata(path, value.Tags, value.Lyrics);
                     else
                         ApplyMetadata(path, new MediaTags(), LyricsDocument.Empty);
                 }));
@@ -93,7 +194,12 @@ namespace 播放器
         /// 是否允许"本地没有就去网上要"。从在线结果自己触发的刷新要传 <c>false</c>，
         /// 否则拿回封面之后又会因为"歌词还没有"再发起一轮查找。
         /// </param>
-        internal void ApplyMetadata(string? path, MediaTags tags, LyricsDocument lyrics, bool allowOnlineLookup)
+        /// <param name="pending">
+        /// 占位（1.19.0）：标签还在读。<c>true</c> 时界面写「正在读取标签…」、封面留空，
+        /// 而且<b>一处磁盘都不碰</b>（不算文件大小、不找外挂封面）。
+        /// </param>
+        internal void ApplyMetadata(
+            string? path, MediaTags tags, LyricsDocument lyrics, bool allowOnlineLookup, bool pending = false)
         {
             _track.Apply(path, tags, lyrics);
 
@@ -101,14 +207,20 @@ namespace 播放器
             RestoreLyricsOffsetForCurrentMedia(path);
 
             // 系统媒体控件（音量弹窗里那一块）跟着换歌
-            UpdateSystemMediaControls(path, tags);
+            UpdateSystemMediaControls(path, tags, includeSidecarCover: !pending);
 
-            sidebarPanel.ShowTrack(path, tags, _track.ShiftedLyrics, BuildInfoRows(path, tags));
+            sidebarPanel.ShowTrack(
+                path,
+                tags,
+                _track.ShiftedLyrics,
+                pending ? BuildPendingInfoRows(path) : BuildInfoRows(path, tags),
+                pending);
+
             UpdateLyricsPosition();
             UpdateTrayText();
 
             // 音频窗口那张卡片跟着换封面 / 曲名；顺手按新文件决定要不要换形态
-            _surfaces.Audio.ShowTrack(path, tags);
+            _surfaces.Audio.ShowTrack(path, tags, pending);
             SyncWindowShape(path);
 
             // 桌面歌词是独立的窗口，内容要单独推一次（曲名在没有歌词时用来兜底）
@@ -121,7 +233,11 @@ namespace 播放器
         /// 把这一首的曲名 / 歌手 / 封面推给系统媒体控件（音量弹窗 / 锁屏里那一块）。
         /// <para>没有接上时什么都不做。曲名与界面上的「标题」取同一份兜底（标签 → 文件名）。</para>
         /// </summary>
-        private void UpdateSystemMediaControls(string? path, MediaTags? tags)
+        /// <param name="includeSidecarCover">
+        /// 要不要去找同目录的外挂封面。占位（标签还在读）时传 <c>false</c>：
+        /// 那时候要的是"把上一首那张摘掉"，而不是去枚举目录。
+        /// </param>
+        private void UpdateSystemMediaControls(string? path, MediaTags? tags, bool includeSidecarCover = true)
         {
             if (_smtc == null) return;
 
@@ -134,7 +250,7 @@ namespace 播放器
             if (tags is { HasCoverArt: true })
                 _smtc.SetCover(tags.CoverArt, tags.CoverMimeType);
             else
-                _smtc.SetCoverFile(SidecarCover.FindFor(path));
+                _smtc.SetCoverFile(includeSidecarCover ? SidecarCover.FindFor(path) : null);
 
             _smtc.SetTimeline(_engine.Length, _engine.Time);
         }
@@ -216,6 +332,21 @@ namespace 播放器
             if (index < 0 || index >= lyrics.Lines.Count) return null;
 
             return lyrics.Lines[index].Text;
+        }
+
+        /// <summary>
+        /// 占位时的「媒体信息」页：只说"在读"和"在读哪个文件"。
+        /// <para>刻意不调 <see cref="BuildInfoRows"/>：那里面会算文件大小、查外挂封面，
+        /// 占位期间不该在界面线程上碰磁盘。</para>
+        /// </summary>
+        internal static IReadOnlyList<(string Name, string Value)> BuildPendingInfoRows(string? path)
+        {
+            var rows = new List<(string, string)> { ("状态", CoverView.PendingText) };
+
+            var name = path == null ? null : Path.GetFileName(path);
+            if (!string.IsNullOrEmpty(name)) rows.Add(("文件", name!));
+
+            return rows;
         }
 
         /// <summary>组装「媒体信息」页的内容。</summary>

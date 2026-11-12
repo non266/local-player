@@ -103,14 +103,16 @@ namespace 播放器.Ui
         public VideoToolsView VideoTools => _videoTools;
 
         /// <summary>替换当前曲目的全部内容。</summary>
+        /// <param name="pending">标签还在读（1.19.0）：封面页先写「正在读取标签…」、封面留空。</param>
         public void ShowTrack(
             string? path,
             MediaTags? tags,
             LyricsDocument lyrics,
-            IReadOnlyList<(string Name, string Value)> infoRows)
+            IReadOnlyList<(string Name, string Value)> infoRows,
+            bool pending = false)
         {
             _lyrics.SetDocument(lyrics);
-            _cover.ShowTrack(path, tags);
+            _cover.ShowTrack(path, tags, pending);
             _info.SetRows(infoRows);
         }
 

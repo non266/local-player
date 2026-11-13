@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace 播放器.Core
@@ -96,6 +97,44 @@ namespace 播放器.Core
 
         /// <summary>既没有时间轴也没有正文。</summary>
         public bool IsEmpty => _lines.Length == 0 && string.IsNullOrWhiteSpace(PlainText);
+
+        /// <summary>
+        /// 把解析结果重新写成一段 LRC 文本（带时间轴的那份；纯文本歌词原样返回）。
+        /// <para>
+        /// 1.20.0 的在线缓存用它落盘：时间轴已经应用过 <c>[offset:]</c>，这里写的是
+        /// <b>生效之后</b>的时刻，再 <see cref="Parse"/> 回来时间轴完全一致
+        /// （毫秒精度，逐行往返不丢）。
+        /// </para>
+        /// </summary>
+        public string ToLrcText()
+        {
+            if (_lines.Length == 0) return PlainText;
+
+            var builder = new StringBuilder();
+
+            foreach (var line in _lines)
+            {
+                var time = line.Time < TimeSpan.Zero ? TimeSpan.Zero : line.Time;
+
+                builder.Append('[');
+
+                if (time.TotalHours >= 1)
+                {
+                    builder.Append((int)time.TotalHours).Append(':')
+                        .Append(time.Minutes.ToString("00", CultureInfo.InvariantCulture)).Append(':');
+                }
+                else
+                {
+                    builder.Append(((int)time.TotalMinutes).ToString("00", CultureInfo.InvariantCulture)).Append(':');
+                }
+
+                builder.Append(time.Seconds.ToString("00", CultureInfo.InvariantCulture)).Append('.')
+                    .Append(time.Milliseconds.ToString("000", CultureInfo.InvariantCulture)).Append(']')
+                    .Append(line.Text).Append('\n');
+            }
+
+            return builder.ToString();
+        }
 
         /// <summary>
         /// 解析歌词文本。

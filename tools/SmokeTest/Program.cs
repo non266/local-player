@@ -18,7 +18,7 @@ namespace SmokeTest
     /// </summary>
     internal static partial class Program
     {
-        private const int StepCount = 31;
+        private const int StepCount = 32;
 
         /// <summary>一步检查：名字用于筛选，<c>Needs</c> 声明它依赖的前置检查。</summary>
         private sealed class SmokeStep
@@ -41,6 +41,14 @@ namespace SmokeTest
         private static int Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+            // 播放器_TEST_CRASHDUMP 的探针子进程：故意在原生层崩掉，用来验 WER 到底写不写转储。
+            // 必须在动数据目录 / 建窗口之前——它连一行"开始跑"都不该留下。
+            if (args.Length > 0 && string.Equals(args[0], "--crash", StringComparison.Ordinal))
+            {
+                CrashForProbe();
+                return 0;
+            }
 
             // 可选筛选：只跑名字里含这个关键字的检查（连它依赖的前置检查一起）。
             // 全量一次 50 秒，只改了一个功能时没必要每次都等；能单独跑也逼着每一步
@@ -106,7 +114,8 @@ namespace SmokeTest
                 new SmokeStep("扫描上限与取消", CheckScanLimitsAndCancel),
                 new SmokeStep("探测去重与有界", CheckProbeDedupeAndBounds),
                 new SmokeStep("大列表排序", CheckSortAndPaint),
-                new SmokeStep("切歌时的等待", CheckMetadataPending)
+                new SmokeStep("切歌时的等待", CheckMetadataPending),
+                new SmokeStep("在线歌词缓存", CheckOnlineCache)
             };
 
             var selected = SelectSteps(steps, filter);

@@ -1,4 +1,4 @@
-﻿; 全能本地播放器 —— Inno Setup 6 脚本
+; 全能本地播放器 —— Inno Setup 6 脚本
 ;
 ; 由 tools\pack.ps1 编译（别手工双击这个文件）：脚本会被复制到临时目录再编译，
 ; 所以这里除了同目录的 ChineseSimplified.isl，其它路径一律通过 /D 传进来。
@@ -124,3 +124,17 @@ Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; F
 [UninstallDelete]
 ; 在安装目录里跑过冒烟测试的话会留下这个隔离数据目录（正常使用不会有）
 Type: filesandordirs; Name: "{app}\smoke-data"
+
+[Code]
+{ 1.20.0：崩溃转储的开关写在 HKCU 的 WER LocalDumps 下（不需要管理员），
+  卸载要把这一支撤掉，否则"卸载干净"这条验收就不再成立。
+  ⚠ %AppData%\播放器 仍然一个字节都不碰：设置 / 历史 / 在线缓存 / 方案都在那儿；
+  转储本身（%LOCALAPPDATA%\CrashDumps）也不删——那是可能还要发给别人分析的现场。 }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    RegDeleteKeyIncludingSubkeys(
+      HKCU, 'Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\播放器.exe');
+  end;
+end;

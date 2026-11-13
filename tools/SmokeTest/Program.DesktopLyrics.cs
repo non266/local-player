@@ -56,6 +56,8 @@ namespace SmokeTest
                     Journal($"第15步分段：主窗体创建 + 读歌词 {sectionClock.ElapsedMilliseconds} ms");
                     sectionClock.Restart();
 
+                    if (!CheckDesktopLyricsMenuDecision()) return false;
+
                     if (!CheckDesktopLyrics(form, lyrics)) return false;
 
                     Journal($"第15步分段：桌面歌词各项检查 {sectionClock.ElapsedMilliseconds} ms");

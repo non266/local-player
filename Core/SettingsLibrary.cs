@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Nodes;
 
 namespace 播放器.Core
 {
@@ -386,7 +387,21 @@ namespace 播放器.Core
 
             try
             {
-                settings.SaveTo(destinationPath);
+                // 导出是**故意**写成可携带的：这份文件的目的就是拿到别的机器 / 别的 Windows
+                // 用户下导入，所以鉴权密钥在这里必须是明文（密文换了地方解不开）。
+                // 方案库（Save / 导入）走的是 AppSettings.SaveTo，那边一律密文。
+                var node = JsonNode.Parse(settings.ToJson())?.AsObject();
+
+                if (node != null)
+                {
+                    node["LrcApiToken"] = settings.LrcApiToken;
+                    SafeFile.WriteAllText(destinationPath, node.ToJsonString());
+                }
+                else
+                {
+                    settings.SaveTo(destinationPath);
+                }
+
                 return true;
             }
             catch (Exception ex)

@@ -258,6 +258,10 @@ namespace 播放器
                 // 日志落盘开关来自设置（Program 启动时先按默认开着，这里按用户的选择纠正）
                 AppLog.SetFileOutput(_settings.DiagnosticLog);
 
+                // 1.20.0：崩溃转储跟诊断日志同一个开关——要「查得下去」才留证据，
+                // 不留的话连 HKCU 下那个键都不写（不做"偷偷注册"的事）。
+                CrashDump.Sync(_settings.DiagnosticLog, CrashDump.ProductExeName);
+
                 if (_menuLogEnabled != null) _menuLogEnabled.Checked = _settings.DiagnosticLog;
 
                 ApplyRepeatModeToMenu(_settings.RepeatMode);
@@ -339,6 +343,25 @@ namespace 播放器
             // 界面上来了再核对"上次那些文件还在不在"：网络盘离线时它会卡在 SMB 超时上，
             // 但那不该挡着窗口出来（见 RestoreSession 的说明）。
             CheckRestoredFilesInBackground(_restoredSessionFiles);
+
+            // 1.20.0：上次要是没正常退出，就在这里说一句（只报一次，见 CrashDump）。
+            // 放在最后：前面的启动步骤可能会改状态栏，这一句不该被它们盖掉。
+            AnnouncePendingCrash();
+        }
+
+        /// <summary>
+        /// 把"上次没有正常退出"摆到状态栏上。
+        /// <para>为什么不弹对话框：它多半发生在用户只想听歌的时候，弹窗只会添堵；
+        /// 但也不能不说——静默死过一次和从没死过，对排查来说是两件完全不同的事。</para>
+        /// </summary>
+        private void AnnouncePendingCrash()
+        {
+            var notice = CrashDump.PendingCrashNotice();
+
+            if (notice == null) return;
+
+            AppLog.Warn(notice);
+            SetStatus(notice);
         }
 
         /// <summary>

@@ -35,11 +35,23 @@ namespace 播放器
 
         private const string OnlineLookupTokenTag = "online-lookup-token";
 
+        private const string OnlineLookupRelookupTag = "online-lookup-relookup";
+
+        private const string OnlineLookupClearCacheTag = "online-lookup-clear-cache";
+
+        /// <summary>
+        /// 在线歌词与封面的磁盘缓存（1.20.0）：重启之后同一首不用再联网。
+        /// <para>放在数据目录下（<c>%AppData%\播放器\online-cache</c>），跟着
+        /// <c>播放器_DATA_DIR</c> 走，所以冒烟测试天然隔离在自己的临时目录里。</para>
+        /// </summary>
+        private readonly OnlineCache _onlineCache =
+            new OnlineCache(Path.Combine(AppSettings.SettingsDirectory, "online-cache"));
+
         /// <summary>
         /// 在线歌词与封面：会话缓存、要不要联网、取消、请求编排都在它里面
         /// （见 <see cref="OnlineLyricsService"/>）。窗体只负责菜单、对话框和"把结果画出来"。
         /// </summary>
-        private readonly OnlineLyricsService _online = new OnlineLyricsService(HasSidecarCover);
+        private readonly OnlineLyricsService _online;
 
         /// <summary>
         /// 只读入口，给冒烟测试用（主工程里有 <c>InternalsVisibleTo("SmokeTest")</c>）。
@@ -50,10 +62,15 @@ namespace 播放器
         /// </summary>
         internal OnlineLyricsService Online => _online;
 
+        /// <summary>磁盘缓存的只读入口（冒烟测试用它核对"落盘了没有、清空有没有清掉"）。</summary>
+        internal OnlineCache OnlineCache => _onlineCache;
+
         private ToolStripMenuItem? _menuOnlineLookup;
         private ToolStripMenuItem? _menuOnlineLookupEnabled;
         private ToolStripMenuItem? _menuOnlineLookupLyrics;
         private ToolStripMenuItem? _menuOnlineLookupCover;
+        private ToolStripMenuItem? _menuOnlineLookupRelookup;
+        private ToolStripMenuItem? _menuOnlineLookupClearCache;
 
         /// <summary>只读入口：视图菜单里的「在线歌词与封面」（给冒烟测试用）。</summary>
         internal ToolStripMenuItem? MenuOnlineLookup => _menuOnlineLookup;
@@ -81,6 +98,19 @@ namespace 播放器
             _menuOnlineLookupCover = new ToolStripMenuItem("获取当前曲目的封面");
             _menuOnlineLookupCover.Click += (s, e) => LookupCurrentTrackOnline(lyrics: false, cover: true);
 
+            // 1.20.0：磁盘缓存有了"旧"的可能（挑错了版本、服务端换了内容），得给一条重来的路
+            _menuOnlineLookupRelookup = new ToolStripMenuItem("重新获取当前曲目（忽略缓存）")
+            {
+                Tag = OnlineLookupRelookupTag
+            };
+            _menuOnlineLookupRelookup.Click += (s, e) => RelookupCurrentTrackIgnoringCache();
+
+            _menuOnlineLookupClearCache = new ToolStripMenuItem("清空在线缓存…")
+            {
+                Tag = OnlineLookupClearCacheTag
+            };
+            _menuOnlineLookupClearCache.Click += (s, e) => ClearOnlineCache(confirm: true);
+
             var address = new ToolStripMenuItem("服务地址…") { Tag = OnlineLookupAddressTag };
             address.Click += (s, e) => EditLrcApiBaseUrl();
 
@@ -94,6 +124,8 @@ namespace 播放器
             _menuOnlineLookup.DropDownItems.Add(new ToolStripSeparator());
             _menuOnlineLookup.DropDownItems.Add(_menuOnlineLookupLyrics);
             _menuOnlineLookup.DropDownItems.Add(_menuOnlineLookupCover);
+            _menuOnlineLookup.DropDownItems.Add(_menuOnlineLookupRelookup);
+            _menuOnlineLookup.DropDownItems.Add(_menuOnlineLookupClearCache);
             _menuOnlineLookup.DropDownItems.Add(new ToolStripSeparator());
             _menuOnlineLookup.DropDownItems.Add(address);
             _menuOnlineLookup.DropDownItems.Add(token);
@@ -136,6 +168,18 @@ namespace 播放器
 
             if (_menuOnlineLookupLyrics != null) _menuOnlineLookupLyrics.Enabled = canLookup;
             if (_menuOnlineLookupCover != null) _menuOnlineLookupCover.Enabled = canLookup;
+            if (_menuOnlineLookupRelookup != null) _menuOnlineLookupRelookup.Enabled = canLookup;
+
+            if (_menuOnlineLookupClearCache != null)
+            {
+                var count = _online.CachedCount;
+
+                // 本来是空的就置灰：点一下什么都不发生，不如直接说明
+                _menuOnlineLookupClearCache.Enabled = count > 0;
+                _menuOnlineLookupClearCache.Text = count > 0
+                    ? "清空在线缓存（" + count + " 条 · " + FormatCacheSize(_online.CachedBytes) + "）…"
+                    : "清空在线缓存（现在是空的）";
+            }
 
             foreach (var item in _menuOnlineLookup?.DropDownItems.OfType<ToolStripMenuItem>() ?? Enumerable.Empty<ToolStripMenuItem>())
             {
@@ -291,10 +335,14 @@ namespace 播放器
             {
                 // 缓存里有：直接补上，别为了已经有的东西再联网
                 if (lyrics.IsEmpty && _online.TryGetLyrics(path, out var cachedLyrics))
-                    ApplyOnlineLyrics(path, cachedLyrics!, "在线歌词（本次运行已取过）");
+                    ApplyOnlineLyrics(path, cachedLyrics!, _online.IsLyricsFromDisk(path)
+                        ? "在线歌词（本地缓存）"
+                        : "在线歌词（本次运行已取过）");
 
                 if (!tags.HasCoverArt && _online.TryGetCover(path, out var cachedCover, out var cachedMime))
-                    ApplyOnlineCover(path, cachedCover!, cachedMime ?? string.Empty, "在线封面（本次运行已取过）");
+                    ApplyOnlineCover(path, cachedCover!, cachedMime ?? string.Empty, _online.IsCoverFromDisk(path)
+                        ? "在线封面（本地缓存）"
+                        : "在线封面（本次运行已取过）");
 
                 return;
             }
@@ -321,6 +369,64 @@ namespace 播放器
 
             _ = RunOnlineLookupAsync(path, _track.Tags, lyrics, cover, silent);
         }
+
+        /// <summary>
+        /// 「重新获取当前曲目（忽略缓存）」：先把这一首的旧结果忘掉（内存 + 磁盘），再联网要一次。
+        /// <para>缓存挑错了版本、或者服务端换了内容时用这条；不点它的话，缓存会一直赢。</para>
+        /// </summary>
+        internal void RelookupCurrentTrackIgnoringCache()
+        {
+            var path = _track.Path;
+
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                SetStatus("当前没有可查询的本地曲目");
+                return;
+            }
+
+            _online.ClearEntry(path);
+            RefreshOnlineLookupMenu();
+
+            LookupCurrentTrackOnline(lyrics: true, cover: true, silent: false);
+        }
+
+        /// <summary>
+        /// 「清空在线缓存」：内存与磁盘一起清，状态栏说清删了多少。
+        /// <para><paramref name="confirm"/> 为 false 时不弹对话框（冒烟测试用）。</para>
+        /// </summary>
+        internal bool ClearOnlineCache(bool confirm)
+        {
+            var count = _online.CachedCount;
+            var bytes = _online.CachedBytes;
+
+            if (confirm)
+            {
+                var answer = MessageBox.Show(
+                    this,
+                    "要清空在线歌词与封面的缓存吗？\n\n"
+                    + $"现在有 {count} 条（{FormatCacheSize(bytes)}），都在数据目录的 online-cache 下。\n"
+                    + "（只删缓存副本，音乐文件不动；下次播到会重新联网要。）",
+                    "清空在线缓存",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (answer != DialogResult.Yes) return false;
+            }
+
+            _online.Clear();
+            RefreshOnlineLookupMenu();
+
+            SetStatus(count == 0
+                ? "在线缓存本来就是空的"
+                : $"已清空在线缓存：删掉 {count} 条（{FormatCacheSize(bytes)}）");
+
+            return true;
+        }
+
+        private static string FormatCacheSize(long bytes) =>
+            bytes < 1024 * 1024
+                ? (bytes < 1024 ? bytes + " 字节" : (bytes / 1024) + " KB")
+                : (bytes / (1024.0 * 1024.0)).ToString("0.0") + " MB";
 
         /// <summary>
         /// 这个是视频吗（视频不查歌词与封面，自动与手动都不查）。

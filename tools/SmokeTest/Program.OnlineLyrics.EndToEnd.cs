@@ -545,9 +545,11 @@ namespace SmokeTest
                     return false;
                 }
 
-                if (manualItems.Count != 2 || manualItems.Any(i => i.Enabled))
+                // 1.20.0 起是三项：获取歌词 / 获取封面 / 重新获取（忽略缓存），视频时都得灰
+                if (manualItems.Count != 3 || manualItems.Any(i => i.Enabled))
                 {
-                    Log(16, "在线歌词检查：视频时手动获取的两项还点得动（点下去只会捞回一首同名的歌）");
+                    Log(16, $"在线歌词检查：视频时手动获取的三项还点得动（{manualItems.Count} 项，"
+                            + "点下去只会捞回一首同名的歌）");
                     return false;
                 }
 

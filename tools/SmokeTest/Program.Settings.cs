@@ -1,5 +1,7 @@
 // 检查点 8：设置文件 JSON 往返、损坏内容降级。
 
+using System.Text.Json.Nodes;
+
 namespace SmokeTest
 {
     internal static partial class Program
@@ -72,6 +74,9 @@ namespace SmokeTest
                     return false;
                 }
 
+                // 1.20.0：密钥落盘必须是密文，而且"导出到文件"仍然要能拿到明文
+                if (!CheckTokenEncryption(folder)) return false;
+
                 // 损坏内容必须安全降级为默认值，而不是抛异常。
                 var broken = AppSettings.FromJson("{ this is not json }");
                 if (broken.Volume != new AppSettings().Volume)
@@ -98,6 +103,131 @@ namespace SmokeTest
             {
                 TryDeleteDirectory(folder);
             }
+        }
+
+        /// <summary>
+        /// 1.20.0：LrcApi 密钥落盘加密（DPAPI）+ 导出明文 + 老明文迁移 + 解不开时的降级。
+        /// </summary>
+        private static bool CheckTokenEncryption(string folder)
+        {
+            var secret = "smoke-token-1234";
+            var settings = new AppSettings { Volume = 42, LrcApiToken = secret };
+            var file = Path.Combine(folder, "token.json");
+
+            settings.SaveTo(file);
+            var text = File.ReadAllText(file);
+
+            if (text.Contains(secret, StringComparison.Ordinal))
+            {
+                Log(8, "设置文件里是明文密钥（期望 dpapi: 开头）");
+                return false;
+            }
+
+            if (!text.Contains("dpapi:", StringComparison.Ordinal))
+            {
+                Log(8, "设置文件里的密钥没有用 DPAPI 加密（没找到 dpapi: 前缀）");
+                return false;
+            }
+
+            if (AppSettings.LoadFrom(file).LrcApiToken != secret)
+            {
+                Log(8, "加密保存的密钥读回来不一样（解不开）");
+                return false;
+            }
+
+            // ---- 老文件（明文）：能读，而且要迁成密文 ----
+            var legacy = JsonNode.Parse(settings.ToJson())!.AsObject();
+            legacy["LrcApiToken"] = "legacy-plain-9999";
+
+            var legacyFile = Path.Combine(folder, "legacy-token.json");
+            SafeFile.WriteAllText(legacyFile, legacy.ToJsonString());
+
+            var loadedLegacy = AppSettings.LoadFrom(legacyFile);
+
+            if (loadedLegacy.LrcApiToken != "legacy-plain-9999")
+            {
+                Log(8, "老的明文密钥读不回来（迁移的第一步就丢了）");
+                return false;
+            }
+
+            loadedLegacy.SaveTo(legacyFile);
+            var migrated = File.ReadAllText(legacyFile);
+
+            if (migrated.Contains("legacy-plain-9999", StringComparison.Ordinal) ||
+                !migrated.Contains("dpapi:", StringComparison.Ordinal))
+            {
+                Log(8, "老的明文密钥没有被改成密文（下次保存就该迁掉）");
+                return false;
+            }
+
+            // ---- 解不开的密文（换 Windows 用户 / 换机器）：按未配置处理，别崩、别丢别的项 ----
+            var broken = JsonNode.Parse(settings.ToJson())!.AsObject();
+            broken["LrcApiToken"] = "dpapi:AAAA";
+
+            var brokenFile = Path.Combine(folder, "broken-token.json");
+            SafeFile.WriteAllText(brokenFile, broken.ToJsonString());
+
+            var loadedBroken = AppSettings.LoadFrom(brokenFile);
+
+            if (loadedBroken.LrcApiToken != string.Empty || loadedBroken.Volume != 42)
+            {
+                Log(8, $"解不开的密文没有被按未配置处理（密钥「{loadedBroken.LrcApiToken}」、音量 {loadedBroken.Volume}）");
+                return false;
+            }
+
+            // ---- DPAPI 没法用：退回明文（不丢密钥），日志里说清楚 ----
+            var fallbackFile = Path.Combine(folder, "fallback-token.json");
+
+            SecretProtector.FailForTest = true;
+            try
+            {
+                new AppSettings { LrcApiToken = "fallback-777" }.SaveTo(fallbackFile);
+            }
+            finally
+            {
+                SecretProtector.FailForTest = false;
+            }
+
+            if (!File.ReadAllText(fallbackFile).Contains("fallback-777", StringComparison.Ordinal))
+            {
+                Log(8, "这台机器加密不了的时候密钥丢了（该退回明文，至少别丢）");
+                return false;
+            }
+
+            // ---- 导出到文件：必须是能换机器用的明文 ----
+            var exportFile = Path.Combine(folder, "exported.json");
+
+            if (!SettingsLibrary.ExportTo(settings, exportFile, out var error))
+            {
+                Log(8, "导出设置失败：" + error);
+                return false;
+            }
+
+            var exported = File.ReadAllText(exportFile);
+
+            if (!exported.Contains(secret, StringComparison.Ordinal))
+            {
+                Log(8, "导出的设置文件里没有明文密钥（换台机器就解不开、用不了）");
+                return false;
+            }
+
+            if (AppSettings.LoadFrom(exportFile).LrcApiToken != secret)
+            {
+                Log(8, "导出的设置文件读回来密钥不对");
+                return false;
+            }
+
+            // ---- 日志里永远只有"有没有"，不许出现密钥本身 ----
+            var log = AppLog.SnapshotText();
+
+            if (log.Contains(secret, StringComparison.Ordinal) || log.Contains("fallback-777", StringComparison.Ordinal))
+            {
+                Log(8, "日志里出现了密钥明文（规矩是只记有没有配）");
+                return false;
+            }
+
+            Log(8, "密钥落盘是 DPAPI 密文、老明文会迁移、解不开时降级为空、导出文件仍是明文、日志不出现密钥");
+            return true;
         }
 
         /// <summary>

@@ -95,8 +95,9 @@ namespace 播放器.Core
     /// 也别指望它记"哪些源已经死了"——那是 <see cref="LrcApi"/> 的事（它自己按 endpoint + 源记着）。
     /// </para>
     /// <para>
-    /// <b>不写盘</b>：缓存只在本次运行有效（换回同一首歌不用重新联网），
-    /// 不会往用户的音乐目录里丢文件——想离线复用就自己另存一份 <c>.lrc</c>。
+    /// <b>写盘要从构造时传进来</b>：<see cref="OnlineCache"/> 负责"落在数据目录里、
+    /// 上限多大、怎么清"；这里只决定"什么时候读、什么时候写"。不传就是只在本次运行里用
+    /// （冒烟测试里那些纯服务检查就是这么造的）。<b>永远不往用户的音乐目录里丢文件。</b>
     /// </para>
     /// </summary>
     public sealed class OnlineLyricsService
@@ -115,16 +116,32 @@ namespace 播放器.Core
         private readonly Dictionary<string, (byte[] Data, string Mime)> _covers =
             new Dictionary<string, (byte[] Data, string Mime)>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// 这一批里有哪些歌词 / 封面是"从磁盘缓存读出来的"（不是这次联网要来的）。
+        /// <para>界面上要分别说「本地缓存」还是「本次运行已取过」——光看"有没有"分不出来：
+        /// <see cref="Decide"/> 为了回答"缺不缺"会先读一次磁盘，等到界面再取时就已经是内存命中。</para>
+        /// </summary>
+        private readonly HashSet<string> _lyricsFromDisk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private readonly HashSet<string> _coversFromDisk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+
         /// <summary>目录里有没有 <c>cover.jpg</c> 之类——那是文件系统的事，由调用方告诉它。</summary>
         private readonly Func<string, bool> _hasSidecarCover;
+
+        /// <summary>磁盘缓存（1.20.0）；<c>null</c> 就是"只在本次运行里用"（测试用这个形态）。</summary>
+        private readonly OnlineCache? _cache;
 
         /// <summary>当前这次查找的取消源：切歌 / 关掉开关时取消，别让旧结果盖到新歌上。</summary>
         private CancellationTokenSource? _cancellation;
 
         private string? _lastReport;
 
-        public OnlineLyricsService(Func<string, bool> hasSidecarCover) =>
+        public OnlineLyricsService(Func<string, bool> hasSidecarCover, OnlineCache? cache = null)
+        {
             _hasSidecarCover = hasSidecarCover ?? throw new ArgumentNullException(nameof(hasSidecarCover));
+            _cache = cache;
+        }
 
         /// <summary>本次运行缓存了多少首歌词。</summary>
         public int LyricsCount
@@ -145,16 +162,25 @@ namespace 播放器.Core
         }
 
         // =====================================================================
-        // 会话缓存（只在本次运行有效）
+        // 缓存：内存（本次运行）+ 磁盘（1.20.0，重启还能用）
         // =====================================================================
 
-        public bool HasLyrics(string path)
-        {
-            lock (_sync) return _lyrics.ContainsKey(path);
-        }
+        public bool HasLyrics(string path) => TryGetLyrics(path, out _);
 
-        public bool TryGetLyrics(string path, out LyricsDocument? document)
+        public bool TryGetLyrics(string path, out LyricsDocument? document) =>
+            TryGetLyrics(path, out document, out _);
+
+        /// <summary>
+        /// 取已经取过的歌词：先内存、再磁盘。
+        /// <para>
+        /// 磁盘命中会顺手填回内存——所以 <see cref="Decide"/> 问完"缺不缺"之后，
+        /// 界面那边再取一次走的是内存，不会重复读盘。
+        /// </para>
+        /// </summary>
+        public bool TryGetLyrics(string path, out LyricsDocument? document, out bool fromDisk)
         {
+            fromDisk = false;
+
             lock (_sync)
             {
                 if (_lyrics.TryGetValue(path, out var found))
@@ -162,6 +188,15 @@ namespace 播放器.Core
                     document = found;
                     return true;
                 }
+            }
+
+            if (_cache != null && _cache.TryReadLyrics(path, out var cached) && cached != null)
+            {
+                RememberLyrics(path, cached);
+
+                document = cached;
+                fromDisk = true;
+                return true;
             }
 
             document = null;
@@ -175,19 +210,36 @@ namespace 播放器.Core
                 if (_lyrics.Count >= LyricsCacheLimit) _lyrics.Clear();
 
                 _lyrics[path] = document;
+                _lyricsFromDisk.Remove(path);
 
                 // 有新的东西进来了：下次再失败还要说（不然一句"没找到"会被永远压住）
                 _lastReport = null;
             }
+
+            // 落盘放在锁外面：写文件不该挡住别的线程问"有没有"
+            _cache?.WriteLyrics(path, document);
         }
 
-        public bool HasCover(string path)
+        private void RememberLyrics(string path, LyricsDocument document)
         {
-            lock (_sync) return _covers.ContainsKey(path);
+            lock (_sync)
+            {
+                if (_lyrics.Count >= LyricsCacheLimit) _lyrics.Clear();
+
+                _lyrics[path] = document;
+                _lyricsFromDisk.Add(path);
+            }
         }
 
-        public bool TryGetCover(string path, out byte[]? data, out string? mime)
+        public bool HasCover(string path) => TryGetCover(path, out _, out _);
+
+        public bool TryGetCover(string path, out byte[]? data, out string? mime) =>
+            TryGetCover(path, out data, out mime, out _);
+
+        public bool TryGetCover(string path, out byte[]? data, out string? mime, out bool fromDisk)
         {
+            fromDisk = false;
+
             lock (_sync)
             {
                 if (_covers.TryGetValue(path, out var found))
@@ -196,6 +248,17 @@ namespace 播放器.Core
                     mime = found.Mime;
                     return true;
                 }
+            }
+
+            if (_cache != null && _cache.TryReadCover(path, out var cachedData, out var cachedMime) &&
+                cachedData != null)
+            {
+                RememberCover(path, cachedData, cachedMime ?? string.Empty);
+
+                data = cachedData;
+                mime = cachedMime ?? string.Empty;
+                fromDisk = true;
+                return true;
             }
 
             data = null;
@@ -210,31 +273,93 @@ namespace 播放器.Core
                 if (_covers.Count >= CoverCacheLimit) _covers.Clear();
 
                 _covers[path] = (data, mime);
+                _coversFromDisk.Remove(path);
                 _lastReport = null;
+            }
+
+            _cache?.WriteCover(path, data, mime);
+        }
+
+        private void RememberCover(string path, byte[] data, string mime)
+        {
+            lock (_sync)
+            {
+                if (_covers.Count >= CoverCacheLimit) _covers.Clear();
+
+                _covers[path] = (data, mime);
+                _coversFromDisk.Add(path);
             }
         }
 
-        /// <summary>忘掉本次运行取过的歌词（封面那份不动）。</summary>
+        /// <summary>忘掉取过的歌词（内存与磁盘都忘；封面那份不动）。</summary>
         public void ClearLyrics()
         {
-            lock (_sync) _lyrics.Clear();
+            lock (_sync)
+            {
+                _lyrics.Clear();
+                _lyricsFromDisk.Clear();
+            }
+
+            _cache?.ClearLyrics();
         }
 
-        /// <summary>忘掉本次运行取过的封面（歌词那份不动）。</summary>
+        /// <summary>忘掉取过的封面（内存与磁盘都忘；歌词那份不动）。</summary>
         public void ClearCovers()
         {
-            lock (_sync) _covers.Clear();
+            lock (_sync)
+            {
+                _covers.Clear();
+                _coversFromDisk.Clear();
+            }
+
+            _cache?.ClearCovers();
         }
 
-        /// <summary>两份缓存都忘掉。</summary>
+        /// <summary>两份缓存都忘掉（磁盘也清空）。</summary>
         public void Clear()
         {
             lock (_sync)
             {
                 _lyrics.Clear();
                 _covers.Clear();
+                _lyricsFromDisk.Clear();
+                _coversFromDisk.Clear();
             }
+
+            _cache?.Clear();
         }
+
+        /// <summary>只忘掉某一首（界面上「重新获取」用它：这条旧缓存不许再被用回来）。</summary>
+        public void ClearEntry(string path)
+        {
+            lock (_sync)
+            {
+                _lyrics.Remove(path);
+                _covers.Remove(path);
+                _lyricsFromDisk.Remove(path);
+                _coversFromDisk.Remove(path);
+            }
+
+            _cache?.ClearEntry(path);
+        }
+
+        /// <summary>这一首的歌词是不是从磁盘缓存拿到的（界面上用它选文案）。</summary>
+        public bool IsLyricsFromDisk(string path)
+        {
+            lock (_sync) return _lyricsFromDisk.Contains(path);
+        }
+
+        /// <summary>这一首的封面是不是从磁盘缓存拿到的。</summary>
+        public bool IsCoverFromDisk(string path)
+        {
+            lock (_sync) return _coversFromDisk.Contains(path);
+        }
+
+        /// <summary>磁盘缓存里有多少条。</summary>
+        public int CachedCount => _cache?.Count ?? 0;
+
+        /// <summary>磁盘缓存占多少字节。</summary>
+        public long CachedBytes => _cache?.Bytes ?? 0;
 
         // =====================================================================
         // 要不要联网

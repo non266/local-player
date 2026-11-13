@@ -191,7 +191,16 @@ namespace 播放器.Core
             };
 
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
                 Error("未处理的异常（进程即将结束）", e.ExceptionObject as Exception);
+
+                // 1.20.0：托管致命异常不一定能等到 WER 的转储，单独留一个标记，
+                // 下次启动至少能说"上次没正常退出"（见 CrashDump.PendingCrashNotice）。
+                CrashDump.MarkFatal(e.ExceptionObject as Exception is { } fatal
+                    ? fatal.GetType().Name + "：" + fatal.Message
+                    : "未处理的异常（进程即将结束）");
+            };
+
 
             System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (s, e) =>
             {

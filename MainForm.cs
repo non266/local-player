@@ -131,6 +131,8 @@ namespace 播放器
 
         private ToolStripMenuItem? _menuOpenLogFile;
 
+        private ToolStripMenuItem? _menuOpenDataFolder;
+
         private ToolStripMenuItem? _menuLogEnabled;
 
         // ---- 给冒烟测试的只读入口（主工程里有 InternalsVisibleTo("SmokeTest")）----
@@ -139,6 +141,8 @@ namespace 播放器
         internal ToolStripMenuItem? MenuViewLog => _menuViewLog;
 
         internal ToolStripMenuItem? MenuOpenLogFile => _menuOpenLogFile;
+
+        internal ToolStripMenuItem? MenuOpenDataFolder => _menuOpenDataFolder;
 
         internal ToolStripMenuItem? MenuLogEnabled => _menuLogEnabled;
 
@@ -193,6 +197,9 @@ namespace 播放器
             // 占位的宽限计时器：读得慢才把上一首的封面摘掉（见 MainForm.Metadata.cs）。
             _metadataPendingTimer = new System.Windows.Forms.Timer { Interval = MetadataPendingGraceMs };
             _metadataPendingTimer.Tick += OnMetadataPendingTimerTick;
+
+            // 在线歌词 / 封面：磁盘缓存跟着数据目录走（1.20.0），重启同一首不用再联网。
+            _online = new OnlineLyricsService(HasSidecarCover, _onlineCache);
 
             _startupArgs = startupArgs ?? Array.Empty<string>();
             _settings = AppSettings.Load();

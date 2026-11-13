@@ -91,8 +91,38 @@ namespace 播放器.Core
         /// 它只作为 <c>Authorization</c> 请求头发给用户自己配的那台服务，
         /// <b>不会</b>跟着封面图片的地址发给第三方主机（见 <c>LrcApi.ShouldSendToken</c>）。
         /// </para>
+        /// <para>
+        /// 1.20.0 起落盘时用 DPAPI 加密（见 <see cref="SecretProtector"/>）。
+        /// 内存里这里始终是明文——只有写进 JSON 的那一条走加密（<see cref="LrcApiTokenStored"/>）。
+        /// </para>
         /// </summary>
-        public string LrcApiToken { get; set; } = string.Empty;
+        [JsonIgnore]
+        public string LrcApiToken
+        {
+            get => _lrcApiToken;
+            set
+            {
+                _lrcApiToken = value ?? string.Empty;
+
+                // 值变了，缓存的那份密文就作废
+                _lrcApiTokenCipher = null;
+            }
+        }
+
+        private string _lrcApiToken = string.Empty;
+
+        private string? _lrcApiTokenCipher;
+
+        /// <summary>
+        /// 密钥在 JSON 里的样子：键名仍然是 <c>LrcApiToken</c>（老文件、方案分组、抢救清单
+        /// 全都按这个名字认），值却是 <c>dpapi:</c> 开头的密文。老文件里的明文读进来也认。
+        /// </summary>
+        [JsonPropertyName("LrcApiToken")]
+        public string LrcApiTokenStored
+        {
+            get => _lrcApiTokenCipher ??= SecretProtector.Protect(_lrcApiToken);
+            set => LrcApiToken = SecretProtector.Unprotect(value);
+        }
 
         /// <summary>播放列表的排序依据。</summary>
         public PlaylistSortField SortField { get; set; } = PlaylistSortField.AddedOrder;

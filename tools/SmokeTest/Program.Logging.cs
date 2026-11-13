@@ -144,10 +144,14 @@ namespace SmokeTest
                 // ---- 7) 主窗体上那三项要真的在「帮助」里，开关真的接上了设置 ----
                 if (!CheckLogMenuInMainForm()) return false;
 
+                // ---- 8) 崩溃取证：转储开关 + 「上次没有正常退出」只报一次 ----
+                if (!CheckCrashCapture()) return false;
+
                 Log(19, "日志与错误处理正常：内存里留最近 500 条（丢最老的）、能落盘到数据目录、"
                         + "超过 1 MB 会轮转成 .1、关掉之后磁盘上不留东西、"
                         + "被忽略的异常带上了理由与异常类型（47 处空 catch 都换成了这个），"
-                        + "「帮助」里能查看 / 打开日志而且开关真的接上了设置");
+                        + "「帮助」里能查看 / 打开日志 / 打开数据目录而且开关真的接上了设置，"
+                        + "崩溃转储的注册表开关跟着诊断日志走、上次没正常退出只提示一次");
                 return true;
             }
             finally
@@ -166,9 +170,10 @@ namespace SmokeTest
 
             if (form.MenuViewLog is not { } viewLog ||
                 form.MenuOpenLogFile is not { } openLog ||
+                form.MenuOpenDataFolder is not { } openData ||
                 form.MenuLogEnabled is not { } toggle)
             {
-                Log(19, "日志检查：主窗体上没有「查看日志 / 打开日志文件 / 记录诊断日志」");
+                Log(19, "日志检查：主窗体上没有「查看日志 / 打开日志文件 / 打开数据目录 / 记录诊断日志」");
                 return false;
             }
 
@@ -180,9 +185,10 @@ namespace SmokeTest
 
             var helpItems = help.DropDownItems.OfType<ToolStripMenuItem>().ToList();
 
-            if (!helpItems.Contains(viewLog) || !helpItems.Contains(openLog) || !helpItems.Contains(toggle))
+            if (!helpItems.Contains(viewLog) || !helpItems.Contains(openLog) ||
+                !helpItems.Contains(openData) || !helpItems.Contains(toggle))
             {
-                Log(19, $"日志检查：这三项不在「帮助」菜单里（{string.Join(" / ", helpItems.Select(i => i.Text))}）");
+                Log(19, $"日志检查：这四项不在「帮助」菜单里（{string.Join(" / ", helpItems.Select(i => i.Text))}）");
                 return false;
             }
 
@@ -231,6 +237,150 @@ namespace SmokeTest
 
             form.Close();
             PumpMessages(150);
+            return true;
+        }
+
+        /// <summary>
+        /// 1.20.0 崩溃取证：WER 本地转储的注册表开关、关掉要撤键，
+        /// 以及「上次没有正常退出」只提示一次（转储目录用临时目录，不碰真正的崩溃现场）。
+        /// </summary>
+        private static bool CheckCrashCapture()
+        {
+            var probe = "SmokeTest-crashdump-probe.exe";
+
+            // ---- 1) 注册表：开 / 读回 / 关 ----
+            CrashDump.Disable(probe, out _);
+
+            if (!CrashDump.Enable(probe, out var enableError))
+            {
+                Log(19, "崩溃取证：转储开关开不起来（" + enableError + "）");
+                return false;
+            }
+
+            try
+            {
+                if (!CrashDump.TryReadSettings(probe, out var dumpType, out var dumpCount) ||
+                    dumpType != 1 || dumpCount != 3)
+                {
+                    Log(19, $"崩溃取证：转储设置不对（DumpType={dumpType}、DumpCount={dumpCount}，期望 1 / 3）");
+                    return false;
+                }
+
+                CrashDump.Sync(false, probe);
+
+                if (CrashDump.IsEnabled(probe))
+                {
+                    Log(19, "崩溃取证：关掉诊断日志之后注册表里还留着转储键");
+                    return false;
+                }
+
+                CrashDump.Sync(true, probe);
+
+                if (!CrashDump.IsEnabled(probe))
+                {
+                    Log(19, "崩溃取证：再打开之后注册表里没有转储键（开关没接上）");
+                    return false;
+                }
+            }
+            finally
+            {
+                CrashDump.Disable(probe, out _);
+            }
+
+            // ---- 2) 「上次没有正常退出」：只报一次、干净退出不报 ----
+            var dumpsFolder = Path.Combine(AppContext.BaseDirectory, "smoke-dumps");
+            TryDeleteDirectory(dumpsFolder);
+            Directory.CreateDirectory(dumpsFolder);
+
+            var settingsFolder = AppSettings.SettingsDirectory;
+            var marker = Path.Combine(settingsFolder, "last-exit.txt");
+            var reported = Path.Combine(settingsFolder, "dumps-reported.txt");
+            var fatal = Path.Combine(settingsFolder, "fatal.txt");
+
+            var previousOverride = CrashDump.DumpsFolderOverride;
+            CrashDump.DumpsFolderOverride = dumpsFolder;
+
+            try
+            {
+                TryDelete(reported);
+                TryDelete(fatal);
+
+                var dump = Path.Combine(dumpsFolder, CrashDump.ProductExeName + ".4242.dmp");
+                File.WriteAllBytes(dump, new byte[] { 0x4D, 0x44, 0x4D, 0x50, 1, 2, 3 });
+                File.SetLastWriteTimeUtc(dump, DateTime.UtcNow);
+
+                File.WriteAllText(marker, DateTime.UtcNow.AddMinutes(-10).Ticks.ToString());
+
+                using (var form = new 播放器.MainForm(Array.Empty<string>()))
+                {
+                    form.Show();
+                    PumpMessages(400);
+
+                    if (!form.StatusText.Contains("没有正常退出", StringComparison.Ordinal))
+                    {
+                        Log(19, "崩溃取证：有转储却没提示上次没正常退出（状态栏：「" + form.StatusText + "」）");
+                        return false;
+                    }
+                }
+
+                // 同一次崩溃：第二次启动不该再报（记号故意再写成旧的，否则"报过没有"验不出来）
+                File.WriteAllText(marker, DateTime.UtcNow.AddMinutes(-10).Ticks.ToString());
+
+                using (var form = new 播放器.MainForm(Array.Empty<string>()))
+                {
+                    form.Show();
+                    PumpMessages(400);
+
+                    if (form.StatusText.Contains("没有正常退出", StringComparison.Ordinal))
+                    {
+                        Log(19, "崩溃取证：同一次崩溃启动两次报了两次");
+                        return false;
+                    }
+                }
+
+                // 干净退出记号比转储新：不该报
+                File.WriteAllText(marker, DateTime.UtcNow.AddMinutes(10).Ticks.ToString());
+
+                using (var form = new 播放器.MainForm(Array.Empty<string>()))
+                {
+                    form.Show();
+                    PumpMessages(400);
+
+                    if (form.StatusText.Contains("没有正常退出", StringComparison.Ordinal))
+                    {
+                        Log(19, "崩溃取证：干净退出之后还报「上次没有正常退出」");
+                        return false;
+                    }
+                }
+
+                // 托管致命异常（可能等不到 WER 转储）：fatal 标记也要能报
+                File.Delete(dump);
+                TryDelete(reported);
+                File.WriteAllText(fatal, DateTime.UtcNow.Ticks.ToString());
+                File.SetLastWriteTimeUtc(fatal, DateTime.UtcNow);
+                File.WriteAllText(marker, DateTime.UtcNow.AddMinutes(-10).Ticks.ToString());
+
+                using (var form = new 播放器.MainForm(Array.Empty<string>()))
+                {
+                    form.Show();
+                    PumpMessages(400);
+
+                    if (!form.StatusText.Contains("没有正常退出", StringComparison.Ordinal))
+                    {
+                        Log(19, "崩溃取证：托管致命异常留下的标记没有触发提示（状态栏：「" + form.StatusText + "」）");
+                        return false;
+                    }
+                }
+            }
+            finally
+            {
+                CrashDump.DumpsFolderOverride = previousOverride;
+                TryDeleteDirectory(dumpsFolder);
+                TryDelete(reported);
+                TryDelete(fatal);
+            }
+
+            Log(19, "崩溃取证正常：转储开关写的是迷你 / 3 份、关掉会撤键、有转储或致命标记时只提示一次、干净退出不吭声");
             return true;
         }
 

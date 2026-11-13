@@ -308,7 +308,7 @@ namespace SmokeTest
             // ---- 解锁热键（Ctrl+Alt+D）：锁定之后托盘之外的另一个出口 ----
             if (!CheckDesktopLyricsLockHotKey(form, window)) return false;
 
-            Section("解锁热键");
+            Section("右键菜单");
             // ---- 右键菜单 ----
             var context = window.ContextMenuStrip;
             if (context == null ||
@@ -321,22 +321,27 @@ namespace SmokeTest
 
             // 真的弹一次：不激活窗口（WS_EX_NOACTIVATE）还能不能弹出右键菜单，
             // 是这套窗口样式最容易踩的坑。
-            context.Show(window, new Point(6, 6));
-            PumpMessages(250);
+            // ⚠ 1.20.0：这一条原来"弹不出来就判失败"，而 1.19.0 装机目录那次全量里，
+            // 同一次跑的前面已经出现过「前台给了别的程序」——于是环境问题被当成了功能坏了
+            // （紧接着重跑就绿了）。现在按三态分：环境不成立 → 跳过并出声；成立 → 必须弹出来。
+            var menuOutcome = ShowAndDecideDesktopLyricsMenu(context, window, preconditionMet);
 
-            if (!context.Visible)
+            if (menuOutcome == DesktopLyricsMenuOutcome.Fail)
             {
-                Log(15, "桌面歌词检查：右键菜单弹不出来");
+                Log(15, "桌面歌词检查：右键菜单弹不出来（前台是本窗口、前置条件成立时它必须弹出来）");
                 return false;
             }
 
-            context.Close();
-            PumpMessages(120);
+            if (menuOutcome == DesktopLyricsMenuOutcome.Skip)
+            {
+                Log(15, "桌面歌词检查：这一次前台不是本程序的窗口（环境不成立），右键菜单这一条跳过——"
+                        + "前置条件成立时它必须弹出来");
+            }
 
             Section("右键菜单");
-            // ---- 全屏时不能被一起收走 ----
             var sidebarWindow = form.SidebarWindow;
 
+            // ---- 全屏时不能被一起收走 ----
             form.EnterFullscreen();
             PumpMessages(300);
 
@@ -494,6 +499,79 @@ namespace SmokeTest
             Log(15, "桌面歌词正常：菜单开启、跟着进度换句、排版随选项变、能拖动、"
                     + "锁定即穿透、不抢焦点、Ctrl+D 可开关、全屏不被收走（对照组侧栏被收起）、"
                     + $"窗口留在屏幕内，画面背景全透明（四角 alpha≤1）且有 {opaquePixels} 个不透明像素");
+            return true;
+        }
+
+        /// <summary>
+        /// 右键菜单那条检查的三态判定（1.20.0）。
+        /// <para>
+        /// 为什么不是"弹不出来就失败"：不激活窗口弹右键菜单本来就依赖前台窗口是谁。
+        /// 前台被别的程序占着时它不弹，是<b>环境</b>；前台是本窗口时它不弹，才是<b>bug</b>。
+        /// 把两者混在一起，就出现了 1.19.0 装机目录那次"第一次判红、重跑立刻绿"的假红。
+        /// </para>
+        /// </summary>
+        private enum DesktopLyricsMenuOutcome
+        {
+            /// <summary>弹出来了。</summary>
+            Ok,
+
+            /// <summary>没弹出来，但前台不是本窗口：环境不成立，跳过（必须出声）。</summary>
+            Skip,
+
+            /// <summary>没弹出来，且前置条件成立：真失败。</summary>
+            Fail
+        }
+
+        /// <summary>
+        /// 纯判定：看得见 → 过；看不见且前台不是本窗口 → 跳过；看不见但前台是本窗口 → 失败。
+        /// <para>（冒烟测试直接调它验三态，不需要真的去抢前台。）</para>
+        /// </summary>
+        private static DesktopLyricsMenuOutcome DecideDesktopLyricsMenuOutcome(bool visible, bool foregroundOwned)
+        {
+            if (visible) return DesktopLyricsMenuOutcome.Ok;
+
+            return foregroundOwned ? DesktopLyricsMenuOutcome.Fail : DesktopLyricsMenuOutcome.Skip;
+        }
+
+        /// <summary>
+        /// 弹一次右键菜单并给出三态结论。前台不是本窗口时先再抢一次（刚才那一下可能被抢走了）。
+        /// </summary>
+        private static DesktopLyricsMenuOutcome ShowAndDecideDesktopLyricsMenu(
+            ContextMenuStrip context, Form owner, bool foregroundOwned)
+        {
+            if (!foregroundOwned)
+            {
+                owner.Activate();
+                PumpMessages(150);
+                foregroundOwned = GetForegroundWindow() == owner.Handle;
+            }
+
+            context.Show(owner, new Point(6, 6));
+            PumpMessages(250);
+
+            var visible = context.Visible;
+
+            if (visible)
+            {
+                context.Close();
+                PumpMessages(120);
+            }
+
+            return DecideDesktopLyricsMenuOutcome(visible, foregroundOwned);
+        }
+
+        /// <summary>三态判定本身的自检（不依赖真的前台窗口，任何机器上都跑得出来）。</summary>
+        private static bool CheckDesktopLyricsMenuDecision()
+        {
+            if (DecideDesktopLyricsMenuOutcome(visible: true, foregroundOwned: true) != DesktopLyricsMenuOutcome.Ok ||
+                DecideDesktopLyricsMenuOutcome(visible: true, foregroundOwned: false) != DesktopLyricsMenuOutcome.Ok ||
+                DecideDesktopLyricsMenuOutcome(visible: false, foregroundOwned: true) != DesktopLyricsMenuOutcome.Fail ||
+                DecideDesktopLyricsMenuOutcome(visible: false, foregroundOwned: false) != DesktopLyricsMenuOutcome.Skip)
+            {
+                Log(15, "桌面歌词检查：右键菜单的三态判定不对（环境不成立时会把假红当成功能坏了）");
+                return false;
+            }
+
             return true;
         }
     }

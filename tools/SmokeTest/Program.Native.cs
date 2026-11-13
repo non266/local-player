@@ -307,6 +307,16 @@ namespace SmokeTest
         [DllImport("user32.dll")]
         private static extern IntPtr WindowFromPoint(Point point);
 
+        /// <summary>
+        /// 故意抛一个原生访问违例：给 <c>--crash</c> 子进程用，验 WER 的本地转储到底写不写。
+        /// <para>走 <c>RaiseException</c> 而不是 <see cref="Environment.FailFast(string)"/>：实测这台机器上
+        /// FailFast 也会被 WER 记成 APPCRASH 并写转储，但 0xC0000005 才是 M8 那一族真正的形状。</para>
+        /// </summary>
+        private static void CrashForProbe() => RaiseException(0xC0000005, 0, 0, IntPtr.Zero);
+
+        [DllImport("kernel32.dll")]
+        private static extern void RaiseException(uint code, uint flags, int arguments, IntPtr argumentsPtr);
+
         private const uint MouseEventLeftDown = 0x0002;
 
         private const uint MouseEventLeftUp = 0x0004;

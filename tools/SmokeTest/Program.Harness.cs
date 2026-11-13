@@ -8,6 +8,9 @@ namespace SmokeTest
         // 辅助
         // -----------------------------------------------------------------
 
+        /// <summary>检查内部的小节分隔（只影响输出的可读性，不参与判定）。</summary>
+        private static void Section(string name) => Console.WriteLine("  · " + name);
+
         private static void Log(int step, string message)
         {
             Console.WriteLine($"[{step}/{StepCount}] {message}");
@@ -67,6 +70,9 @@ namespace SmokeTest
 
         /// <summary>主窗体的在线查找服务（测试要"假装这次运行还没取过"时清它的缓存）。</summary>
         private static OnlineLyricsService OnlineOf(Form form) => ((播放器.MainForm)form).Online;
+
+        /// <summary>主窗体的在线缓存（磁盘那份：数条数 / 核对清空和落盘）。</summary>
+        private static OnlineCache OnlineCacheOf(Form form) => ((播放器.MainForm)form).OnlineCache;
 
         /// <summary>主窗体的歌单库状态（当前歌单名 / 未保存标记 / 替换前的询问规则）。</summary>
         private static PlaylistLibraryController PlaylistsOf(Form form) => ((播放器.MainForm)form).Playlists;

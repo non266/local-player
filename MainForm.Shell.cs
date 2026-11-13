@@ -215,6 +215,10 @@ namespace 播放器
             _menuOpenLogFile = new ToolStripMenuItem("打开日志文件");
             _menuOpenLogFile.Click += (s, e) => OpenLogFile();
 
+            // 1.20.0：转储 / 在线缓存 / 日志都在这个目录里，崩溃提示里指的也是它
+            _menuOpenDataFolder = new ToolStripMenuItem("打开数据目录");
+            _menuOpenDataFolder.Click += (s, e) => OpenDataFolder();
+
             _menuLogEnabled = new ToolStripMenuItem("记录诊断日志")
             {
                 CheckOnClick = true,
@@ -224,6 +228,9 @@ namespace 播放器
             {
                 _settings.DiagnosticLog = _menuLogEnabled.Checked;
                 AppLog.SetFileOutput(_settings.DiagnosticLog);
+
+                // 1.20.0：转储的开关跟着它走（关掉就把 HKCU 下那个键也撤掉）
+                CrashDump.Sync(_settings.DiagnosticLog, CrashDump.ProductExeName);
 
                 SetStatus(_settings.DiagnosticLog
                     ? "已开始记录诊断日志：" + AppLog.DefaultFilePath
@@ -237,6 +244,7 @@ namespace 播放器
             if (insertAt < 0)
             {
                 menuHelp.DropDownItems.Insert(0, _menuLogEnabled);
+                menuHelp.DropDownItems.Insert(0, _menuOpenDataFolder);
                 menuHelp.DropDownItems.Insert(0, _menuOpenLogFile);
                 menuHelp.DropDownItems.Insert(0, _menuViewLog);
             }
@@ -245,8 +253,32 @@ namespace 播放器
                 // 快捷键说明 / 关于 之后，另起一组
                 menuHelp.DropDownItems.Insert(insertAt, _menuViewLog);
                 menuHelp.DropDownItems.Insert(insertAt + 1, _menuOpenLogFile);
-                menuHelp.DropDownItems.Insert(insertAt + 2, _menuLogEnabled);
-                menuHelp.DropDownItems.Insert(insertAt + 3, new ToolStripSeparator());
+                menuHelp.DropDownItems.Insert(insertAt + 2, _menuOpenDataFolder);
+                menuHelp.DropDownItems.Insert(insertAt + 3, _menuLogEnabled);
+                menuHelp.DropDownItems.Insert(insertAt + 4, new ToolStripSeparator());
+            }
+        }
+
+        /// <summary>打开数据目录（设置 / 日志 / 在线缓存 / 设置方案都在这里）。</summary>
+        private void OpenDataFolder()
+        {
+            var folder = AppSettings.SettingsDirectory;
+
+            try
+            {
+                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"")
+                {
+                    UseShellExecute = true
+                });
+
+                SetStatus("数据目录：" + folder);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn("打开数据目录失败", ex);
+                ShowError("打开数据目录失败", ex);
             }
         }
 
@@ -333,6 +365,10 @@ namespace 播放器
             _shutdown = true;
 
             FlushHistory();
+
+            // 1.20.0：留一个"这次是正常退出"的记号。下次启动拿它和崩溃转储比时间，
+            // 比它新的转储才算"上次没正常退出"（见 CrashDump）。
+            CrashDump.MarkCleanExit();
 
             _disposed = true;
 

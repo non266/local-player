@@ -508,7 +508,13 @@ namespace 播放器
                 return false;
             }
 
-            SetStatus("设置已导出：" + path);
+            // 1.20.0：密钥平时是 DPAPI 密文，但导出的这份是明文（为了能换机器导入）。
+            // 这一步必须说出来，不然用户会把"带密钥的设置文件"随手转发。
+            var hasToken = LrcApi.NormalizeToken(_settings.LrcApiToken) != null;
+
+            SetStatus(hasToken
+                ? "设置已导出（文件里含明文鉴权密钥，注意保管）：" + path
+                : "设置已导出：" + path);
             return true;
         }
 

@@ -9,6 +9,7 @@
 //   ④ 在飞上限 4 条（第 5 条立刻说「太多」）；
 //   ⑤ 探测跑在专用线程上（不占线程池的工作线程）。
 
+using System.Diagnostics;
 using System.Threading.Tasks;
 
 namespace SmokeTest
@@ -262,6 +263,76 @@ namespace SmokeTest
                     }
                 }
 
+                // ---- 8：崩溃转储到底写不写（gated，只量不判） ----
+                // 1.20.0 的取证靠的是 WER 的「本地转储」：我们只往 HKCU 写 DumpType / DumpCount，
+                // 路径由 Windows 给（实测这台机器上自定 DumpFolder 不生效，见 CrashDump 的文件头）。
+                // 这一段用一个**故意崩掉**的子进程验"这条路真的通"，默认不跑：它会真的崩一次进程。
+                if (Environment.GetEnvironmentVariable("播放器_TEST_CRASHDUMP") is { Length: > 0 } crashRaw)
+                {
+                    var waitSeconds = int.TryParse(crashRaw, out var dumpWait) && dumpWait > 0 ? dumpWait : 15;
+
+                    var appHost = Path.Combine(AppContext.BaseDirectory, "SmokeTest.exe");
+
+                    if (!File.Exists(appHost))
+                    {
+                        Log(29, "崩溃转储探针：找不到 SmokeTest.exe（用 dotnet 跑的时候它也在输出目录里），跳过");
+                    }
+                    else
+                    {
+                        var probeName = Path.GetFileName(appHost);
+
+                        CrashDump.Disable(probeName, out _);
+
+                        if (!CrashDump.Enable(probeName, out var dumpError))
+                        {
+                            Log(29, "崩溃转储探针：注册不了转储开关（" + dumpError + "）");
+                        }
+                        else
+                        {
+                            try
+                            {
+                                var started = DateTime.UtcNow;
+
+                                using (var child = Process.Start(new ProcessStartInfo(appHost, "--crash")
+                                {
+                                    UseShellExecute = false
+                                }))
+                                {
+                                    child?.WaitForExit(10000);
+                                }
+
+                                string? dump = null;
+
+                                PumpUntil(
+                                    () => (dump = NewestDumpSince(started)) != null,
+                                    waitSeconds * 1000);
+
+                                Log(29, dump != null
+                                    ? "崩溃转储探针：子进程崩掉之后 Windows 写了转储（" + dump + "，"
+                                      + new FileInfo(dump).Length + " 字节）——WER 这条路是通的"
+                                    : $"崩溃转储探针：等了 {waitSeconds} 秒也没看到转储（"
+                                      + CrashDump.DumpsDirectory + "，现有 "
+                                      + (Directory.Exists(CrashDump.DumpsDirectory)
+                                          ? Directory.GetFiles(CrashDump.DumpsDirectory, "*.dmp").Length
+                                          : 0)
+                                      + $" 个 dmp；起点 {started:HH:mm:ss}）——WER 这条路没验通，如实记下");
+                            }
+                            finally
+                            {
+                                CrashDump.Disable(probeName, out _);
+
+                                // 只删这次探针产生的（别动真正的崩溃现场）
+                                foreach (var file in Directory.Exists(CrashDump.DumpsDirectory)
+                                             ? Directory.GetFiles(CrashDump.DumpsDirectory, probeName + ".*.dmp")
+                                             : Array.Empty<string>())
+                                {
+                                    TryDelete(file);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Log(29, "探测正常：同一路径只起一条、冷却期内不再问、冷却过去会重问、"
                         + "在飞最多 4 条、跑在专用线程上");
                 return true;
@@ -270,6 +341,25 @@ namespace SmokeTest
             {
                 Log(29, "探测去重与有界检查失败: " + ex);
                 return false;
+            }
+        }
+
+        /// <summary>转储目录里比 <paramref name="since"/> 新的那份 SmokeTest 转储（没有就 null）。</summary>
+        private static string? NewestDumpSince(DateTime since)
+        {
+            try
+            {
+                var folder = CrashDump.DumpsDirectory;
+                if (!Directory.Exists(folder)) return null;
+
+                return Directory.GetFiles(folder, "*.dmp")
+                    .Where(file => File.GetLastWriteTimeUtc(file) >= since)
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
+                    .FirstOrDefault();
+            }
+            catch (Exception)
+            {
+                return null;
             }
         }
     }

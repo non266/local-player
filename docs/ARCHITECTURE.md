@@ -11,13 +11,16 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 40,826 行 / **174 个文件** |
-| `Core/` | 13,870 行 / 75 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 42,094 行 / **177 个文件** |
+| `Core/` | 14,960 行 / 78 个文件 |
 | `Ui/` | 13,022 行 / 59 个文件 |
-| `MainForm*` 这一族 partial | 13,857 行 / **39 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 23,518 行 / 79 个文件 |
+| `MainForm*` 这一族 partial | 14,035 行 / **39 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 24,425 行 / 80 个文件 |
 
-> 数字最后一次量是在 **2026-11-12（1.19.0：切歌时的等待）**。
+> 数字最后一次量是在 **2026-11-13（1.20.0：在线缓存 / 密钥加密 / 崩溃取证）**。
+> 1.20.0 产品侧多出 `Core/OnlineCache`、`Core/SecretProtector`、`Core/CrashDump`（`MainForm.OnlineLyrics` /
+> `MainForm.Shell` / `MainForm.Startup` / `AppLog` / `AppSettings` / `SettingsLibrary` 接线）；
+> 冒烟多出 `Program.OnlineCache`（**第 32 项检查**，第 27 个运行步骤）。
 > 1.12.0 那轮产品侧多出 `Core/PlaybackCoordinator`（+`.AbLoop`）、`Core/PlaylistWorkspace`、
 > `Core/HistoryService`、`Core/MediaSession`（由 `TrackLyricsSession` 改名）、`Ui/PlayerCommand`、
 > `Ui/CommandBinder`、`Ui/IWindowSurfaceHost`、`Ui/WindowSurfaceController`、`Ui/VideoWindowModule`、
@@ -82,7 +85,7 @@ D9 | 冒烟测试里两个真实输入检查依赖桌面环境（真鼠标拖动
 
 1. ✅ **日志与错误处理**：`Core/AppLog.cs`（内存环形缓冲 500 条 + 落盘 + 1 MB 轮转 + 崩溃处理器）；
    47 处"决定不管"的异常全部换成 `AppLog.Swallowed("理由", ex)`，**空吞异常从 54 处降到 0**（只剩 `AppLog` 自己那两处：写日志失败不能再递归记日志）；
-   `帮助 → 查看日志… / 打开日志文件 / 记录诊断日志`；设置里加 `DiagnosticLog` 开关。
+   `帮助 → 查看日志… / 打开日志文件 / 打开数据目录 / 记录诊断日志`；设置里加 `DiagnosticLog` 开关（1.20.0 起它同时管崩溃转储开关）。
 2. ✅ **两处抖动检查**：字体样本改成确定性候选 + 撞车重试；真鼠标拖动加"光标是否静止"判据 + **判据自检**。
    关键是"**把夹具撞车和真 bug 分开判**"：
    - 族名压根没进应用的字体表（GDI+ 把改造过的字体并进了已装过的那个族）→ 夹具撞车，换样本；
@@ -710,11 +713,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 26 个运行步骤 / 31 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 27 个运行步骤 / 32 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（26 个运行步骤 / 31 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（27 个运行步骤 / 32 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -1283,3 +1286,79 @@ libvlc 的 vout 线程在 `MediaPlayer.Stop` 期间还在往那个 HWND 上画�
 - 两条过程教训（进维护手册坑表）：**变异备份只备份 / 只恢复被变异的那个文件**（这一轮把三个文件一起恢复，
   把备份之后才写的宽限计时器一起回退了）；**恢复之后必须 `-t:Rebuild`**（备份文件的修改时间比产物旧，
   增量构建会跳过，于是"恢复了"其实还在跑变异版）。
+---
+
+## 26. 在线歌词 / 封面的磁盘缓存（1.20.0）
+
+### 26.1 先量
+
+| 现象 | 数字 |
+| --- | --- |
+| 改之前第二次启动同一首，假服务器又收到几个请求 | **4 个**（单曲接口 / 旧版 `/lyrics` / 批量搜索 / 封面图），也就是"重启就重来一遍" |
+| 缓存原本在哪 | 两个内存字典，键是**曲目路径**（`OnlineLyricsService`），关程序即丢 |
+| 第二次启动（改之后） | **0 个请求**，歌词与封面都从 `online-cache` 出来 |
+
+### 26.2 设计
+
+- **`Core/OnlineCache`**：键 = `Path.GetFullPath` 统一大写之后的 SHA-256 前 32 位十六进制（和"按文件路径记录"的其他东西同一口径）。
+  一条一个 JSON（歌词存 LRC 原文 + 来源；封面存 base64 + mime），写入走 `SafeFile`（临时文件 + 改名覆盖）。
+- **读**：JSON 坏 / base64 坏 / 不是图片 / 解析出来是空歌词 → **删掉这条并返回没有**（由调用方重新联网）。
+  磁盘命中会顺手填回内存——所以 `Decide` 问完"缺不缺"之后界面再取是内存命中，不会重复读盘。
+- **写**：只在成功取回时写；写盘放在服务锁外面（文件 I/O 不挡其他线程问"有没有"）。失败只记一次日志。
+- **上限**：默认 128 MB，每次写完量一次，超了按 `LastWriteTimeUtc` 从最旧删到 75%；单张封面 > 4 MB 不落盘。
+- **两句话分得开**：`IsLyricsFromDisk` / `IsCoverFromDisk` 决定状态栏说「本地缓存」还是「本次运行已取过」——
+  只看"有没有"分不出来，因为 `Decide` 自己会先读一次磁盘。
+- **界面**：菜单加「重新获取当前曲目（忽略缓存）」（`ClearEntry` 后联网，**旧条目先忘掉**，新的失败也不会留着旧的）
+  与「清空在线缓存（N 条 · X MB）…」（确认框；测试用 `confirm:false`）。
+
+### 26.3 边界
+
+1. 键是路径，不是标签：文件挪走 / 改名后命中不到，旧条目占着空间直到被上限清掉。
+2. **不缓存"没找到"**：否则一次服务端抖动会让那一首永远不再重试。
+3. 缓存不加密（内容就是歌词与封面图）。
+4. 不会往媒体目录写任何文件（检查 16 的"没往媒体目录写文件"断言仍然绿）。
+
+### 26.4 测试
+
+- **第 32 项检查**（`Program.OnlineCache.cs`，第 27 个运行步骤）：第一次 4 个请求落盘 2 条 → 第二次 0 请求且时间轴逐行相同 →
+  坏文件回退并重写 → 清空（内存 + 磁盘）→ 重新获取写回 → 重新获取失败时旧条目清掉且失败不落盘 → 小上限按最旧先删。
+- **5 条变异**：不读磁盘 / 坏文件当有效 / 不清理上限 / 重新获取不清条目 / `ToLrcText` 丢时间轴，原文见 [1.20.0计划.md](1.20.0计划.md) §5。
+
+---
+
+## 27. 凭据与崩溃取证（1.20.0）
+
+### 27.1 密钥落盘（DPAPI）
+
+- `Core/SecretProtector`：`dpapi:` 前缀 + base64（`ProtectedData`，`CurrentUser` 作用域，固定 entropy）。
+  没有前缀的按明文读（老文件），带前缀解不开 → 空串 + 一次日志（别的用户 / 别的机器）。
+- **JSON 键名不变**：`AppSettings.LrcApiToken` 是 `[JsonIgnore]` 的明文，真正序列化的是
+  `[JsonPropertyName("LrcApiToken")] LrcApiTokenStored`（读时解密、写时加密）。所以方案分组、抢救清单、
+  `KeysOf` / `Merge` / `CountDifferences` 全都不用改。
+- **导出是例外**：`SettingsLibrary.ExportTo` 把那一项换回明文（导出就是为了换机器导入），
+  状态栏写着「文件里含明文鉴权密钥，注意保管」；导入两种都认，落盘自动变密文。
+- 加密不可用（DPAPI 故障）→ **退回明文 + 一次日志**，不丢用户填的密钥；日志里永远只有「有 / 无」。
+
+### 27.2 崩溃转储与"上次没正常退出"
+
+- **注册表**：`HKCU\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\播放器.exe`，
+  只写 `DumpType=1`（迷你）与 `DumpCount=3`，并把旧的 `DumpFolder` 删掉。跟 `DiagnosticLog` 开关走
+  （启动对齐一次、菜单切换对齐一次）。
+- **为什么没有自定目录**：实测这台机器上 HKCU 的 `DumpFolder` 不生效（三次崩溃都只出现在
+  `%LocalAppData%\CrashDumps`），删掉它才按默认位置出转储。所以路径交给 Windows。
+- **报告**：正常退出写 `last-exit.txt`；`AppLog` 的托管致命异常写 `fatal.txt`；启动时找
+  "比 last-exit 新、且比已报告时间新"的转储或 fatal，状态栏说一句并记下已报告——**同一份崩溃只报一次**。
+- **卸载**：安装器 `[Code]` 里 `RegDeleteKeyIncludingSubkeys` 删那支键；`%AppData%\播放器` 与
+  `%LocalAppData%\CrashDumps` 都不碰。
+- **探针**：`播放器_TEST_CRASHDUMP=秒数` 起一个 `SmokeTest.exe --crash`（`RaiseException(0xC0000005)`）子进程，
+  打印转储出没出来、多大、在哪。实测一次 **2,200,889 字节**；**注册之后 WER 不是立刻生效**（第一次探针等了 20 秒也没出，
+  过一会儿再跑就有），所以它是"只量不判"。
+
+### 27.3 测试
+
+- 密钥：第 4 项检查里的 `CheckTokenEncryption`（密文 / 迁移 / 解不开降级 / DPAPI 不可用退回明文 / 导出明文 / 日志无密钥）；
+  变异 C1a～C1d。
+- 转储：第 15 项检查里的 `CheckCrashCapture`（三值核对 / `Sync(false)` 撤键 / `Sync(true)` 再开 / 伪造转储只报一次 /
+  干净退出不报 / `fatal` 也报）；变异 C2a～C2d。
+- 测试可信度：桌面歌词右键菜单的三态判定（Ok / Skip / Fail）有纯函数自检；`foregroundOwned` 不成立时打印原因并跳过，
+  成立时仍硬失败；变异 D1。

@@ -13,6 +13,9 @@ namespace SmokeTest
         /// </summary>
         private static bool CheckFullscreenProgressBar()
         {
+            // 1.21.0：先把"环境不成立"与"功能坏了"的分界本身断言一遍。
+            if (!CheckFullscreenBarDecision()) return false;
+
             var wav = Path.Combine(AppContext.BaseDirectory, "fullscreen-bar.wav");
             WriteWav(wav, seconds: 60, frequency: 440);
 
@@ -132,10 +135,46 @@ namespace SmokeTest
                 var center = new Point(screen.Left + screen.Width / 2, screen.Top + screen.Height / 2);
                 form.NotifyFullscreenPointer(center);
 
-                if (!bar.Visible)
+                // 1.21.0 三态：1.20.0 的 release-check 里这一条红过一次
+                // （"鼠标再动一下之后它没有回来"），当时旁边有别的程序在抢前台；
+                // 现在最多试 3 次、每次先把主窗口抢回前台，仍然不回来才按前置条件判。
+                var visible = bar.Visible;
+
+                for (var attempt = 0; attempt < 3 && !visible; attempt++)
                 {
-                    Log(13, "全屏进度条：鼠标再动一下之后它没有回来");
+                    if (GetForegroundWindow() != form.Handle)
+                    {
+                        form.Activate();
+                        PumpMessages(150);
+                    }
+
+                    form.NotifyFullscreenPointer(center);
+                    PumpMessages(250);
+
+                    visible = bar.Visible;
+                }
+
+                var verdict = DecideFullscreenBarReturn(
+                    visible,
+                    form.IsFullscreen,
+                    form.Engine.HasMedia,
+                    form.Engine.IsPlaying,
+                    GetForegroundWindow() == form.Handle,
+                    out var reason);
+
+                if (verdict == FullscreenBarVerdict.Fail)
+                {
+                    Log(13, "全屏进度条：鼠标再动一下之后它没有回来"
+                            + $"（全屏={form.IsFullscreen}、有媒体={form.Engine.HasMedia}、"
+                            + $"在播={form.Engine.IsPlaying}、前台 0x{GetForegroundWindow().ToInt64():X}、"
+                            + $"窗口 0x{form.Handle.ToInt64():X}；{reason}）");
                     return false;
+                }
+
+                if (verdict == FullscreenBarVerdict.SkipEnvironment)
+                {
+                    Log(13, $"全屏进度条：「再动又出现」这一条这次不计——{reason}"
+                            + "（前置条件成立时它必须回来）");
                 }
 
                 if (GetForegroundWindow() == bar.Handle)
@@ -168,6 +207,113 @@ namespace SmokeTest
             {
                 TryDelete(wav);
             }
+        }
+
+        /// <summary>
+        /// 全屏进度条"收起来之后再动又出现"的三态判定（1.21.0）。
+        /// <para>
+        /// 1.20.0 的 release-check 里这一条红过一次：旁边有别的程序在抢前台，
+        /// 主窗口已经不是前台了，进度条按设计就不该再冒出来——那是<b>环境</b>。
+        /// 只有"还在全屏、媒体还在播、前台也是本程序，条却不回来"才是 <b>bug</b>。
+        /// </para>
+        /// </summary>
+        private enum FullscreenBarVerdict
+        {
+            /// <summary>进度条回来了。</summary>
+            Ok,
+
+            /// <summary>前置条件不成立（不在全屏 / 媒体不在了 / 前台不是本程序）：跳过并出声。</summary>
+            SkipEnvironment,
+
+            /// <summary>前置条件成立，条却没回来：真失败。</summary>
+            Fail
+        }
+
+        /// <summary>纯判定：不依赖真实前台，冒烟直接调它把三种结论都走一遍。</summary>
+        private static FullscreenBarVerdict DecideFullscreenBarReturn(
+            bool visible,
+            bool isFullscreen,
+            bool hasMedia,
+            bool isPlaying,
+            bool foregroundOwned,
+            out string reason)
+        {
+            reason = string.Empty;
+
+            if (visible) return FullscreenBarVerdict.Ok;
+
+            if (!isFullscreen)
+            {
+                reason = "已经不是全屏了";
+                return FullscreenBarVerdict.SkipEnvironment;
+            }
+
+            if (!hasMedia)
+            {
+                reason = "媒体已经不在了";
+                return FullscreenBarVerdict.SkipEnvironment;
+            }
+
+            if (!isPlaying)
+            {
+                reason = "媒体不在播了";
+                return FullscreenBarVerdict.SkipEnvironment;
+            }
+
+            if (!foregroundOwned)
+            {
+                reason = "前台不是本程序";
+                return FullscreenBarVerdict.SkipEnvironment;
+            }
+
+            reason = "全屏、在播、前台也是本程序，条却没回来";
+            return FullscreenBarVerdict.Fail;
+        }
+
+        /// <summary>三态判定本身的自检（不依赖真的前台窗口，任何机器上都跑得出来）。</summary>
+        private static bool CheckFullscreenBarDecision()
+        {
+            if (DecideFullscreenBarReturn(true, false, false, false, false, out _) != FullscreenBarVerdict.Ok)
+            {
+                Log(13, "全屏进度条：三态判定不对（条已经回来了还算失败）");
+                return false;
+            }
+
+            if (DecideFullscreenBarReturn(false, false, true, true, true, out var notFullscreen) !=
+                    FullscreenBarVerdict.SkipEnvironment || notFullscreen.Length == 0)
+            {
+                Log(13, "全屏进度条：三态判定不对（不在全屏时没有跳过，也没有说原因）");
+                return false;
+            }
+
+            if (DecideFullscreenBarReturn(false, true, false, true, true, out var noMedia) !=
+                    FullscreenBarVerdict.SkipEnvironment || noMedia.Length == 0)
+            {
+                Log(13, "全屏进度条：三态判定不对（没有媒体时没有跳过，也没有说原因）");
+                return false;
+            }
+
+            if (DecideFullscreenBarReturn(false, true, true, false, true, out var notPlaying) !=
+                    FullscreenBarVerdict.SkipEnvironment || notPlaying.Length == 0)
+            {
+                Log(13, "全屏进度条：三态判定不对（媒体不在播时没有跳过，也没有说原因）");
+                return false;
+            }
+
+            if (DecideFullscreenBarReturn(false, true, true, true, false, out var notForeground) !=
+                    FullscreenBarVerdict.SkipEnvironment || notForeground.Length == 0)
+            {
+                Log(13, "全屏进度条：三态判定不对（窗口不是前台时会被判成功能坏了）");
+                return false;
+            }
+
+            if (DecideFullscreenBarReturn(false, true, true, true, true, out _) != FullscreenBarVerdict.Fail)
+            {
+                Log(13, "全屏进度条：三态判定不对（前置条件成立时被当成了环境问题）");
+                return false;
+            }
+
+            return true;
         }
     }
 }

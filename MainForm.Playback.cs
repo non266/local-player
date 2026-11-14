@@ -46,7 +46,8 @@ namespace 播放器
             // 必须在创建媒体之前摆好，开播时那个内核不一致就换内核（换片自动恢复）。
             _engine.Rotation = Adjustments.Get(e.Path).Rotation;
 
-            AppLog.Info($"打开媒体：{e.Path}");
+            // 网络流只记 scheme://host/…，口令 / 一次性参数不进日志（1.21.0）。
+            AppLog.Info($"打开媒体：{MediaFormats.DescribeForLog(e.Path)}");
         }
 
         /// <summary>已经交给引擎：标题、列表高亮、状态栏、标签 / 歌词 / 封面都从这里刷。</summary>

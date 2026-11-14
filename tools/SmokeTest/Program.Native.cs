@@ -304,6 +304,10 @@ namespace SmokeTest
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
+        /// <summary>某个窗口属于哪个进程：1.21.0 用它区分"被别人盖住"与"我们自己的窗口"。</summary>
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
         [DllImport("user32.dll")]
         private static extern IntPtr WindowFromPoint(Point point);
 

@@ -159,7 +159,8 @@ namespace 播放器.Core
 
                         // 这一条以前是无声的：界面上只看到"某一项时长未知"，
                         // 到底卡在哪个文件、卡了多久，只能靠猜。
-                        AppLog.Warn($"时长解析超时（等了 {waited} ms），稍后还会再试：{path}");
+                        // 网络流只记 scheme://host/…（1.21.0，日志里不留凭据）。
+                        AppLog.Warn($"时长解析超时（等了 {waited} ms），稍后还会再试：{MediaFormats.DescribeForLog(path)}");
 
                         return TimeSpan.Zero;
                     }
@@ -169,14 +170,14 @@ namespace 播放器.Core
                 var duration = milliseconds > 0 ? TimeSpan.FromMilliseconds(milliseconds) : TimeSpan.Zero;
 
                 AppLog.Debug(duration > TimeSpan.Zero
-                    ? $"时长解析：{TimeFormatter.Format(duration)}，用了 {Environment.TickCount64 - started} ms —— {path}"
-                    : $"时长解析：媒体没给出时长，用了 {Environment.TickCount64 - started} ms —— {path}");
+                    ? $"时长解析：{TimeFormatter.Format(duration)}，用了 {Environment.TickCount64 - started} ms —— {MediaFormats.DescribeForLog(path)}"
+                    : $"时长解析：媒体没给出时长，用了 {Environment.TickCount64 - started} ms —— {MediaFormats.DescribeForLog(path)}");
 
                 return duration;
             }
             catch (Exception ex)
             {
-                AppLog.Swallowed("时长解析失败（多半不是有效的媒体文件）：" + path, ex);
+                AppLog.Swallowed("时长解析失败（多半不是有效的媒体文件）：" + MediaFormats.DescribeForLog(path), ex);
                 return TimeSpan.Zero;
             }
             finally

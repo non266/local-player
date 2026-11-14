@@ -14,8 +14,16 @@ namespace 播放器
         // =====================================================================
         private void OnEngineStateChanged(object? sender, PlayerState state)
         {
+            // 1.21.0：每次新的"打开"都从零计时。不能只靠界面计时器里那次复位——
+            // 用户"按停止、马上再点播放"时，两次状态变化可能落在同一拍计时器里，
+            // 上一次的"已经提示过"就会被带进这一次（冒烟里就是这么抓到的）。
+            if (state == PlayerState.Opening) _slowOpenWatch.Reset();
+
             if (state == PlayerState.Playing)
             {
+                // 1.21.0：刚才要是提示过"网络流还没播起来"，把实际等了多久记进日志（不含地址）。
+                LogSlowOpenRecovered();
+
                 // 一次真的播起来了：之前那串失败不再算"连续"。
                 _playback.ResetErrorCount();
 

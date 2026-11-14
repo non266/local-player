@@ -2,6 +2,8 @@
 //
 // 从 Program.DesktopLyrics.cs 按 ARCHITECTURE 17.2 的规矩整块搬过来：成员一个字没动。
 
+using System.Diagnostics;
+
 namespace SmokeTest
 {
     internal static partial class Program
@@ -61,6 +63,9 @@ namespace SmokeTest
         /// </summary>
         private static bool CheckLyricsRealDrag(DesktopLyricsWindow window)
         {
+            // 1.21.0：先把"环境不成立"与"功能坏了"的分界本身断言一遍（不依赖真前台）。
+            if (!CheckLyricsDragDecision()) return false;
+
             // ---- 先做一次"输入自检"：这台机器到底能不能合成鼠标输入 ----
             // 没这一步的话，"真鼠标拖不动"既可能是歌词窗的问题、
             // 也可能只是环境不允许合成输入，两种情况看起来一模一样。
@@ -89,34 +94,71 @@ namespace SmokeTest
                 return false;
             }
 
-            if (!IsCursorIdle(400))
-            {
-                Log(15, "桌面歌词检查：检测到真实鼠标正在移动，真鼠标拖动这一条跳过"
-                        + "（合成输入和真人抢同一个通道，拖动结果不可信）；"
-                        + "拖动本身由「给窗口发消息」那一条覆盖");
-                return true;
-            }
-
             try
             {
-                // 先落到歌词上，等悬停背景出来
-                Cursor.Position = window.PointToScreen(new Point(window.Width / 2, window.Height / 2));
-                PumpMessages(400);
+                // ---- 1.21.0 三态：最多试 3 次，只有"光标在我们窗口上、也静止"才真的拖 ----
+                // 1.20.0 装机验收里出现过："光标底下不是歌词窗口（0x…），所以按下去没人收到"
+                // 直接判红——而当时只是别的程序盖在歌词上面。那不是功能坏了，是环境不成立。
+                var proceed = false;
+                var lastReason = string.Empty;
+
+                for (var attempt = 0; attempt < 3 && !proceed; attempt++)
+                {
+                    // 先落到歌词上，等悬停背景出来
+                    Cursor.Position = window.PointToScreen(new Point(window.Width / 2, window.Height / 2));
+                    PumpMessages(350);
+
+                    var cursorWindow = WindowFromPoint(Cursor.Position);
+                    var hitOurs = cursorWindow == window.Handle;
+                    var hitOther = false;
+                    uint hitPid = 0;
+                    var hitName = "?";
+
+                    if (!hitOurs)
+                    {
+                        hitOther = IsOtherProcessWindow(cursorWindow, out hitPid, out hitName);
+                    }
+
+                    var verdict = DecideLyricsDragHit(
+                        window.Bounds.Contains(Cursor.Position),
+                        IsCursorIdle(400),
+                        hitOurs,
+                        hitOther,
+                        out var reason);
+
+                    if (verdict == LyricsDragVerdict.Fail)
+                    {
+                        Log(15, "桌面歌词检查：真鼠标拖不动——光标底下既不是歌词窗口、也不属于别的程序"
+                                + $"（光标 {Cursor.Position}，窗口 {window.Bounds}，命中 "
+                                + $"0x{cursorWindow.ToInt64():X}）");
+                        return false;
+                    }
+
+                    if (verdict == LyricsDragVerdict.SkipEnvironment)
+                    {
+                        lastReason = reason;
+                        Log(15, $"桌面歌词检查：真鼠标拖动这一条这次不计——{reason}"
+                                + $"（尝试 {attempt + 1}/3；光标 {Cursor.Position}，窗口 {window.Bounds}，"
+                                + $"命中 0x{cursorWindow.ToInt64():X}（pid {hitPid}，{hitName}），"
+                                + $"{DescribeForeground()}）");
+                        PumpMessages(250);
+                        continue;
+                    }
+
+                    proceed = true;
+                }
+
+                if (!proceed)
+                {
+                    Log(15, $"桌面歌词检查：真鼠标拖动这一条跳过（环境三次都不成立：{lastReason}）；"
+                            + "拖动本身由「给窗口发消息」那一条覆盖");
+                    return true;
+                }
 
                 if (!TryReadAlpha(window, 0.5, 0.5, out var panelAlpha) || panelAlpha == 0)
                 {
                     Log(15, $"桌面歌词检查：光标已经停在歌词上了，悬停背景却没铺出来"
                             + $"（中间 alpha = {panelAlpha}）——那这个框就不是整块可抓的");
-                    return false;
-                }
-
-                // 按下之前先问一句：光标底下到底是谁？
-                var cursorWindow = WindowFromPoint(Cursor.Position);
-
-                if (cursorWindow != window.Handle)
-                {
-                    Log(15, $"桌面歌词检查：光标（{Cursor.Position}，窗口 {window.Bounds}）底下不是歌词窗口"
-                            + $"（0x{cursorWindow.ToInt64():X}），所以按下去没人收到");
                     return false;
                 }
 
@@ -256,6 +298,139 @@ namespace SmokeTest
 
             Log(15, "桌面歌词检查：字上那一点命中的不是歌词窗口");
             return false;
+        }
+
+        /// <summary>
+        /// 真鼠标拖动的三态判定（1.21.0）。
+        /// <para>
+        /// 为什么不"点不到就失败"：歌词窗口是置顶的，但别人的置顶窗口 / 前台窗口一样能盖住它；
+        /// 那时候光标底下本来就不是歌词窗口，按下去当然没人收到——这是<b>环境</b>。
+        /// 只有"光标就在我们窗口上、也不属于别的程序，却还是拖不动"才是<b>bug</b>。
+        /// </para>
+        /// <para>
+        /// 1.20.0 装机验收里混过一次这两种情况（`光标（…）底下不是歌词窗口…` 直接判红，
+        /// 紧接着串行重跑就绿）。跳过必须打印原因，不许静默通过。
+        /// </para>
+        /// </summary>
+        private enum LyricsDragVerdict
+        {
+            /// <summary>光标在我们窗口上、也静止：可以真的按下去拖。</summary>
+            Proceed,
+
+            /// <summary>环境不成立（光标不在窗口里 / 有人在动鼠标 / 被别的程序盖住）：跳过并出声。</summary>
+            SkipEnvironment,
+
+            /// <summary>光标在窗口里、也不是别人的窗口，却收不到点击：真失败。</summary>
+            Fail
+        }
+
+        /// <summary>纯判定：不依赖真实前台，冒烟直接调它把三种结论都走一遍。</summary>
+        private static LyricsDragVerdict DecideLyricsDragHit(
+            bool cursorInWindow,
+            bool cursorIdle,
+            bool hitIsOurs,
+            bool hitOtherProcess,
+            out string reason)
+        {
+            reason = string.Empty;
+
+            if (!cursorInWindow)
+            {
+                reason = "光标已经不在歌词窗口里";
+                return LyricsDragVerdict.SkipEnvironment;
+            }
+
+            if (!cursorIdle)
+            {
+                reason = "有人在动真鼠标（合成输入和真人抢同一个通道）";
+                return LyricsDragVerdict.SkipEnvironment;
+            }
+
+            if (hitIsOurs) return LyricsDragVerdict.Proceed;
+
+            if (hitOtherProcess)
+            {
+                reason = "被别的程序盖住";
+                return LyricsDragVerdict.SkipEnvironment;
+            }
+
+            reason = "光标底下既不是歌词窗口、也不属于别的程序";
+            return LyricsDragVerdict.Fail;
+        }
+
+        /// <summary>三态判定本身的自检（不依赖真的前台窗口，任何机器上都跑得出来）。</summary>
+        private static bool CheckLyricsDragDecision()
+        {
+            if (DecideLyricsDragHit(true, true, true, false, out _) != LyricsDragVerdict.Proceed)
+            {
+                Log(15, "桌面歌词检查：三态判定不对（光标在我们窗口上时不算「可以拖」）");
+                return false;
+            }
+
+            if (DecideLyricsDragHit(false, true, false, false, out var outOfWindow) != LyricsDragVerdict.SkipEnvironment ||
+                outOfWindow.Length == 0)
+            {
+                Log(15, "桌面歌词检查：三态判定不对（光标不在窗口里时没有跳过，也没有说原因）");
+                return false;
+            }
+
+            if (DecideLyricsDragHit(true, false, false, false, out var moving) != LyricsDragVerdict.SkipEnvironment ||
+                moving.Length == 0)
+            {
+                Log(15, "桌面歌词检查：三态判定不对（有人在动鼠标时没有跳过，也没有说原因）");
+                return false;
+            }
+
+            if (DecideLyricsDragHit(true, true, false, true, out var covered) != LyricsDragVerdict.SkipEnvironment ||
+                covered.Length == 0 || !covered.Contains("别的程序", StringComparison.Ordinal))
+            {
+                Log(15, "桌面歌词检查：三态判定不对（光标被别的程序盖住时会被判成功能坏了）");
+                return false;
+            }
+
+            if (DecideLyricsDragHit(true, true, false, false, out _) != LyricsDragVerdict.Fail)
+            {
+                Log(15, "桌面歌词检查：三态判定不对（光标底下是我们自己的窗口时被当成了环境问题）");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>命中的窗口是不是别的进程的（是 → 环境问题；我们自己进程的 → 功能问题）。</summary>
+        private static bool IsOtherProcessWindow(IntPtr window, out uint pid, out string processName)
+        {
+            pid = 0;
+            processName = "?";
+
+            if (window == IntPtr.Zero) return false;
+
+            GetWindowThreadProcessId(window, out pid);
+
+            if (pid == 0) return false;
+
+            try
+            {
+                processName = Process.GetProcessById((int)pid).ProcessName;
+            }
+            catch (Exception)
+            {
+                processName = "?";
+            }
+
+            return pid != (uint)Environment.ProcessId;
+        }
+
+        /// <summary>跳过时把前台窗口写进日志（排查"到底是谁盖住了它"）。</summary>
+        private static string DescribeForeground()
+        {
+            var foreground = GetForegroundWindow();
+
+            if (foreground == IntPtr.Zero) return "前台：无";
+
+            GetWindowThreadProcessId(foreground, out var pid);
+
+            return $"前台 0x{foreground.ToInt64():X}（pid {pid}）";
         }
     }
 }

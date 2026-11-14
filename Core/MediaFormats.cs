@@ -115,6 +115,25 @@ namespace 播放器.Core
         }
 
         /// <summary>
+        /// 给日志用的路径描述（1.21.0）：本地路径原样；网络流只留 <c>scheme://host:port/…</c>。
+        /// <para>
+        /// 流地址里经常带凭据（<c>http://user:pass@host/…</c>，或者一次性签名参数），
+        /// 日志是拿来发给别人排查的，不能把口令一起塞进去。1.20.0 把 LrcAPI 的密钥
+        /// 从日志里赶了出去，这条线是同一个规矩：<b>只记"打开了哪个网络流"，不记凭据</b>。
+        /// </para>
+        /// </summary>
+        public static string DescribeForLog(string? path)
+        {
+            if (!IsStreamUri(path)) return path ?? string.Empty;
+
+            if (!Uri.TryCreate(path, UriKind.Absolute, out var uri)) return "（网络流）";
+
+            var port = uri.IsDefaultPort ? string.Empty : ":" + uri.Port;
+
+            return uri.Scheme + "://" + uri.Host + port + "/…";
+        }
+
+        /// <summary>
         /// 判断是否为光盘 / 设备位置（libvlc 的 location 型 MRL）。
         /// <para>
         /// 这些地址<b>不是文件</b>：它们没有扩展名、不参与标签 / 歌词 / 时长扫描、也不该记播放进度——

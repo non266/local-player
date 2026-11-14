@@ -42,6 +42,9 @@ namespace 播放器
 
             UpdateProgress();
 
+            // 网络流 / 网络位置打开得慢（1.21.0）：到点说一句，不自动停（见 MainForm.SlowOpen.cs）。
+            CheckSlowOpen();
+
             // 光盘的位置说明（"菜单" / "标题 2 / 12 · 第 3 章"）只在变化时刷一次状态栏。
             UpdateDiscStatus();
 

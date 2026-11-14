@@ -112,7 +112,7 @@ namespace SmokeTest
                 new SmokeStep("网络位置", CheckNetworkPathPlayback),
                 new SmokeStep("网络目录", CheckNetworkFolderImport),
                 new SmokeStep("扫描上限与取消", CheckScanLimitsAndCancel),
-                new SmokeStep("探测去重与有界", CheckProbeDedupeAndBounds),
+                new SmokeStep("网络等待与探测去重", CheckProbeDedupeAndBounds),
                 new SmokeStep("大列表排序", CheckSortAndPaint),
                 new SmokeStep("切歌时的等待", CheckMetadataPending),
                 new SmokeStep("在线歌词缓存", CheckOnlineCache)

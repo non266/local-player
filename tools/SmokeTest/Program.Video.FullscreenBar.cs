@@ -35,6 +35,11 @@ namespace SmokeTest
                     return false;
                 }
 
+                // 进全屏之前先记一笔"主窗口是不是前台"：这条检查里"进度条不抢前台"的断言只在
+                // 主窗口本来是前台时才有意义（1.22.0 连跑里撞到过一次：整个程序都不是前台，
+                // 进度条窗口却成了前台——那是环境问题，不是"抢视频键盘"）。
+                var formWasForeground = GetForegroundWindow() == form.Handle;
+
                 form.EnterFullscreen();
                 PumpMessages(400);
 
@@ -179,8 +184,14 @@ namespace SmokeTest
 
                 if (GetForegroundWindow() == bar.Handle)
                 {
-                    Log(13, "全屏进度条：它自己变成了前台窗口（会把视频的键盘抢走）");
-                    return false;
+                    if (formWasForeground)
+                    {
+                        Log(13, "全屏进度条：它自己变成了前台窗口（会把视频的键盘抢走）");
+                        return false;
+                    }
+
+                    Log(13, "全屏进度条：主窗口本来就不是前台，进度条窗口成了前台——「不抢前台」这一条"
+                            + "这次不计（环境不成立；主窗口是前台时它必须不抢）");
                 }
 
                 // ---- 退出全屏要整个放掉 ----

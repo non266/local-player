@@ -388,6 +388,10 @@ namespace 播放器
             var length = _engine.Length;
             Add("时长", length > 0 ? TimeFormatter.FormatWithHours(TimeSpan.FromMilliseconds(length)) : null);
 
+            // 轨道自己的码率 libvlc 3 对 mp4 / mkv 常常不填（实测为 0），那就看整体：
+            // 文件大小 ÷ 时长 = 容器平均码率。这一个是算出来的，注释里写清口径，不当成"视频轨码率"。
+            Add("总码率", DescribeOverallBitrate(path, length));
+
             // 视频规格与同步状态
             var fps = _engine.FrameRate;
             Add("帧率", fps > 0 ? $"{fps:0.###} fps" : null);
@@ -440,7 +444,12 @@ namespace 播放器
             var parts = new List<string>();
 
             var codec = _engine.DescribeCodec(track);
-            parts.Add(!string.IsNullOrWhiteSpace(codec) ? codec! : FourCc(track.Codec));
+            var codecText = !string.IsNullOrWhiteSpace(codec) ? codec! : DescribeFourCc(track.Codec);
+            parts.Add(codecText);
+
+            // H.264 的 profile / level 才翻译成 High@4.1；别的编码读不到就不写（见 MediaDescriptions）
+            var profile = MediaDescriptions.ProfileLevel(track.Codec, track.Profile, track.Level);
+            if (!string.IsNullOrWhiteSpace(profile)) parts.Add(profile);
 
             switch (track.TrackType)
             {
@@ -448,8 +457,21 @@ namespace 播放器
                 {
                     var size = track.Data.Video;
                     if (size.Width > 0 && size.Height > 0) parts.Add($"{size.Width}×{size.Height}");
+
+                    // 只有像素宽高比不是 1:1 时才写「显示 16:9」——方像素的文件写了也只是噪音
+                    var aspect = MediaDescriptions.AspectRatio(size.Width, size.Height, size.SarNum, size.SarDen);
+                    if (!string.IsNullOrWhiteSpace(aspect)) parts.Add("显示 " + aspect);
+
                     if (size.FrameRateNum > 0 && size.FrameRateDen > 0)
                         parts.Add($"{size.FrameRateNum / (double)size.FrameRateDen:0.###} fps");
+
+                    AddTrackDescription(parts, codecText, track.Description);
+
+                    var orientation = MediaDescriptions.Orientation(size.Orientation);
+                    if (!string.IsNullOrWhiteSpace(orientation)) parts.Add(orientation!);
+
+                    var projection = MediaDescriptions.Projection(size.Projection);
+                    if (!string.IsNullOrWhiteSpace(projection)) parts.Add(projection!);
                     break;
                 }
 
@@ -458,25 +480,54 @@ namespace 播放器
                     var sound = track.Data.Audio;
                     if (sound.Rate > 0) parts.Add($"{sound.Rate} Hz");
                     if (sound.Channels > 0) parts.Add($"{sound.Channels} 声道");
+                    AddTrackDescription(parts, codecText, track.Description);
                     break;
                 }
+
+                case TrackType.Text:
+                    AddTrackDescription(parts, codecText, track.Description);
+                    break;
             }
 
-            if (track.Bitrate > 0) parts.Add($"{track.Bitrate / 1000} kbps");
+            var bitrate = MediaDescriptions.Bitrate(track.Bitrate);
+            if (!string.IsNullOrWhiteSpace(bitrate)) parts.Add(bitrate!);
 
-            // "und" 是 libvlc 表示"未标注语言"，显示出来没有意义
-            if (!string.IsNullOrWhiteSpace(track.Language) &&
-                !string.Equals(track.Language, "und", StringComparison.OrdinalIgnoreCase))
-                parts.Add(track.Language!);
+            // "und" 是 libvlc 表示"未标注语言"，显示出来没有意义；认得的语言码给中文名
+            var language = MediaDescriptions.Language(track.Language);
+            if (!string.IsNullOrWhiteSpace(language)) parts.Add(language!);
 
             return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
         }
 
-        private static string FourCc(uint codec)
+        /// <summary>
+        /// 轨道自带的描述（视频是像素格式如 <c>Planar 4:2:0 YUV</c>，音频/字幕是编码细节）。
+        /// 与编解码器名重复时不写两遍——同一件事在同一行出现两次只是噪音。
+        /// </summary>
+        private static void AddTrackDescription(List<string> parts, string codecText, string? description)
+        {
+            if (string.IsNullOrWhiteSpace(description)) return;
+
+            var trimmed = description!.Trim();
+            if (trimmed.Length == 0) return;
+            if (string.Equals(trimmed, codecText, StringComparison.OrdinalIgnoreCase)) return;
+            if (codecText.Contains(trimmed, StringComparison.OrdinalIgnoreCase)) return;
+
+            parts.Add(trimmed);
+        }
+
+        /// <summary>
+        /// fallback：把 libvlc 的 fourcc 还原成四字符码。
+        /// <para>
+        /// VLC 的 fourcc 把<b>第一个字符放在最低字节</b>（<c>VLC_FOURCC('h','2','6','4')</c> = 0x34363268），
+        /// 所以要从低到高取。1.22.0 之前这里是从高到低，兜底名一直显示成「462h」——
+        /// 看着像编码名，其实是反的。
+        /// </para>
+        /// </summary>
+        internal static string DescribeFourCc(uint codec)
         {
             var bytes = new[]
             {
-                (byte)(codec >> 24), (byte)(codec >> 16), (byte)(codec >> 8), (byte)codec
+                (byte)codec, (byte)(codec >> 8), (byte)(codec >> 16), (byte)(codec >> 24)
             };
 
             var printable = bytes.All(b => b >= 32 && b < 127);
@@ -484,6 +535,25 @@ namespace 播放器
 
             var text = new string(bytes.Select(b => (char)b).ToArray()).Trim();
             return text.Length > 0 ? text : $"0x{codec:X8}";
+        }
+
+        /// <summary>容器平均码率（文件大小 × 8 ÷ 时长）；时长或文件大小还不知道时返回 null。</summary>
+        private static string? DescribeOverallBitrate(string path, long durationMilliseconds)
+        {
+            if (durationMilliseconds <= 0) return null;
+
+            try
+            {
+                var bytes = new FileInfo(path).Length;
+                if (bytes <= 0) return null;
+
+                var bitsPerSecond = (long)(bytes * 8.0 / (durationMilliseconds / 1000.0));
+                return MediaDescriptions.Bitrate(bitsPerSecond);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         private static string? FormatFileSize(string path)

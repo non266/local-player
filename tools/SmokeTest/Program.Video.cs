@@ -25,6 +25,9 @@ namespace SmokeTest
             // 1.7.0 F3：按文件记住音轨 / 字幕轨（2 音轨 + 2 字幕轨的样本自己合成）
             if (!CheckTrackMemory()) return false;
 
+            // 1.22.0 B：「媒体信息」页要写清分辨率 / 显示比例 / 帧率 / 码率 / 语言（素材自己合成）
+            if (!CheckMediaInfoRows()) return false;
+
             var video = Environment.GetEnvironmentVariable("播放器_TEST_VIDEO");
 
             if (string.IsNullOrWhiteSpace(video) || !File.Exists(video))

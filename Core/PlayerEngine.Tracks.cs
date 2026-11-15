@@ -59,13 +59,22 @@ namespace 播放器.Core
             catch (Exception) { return Array.Empty<MediaTrack>(); }
         }
 
-        /// <summary>轨道的可读编解码器名称，例如 <c>H264 - MPEG-4 AVC (part 10)</c>。</summary>
+        /// <summary>
+        /// 轨道的可读编解码器名称，例如 <c>H264 - MPEG-4 AVC (part 10)</c>。
+        /// <para>
+        /// ⚠ 第二个参数是<b>编解码器 fourcc</b>，不是轨道 id（<c>Media.CodecDescription</c> 的签名）。
+        /// 1.22.0 之前这里传的是 <c>track.Id</c>（1、2、3…），libvlc 查不到就返回空，
+        /// 界面上一直显示的是四字符码的兜底值——看起来像"编码名"，其实什么都不是。
+        /// </para>
+        /// </summary>
         public string? DescribeCodec(MediaTrack track)
         {
             var media = _currentMedia;
             if (media == null) return null;
 
-            try { return media.CodecDescription(track.TrackType, (uint)track.Id); }
+            var codec = track.Codec != 0 ? track.Codec : track.OriginalFourcc;
+
+            try { return media.CodecDescription(track.TrackType, codec); }
             catch (Exception) { return null; }
         }
 

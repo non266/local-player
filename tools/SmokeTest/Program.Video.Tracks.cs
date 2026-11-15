@@ -257,17 +257,34 @@ namespace SmokeTest
                             var center = view.PointToScreen(new Point(view.Width / 2, view.Height / 2));
 
                             // ① 右键
-                            Cursor.Position = center;
-                            PumpMessages(200);
+                            // 1.22.0 连跑里这一条红过一次（20 次里 1 次，`画面右键菜单：在画面上按了右键，
+                            // 菜单没弹出来`）：产品的右键是"轮询 GetAsyncKeyState + 光标是否落在画面上"，
+                            // 窗口刚激活、光标刚挪过去的那一拍可能还没轮询到。最多试 3 次，
+                            // 每次都重新激活 + 重新摆光标；三次都弹不出来才判失败（判据没放宽）。
+                            var menuShown = false;
+                            var menuAttempts = 0;
 
-                            mouse_event(MouseEventRightDown, 0, 0, 0, IntPtr.Zero);
-                            PumpMessages(120);
-                            mouse_event(MouseEventRightUp, 0, 0, 0, IntPtr.Zero);
-                            PumpMessages(700);
-
-                            if (!form.VideoMenu.Visible)
+                            for (; menuAttempts < 3 && !menuShown; menuAttempts++)
                             {
-                                Log(13, "画面右键菜单：在画面上按了右键，菜单没弹出来");
+                                form.Activate();
+                                PumpMessages(200);
+
+                                Cursor.Position = center;
+                                PumpMessages(200);
+
+                                mouse_event(MouseEventRightDown, 0, 0, 0, IntPtr.Zero);
+                                PumpMessages(120);
+                                mouse_event(MouseEventRightUp, 0, 0, 0, IntPtr.Zero);
+                                PumpMessages(700);
+
+                                menuShown = form.VideoMenu.Visible;
+                            }
+
+                            if (!menuShown)
+                            {
+                                Log(13, "画面右键菜单：在画面上按了右键，菜单没弹出来"
+                                        + $"（连试 {menuAttempts} 次：窗口激活={Form.ActiveForm == form}、"
+                                        + $"光标在画面上={form.IsScreenPointOnVideo(Cursor.Position)}）");
                                 return false;
                             }
 

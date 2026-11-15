@@ -74,8 +74,14 @@ namespace 播放器.Core
                 tags.DurationMilliseconds = totalSamples * 1000L / sampleRate;
         }
 
-        /// <summary>VORBIS_COMMENT：全部小端序，键名大小写不敏感。</summary>
-        private static void ReadVorbisComment(byte[] data, MediaTags tags)
+        /// <summary>
+        /// VORBIS_COMMENT：全部小端序，键名大小写不敏感。
+        /// <para>
+        /// 同一段结构也用在 Ogg（Vorbis / Opus / Speex）与 APE 标签上，所以是 internal——
+        /// 四个格式共用一份解析，免得各写各的慢慢漂开。
+        /// </para>
+        /// </summary>
+        internal static void ReadVorbisComment(byte[] data, MediaTags tags)
         {
             var offset = 0;
 
@@ -98,7 +104,8 @@ namespace 播放器.Core
             }
         }
 
-        private static void ApplyVorbisField(string key, string value, MediaTags tags)
+        /// <summary>一条 Vorbis comment 的键 / 值；键名归一后大小写、下划线、空格都不敏感。</summary>
+        internal static void ApplyVorbisField(string key, string value, MediaTags tags)
         {
             if (string.IsNullOrWhiteSpace(value)) return;
 
@@ -126,12 +133,16 @@ namespace 播放器.Core
                 case "YEAR":
                     tags.Year ??= TagText.NormalizeYear(value);
                     break;
+                case "TRACK":
                 case "TRACKNUMBER":
                     tags.TrackNumber ??= value;
                     break;
                 case "COMMENT":
                 case "DESCRIPTION":
                     tags.Comment ??= value;
+                    break;
+                case "METADATABLOCKPICTURE":
+                    ApplyPictureBlock(value, tags);
                     break;
                 case "LYRICS":
                 case "LYRIC":
@@ -144,8 +155,38 @@ namespace 播放器.Core
             }
         }
 
-        /// <summary>FLAC PICTURE 块：除最后的图片数据外全部是大端序。</summary>
-        private static void ReadFlacPicture(byte[] data, MediaTags tags)
+        /// <summary>
+        /// Vorbis comment 里的封面：值是「FLAC PICTURE 块」的 base64（Ogg 里常见，FLAC 里也可能出现）。
+        /// 解不开、或图太大就当没有——封面坏掉不能影响别的字段。
+        /// </summary>
+        private static void ApplyPictureBlock(string value, MediaTags tags)
+        {
+            if (tags.HasCoverArt) return;
+
+            // base64 比原图大 1/3；长度上限按解码后的上限反推，免得先解一份几十 MB 的字符串。
+            if (value.Length > TagReader.MaxCoverBytes / 3 * 4 + 8) return;
+
+            byte[] block;
+
+            try
+            {
+                block = Convert.FromBase64String(value.Trim());
+            }
+            catch (FormatException)
+            {
+                return;
+            }
+
+            if (block.Length == 0) return;
+
+            ReadFlacPicture(block, tags);
+        }
+
+        /// <summary>
+        /// FLAC PICTURE 块：除最后的图片数据外全部是大端序。
+        /// <para>Ogg 的 METADATA_BLOCK_PICTURE 是同一个结构，所以这里 internal，两处共用。</para>
+        /// </summary>
+        internal static void ReadFlacPicture(byte[] data, MediaTags tags)
         {
             var offset = 0;
 

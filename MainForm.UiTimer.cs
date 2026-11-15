@@ -11,6 +11,9 @@ namespace 播放器
         /// <summary>测试用：进度条现在能不能拖（DVD 菜单上是关着的）。</summary>
         internal bool SeekBarEnabled => trackSeek.Enabled;
 
+        /// <summary>测试用：现在是不是"用户正按着进度条拖"（偶发红抓现场时用）。</summary>
+        internal bool UserSeekingForTest => _userSeeking;
+
         /// <summary>
         /// 界面计时器跳了几拍（冒烟测试用）。
         /// <para>

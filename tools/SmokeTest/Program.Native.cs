@@ -321,6 +321,16 @@ namespace SmokeTest
         [DllImport("kernel32.dll")]
         private static extern void RaiseException(uint code, uint flags, int arguments, IntPtr argumentsPtr);
 
+        /// <summary>
+        /// 给自己写一份迷你转储（1.22.0 的看门狗用）：卡死的时候界面线程动不了，
+        /// 但后台线程还活着，所以能从这里把现场留下——本机分析不了，拿到别的机器能看。
+        /// </summary>
+        [DllImport("dbghelp.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool MiniDumpWriteDump(
+            IntPtr hProcess, uint processId, IntPtr hFile, uint dumpType,
+            IntPtr exceptionParam, IntPtr userStreamParam, IntPtr callbackParam);
+
         private const uint MouseEventLeftDown = 0x0002;
 
         private const uint MouseEventLeftUp = 0x0004;

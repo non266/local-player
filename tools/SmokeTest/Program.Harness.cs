@@ -35,6 +35,9 @@ namespace SmokeTest
         /// </summary>
         private static void Journal(string text)
         {
+            // 写日志本身也刷新心跳：能写日志说明这个进程还活着（看门狗见 Program.Watchdog.cs）。
+            WatchdogHeartbeat();
+
             try
             {
                 File.AppendAllText(JournalPath,
@@ -48,8 +51,12 @@ namespace SmokeTest
 
         private static void ResetJournal() => TryDelete(JournalPath);
 
+        /// <summary>自检子进程会把它指到自己的临时文件，免得把父进程那份日志删掉/写乱。</summary>
+        private static string? JournalPathOverride { get; set; }
+
         /// <summary>崩溃日志落在输出目录（和冒烟的其他夹具一样，不入库、跑完即弃）。</summary>
-        private static string JournalPath => Path.Combine(AppContext.BaseDirectory, "smoke-journal.txt");
+        private static string JournalPath =>
+            JournalPathOverride ?? Path.Combine(AppContext.BaseDirectory, "smoke-journal.txt");
 
         private static Control Find(Control root, string name) =>
             root.Controls.Find(name, searchAllChildren: true).FirstOrDefault();
@@ -86,6 +93,10 @@ namespace SmokeTest
             while (DateTime.UtcNow < deadline)
             {
                 Application.DoEvents();
+
+                // 每转一圈就算一次心跳：界面线程还在泵消息 = 没有卡死（看门狗见 Program.Watchdog.cs）
+                WatchdogHeartbeat();
+
                 Thread.Sleep(15);
             }
         }

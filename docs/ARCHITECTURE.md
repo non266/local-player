@@ -11,13 +11,18 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 42,267 行 / **179 个文件** |
-| `Core/` | 15,061 行 / 79 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 42,959 行 / **182 个文件** |
+| `Core/` | 15,680 行 / 82 个文件 |
 | `Ui/` | 13,022 行 / 59 个文件 |
-| `MainForm*` 这一族 partial | 14,107 行 / **40 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 25,215 行 / 81 个文件 |
+| `MainForm*` 这一族 partial | 14,180 行 / **40 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 26,615 行 / 85 个文件 |
 
-> 数字最后一次量是在 **2026-11-14（1.21.0：打开慢流的等待提示 + 两处三态收口）**。
+> 数字最后一次量是在 **2026-11-15（1.22.0：Ogg / Opus / APE 标签 + 媒体信息更详细 + 冒烟看门狗）**。
+> 1.22.0 产品侧多出 `Core/OggTagReader`、`Core/ApeTagReader`、`Core/MediaDescriptions`
+> （`Core` 79 → 82 个文件；`FlacTagReader` 的 Vorbis comment / PICTURE 解析改成与 Ogg 共用），
+> `PlayerEngine.DescribeCodec` 修了一个一直传错参数的问题（见 §29）；
+> 冒烟多出 `Program.Tags.Ogg` / `Program.Fixtures.Ogg` / `Program.Video.Info` / `Program.Watchdog`
+> （第 9 / 13 / 19 项检查里的新段，**不新增步骤 / 编号**）。
 > 1.21.0 产品侧多出 `Core/SlowOpenWatch`、`MainForm.SlowOpen`（`MainForm*` 39 → 40 个文件），
 > `MediaFormats` 多了 `DescribeForLog`（日志脱敏），`DurationScanner` / `MainForm.Playback` 改用脱敏；
 > 冒烟多出 `Program.SlowOpen`（**第 29 项检查里的新一段**，不新增步骤 / 编号）。
@@ -1411,3 +1416,89 @@ libvlc 的 vout 线程在 `MediaPlayer.Stop` 期间还在往那个 HWND 上画�
   第二条死流还会提示；日志有"等了很久"、无完整地址；`SlowOpenWatch` 纯逻辑 5 组；
   回环被拦时打印原因跳过。
 - 变异 A1～A7（含"到点自动停"与"日志拼上 URL"）；原文见 [1.21.0计划.md](1.21.0计划.md) §5。
+---
+
+## 29. 标签覆盖与媒体信息（1.22.0）
+
+### 29.1 为什么先复用
+
+Ogg（Vorbis / Opus / Speex）的评论包与 FLAC 的 VORBIS_COMMENT 是**同一套结构**
+（小端序：厂商串、条数、每条"长度 + UTF-8 文本"），所以没有另写解析：
+FlacTagReader.ReadVorbisComment / ApplyVorbisField / ReadFlacPicture 改成 internal，
+Ogg 与 FLAC 共用；METADATA_BLOCK_PICTURE（base64 的 PICTURE 块）也在 ApplyVorbisField 里解。
+APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归一，只多认一个 TRACK。
+
+### 29.2 Ogg 的边界（Core/OggTagReader）
+
+- 只读页头（27 字节）+ 段表 + 数据；按页头"继续位"拼包，**一页最多 255 段**。
+- 第一个包认编解码（\x01vorbis / OpusHead / Speex   ），第二个包去前缀后交给 Vorbis comment；
+  读到评论包就停，不扫音频页。
+- 上限：**32 页 / 2 MB / 单包 8 MB**——解析跑在标签队列的专用线程上，坏文件不能把它拖住。
+- OggS 以外的（含 Ogg-FLAC \x7fFLAC、Theora \x80theora）直接返回，**不猜**。
+- 链式 Ogg（多段拼接）只读第一段。
+
+### 29.3 APE 的边界（Core/ApeTagReader）
+
+- 文件尾 32 字节 APETAGEX footer：版本 / 标签总长（**含 footer、不含 header**）/ 条目数 / 标志。
+- 标签起点 = 文件长度 − 标签总长；"带 header"的 APEv1 形状也算得对（header 在条目之前）。
+- 条目 = 值长 / 标志 / 键（ASCII + 0）/ 值；条数上限 4096，值上限 16 MB（封面沿用 12 MB 上限）。
+- 封面是二进制条目 Cover Art (Front)，值是「文件名 + 0 + 图片」；坏图只丢封面。
+- APE 标签也常挂在 MP3 上：本轮只按 .ape / .wv / .tta / .mpc 认，MP3 不动。
+
+### 29.4 媒体信息（Core/MediaDescriptions + MainForm.Metadata）
+
+- **先量后写**（2026-11-15，640×480 / 25 fps / SAR 4:3 的 mp4）：libvlc 3.0.24 报
+  profile=-1、level=-1、itrate=0、description=null。所以轨道行只写"真有的"：
+  分辨率、显示比例（SAR → DAR）、帧率、语言中文名、编码全名。
+- 文件级「总码率」= 文件大小 × 8 ÷ 时长（容器平均），标成「总码率」，不当成轨道码率。
+- H.264 的 Profile@Level 只在 libvlc 真给了 profile / level **且 fourcc 是 H.264** 时才翻译，
+  别的编码的编号含义不同，不硬套（MediaDescriptions.ProfileLevel 的判据在纯逻辑断言里）。
+- 顺带修掉两个一直存在的显示错误：Media.CodecDescription 的第二个参数是**编解码器 fourcc**
+  （旧代码传的是轨道 id），以及兜底四字符码的字节序（VLC 把第一个字符放在最低字节，
+  旧代码从高到低取，H.264 显示成「462h」）。
+
+### 29.5 测试
+
+- 第 9 项：Opus（评论包 70 KB 跨页）/ Vorbis / Speex / APEv2 / APEv1（带 header）/ 坏样本
+  （坏 base64、截断 footer、截断页）；gated 播放器_TEST_OGGPROBE=1 用 ffmpeg 现造真实
+  .opus / .ogg 再读一遍。
+- 第 13 项：MediaDescriptions 的纯逻辑边界 + 真播放样本的「媒体信息」行断言
+  （含"不出现 462h / @ /   kbps / und"）；gated 播放器_TEST_VIDEOPROBE=1 打原始字段。
+- 变异 A1～A6 / B1～B4；原文见 [1.22.0计划.md](1.22.0计划.md) §10。
+
+---
+
+## 30. 冒烟看门狗（1.22.0）
+
+### 30.1 为什么
+
+1.21.0 验收时第 13 步「音轨记忆」挂死 **15 分钟**：界面线程不响应、CPU 不动、没有对话框，
+只能手动杀进程。这类挂死最缺的不是"再等一会儿"，而是"卡在哪一段 + 卡住那一刻的现场"。
+
+### 30.2 心跳与阈值
+
+- PumpMessages 每转一圈、Journal 每写一行都刷新一次单调时钟（Stopwatch.GetTimestamp()），
+  同时记下"当前是哪一步"。
+- 阈值默认 **180 秒**，播放器_TEST_WATCHDOG（秒）可改、  关掉。
+  依据：合法但很久不泵消息的操作只有 ffmpeg 等待（≤60 秒）与 Media.Parse（≤15 秒）；
+  网络那几条实测 82～93 秒但都在后台线程，界面照泵——**泵消息就不算挂死**。
+- 触发时：先把「疑似挂死：第 X 步 / 已 N 秒」写进 smoke-journal.txt（快、且即使写转储失败也留下），
+  再用 dbghelp.dll 的 MiniDumpWriteDump（MiniDumpNormal | MiniDumpWithThreadInfo）写一份
+  迷你转储到 %TEMP%\smoke-hang-<pid>-<时间>.dmp，最后 Environment.Exit(3)。
+  用 Exit 而不是 FailFast：FailFast 会让 WER 再记一次崩溃、在 CrashDumps 里多一份与本问题
+  无关的转储，1.20.0 的崩溃取证会被污染。
+- 看门狗线程是后台线程；写转储失败也照样报红（不会悄悄放过）。
+
+### 30.3 自检与边界
+
+- gated 播放器_TEST_WATCHDOG_SELFTEST=1：起 SmokeTest.exe --watchdog-selftest 子进程
+  （阈值 2 秒、故意睡 60 秒），断言退出码 3、有转储、子进程自己的日志里有「疑似挂死」；
+  子进程用临时日志文件，不删父进程的 smoke-journal.txt。
+- **本机没有 cdb / dotnet-dump**：转储当场分析不了，它的用处是把现场留下来拿到别的机器看
+  ——与 1.20.0 的崩溃取证同一条口径。
+- 第 6 步（进度条标签）加了一段只诊断不断言的采样（每 100 ms 记一次标签 / 滑块 / 位置 / 时长 /
+  状态 / 是否在拖动），失败时整段打进日志；判据一个字没改。
+- 连跑里抓到了 1.21.0 那次偶发红的根因：合成拖动会打开鼠标捕获，**真实鼠标**在按住期间一动，
+  `WM_MOUSEMOVE` 就落到滑块上、把它带到真实光标的位置（拖动本来的行为，不是产品 bug）。
+  收口三件：检查前把真实光标停到屏幕左上角、结束还原；真实鼠标带跑（拖动状态还在而滑块值变了）
+  → 打印原因跳过；拖动状态被清掉（计时器把标签 / 滑块写回播放时间）→ 仍然硬失败。

@@ -50,6 +50,13 @@ namespace SmokeTest
                 return 0;
             }
 
+            // 看门狗自检的子进程（1.22.0）：故意挂死，等看门狗把它拦下来。
+            // 也在动数据目录 / 建窗口之前——它只写自己那份临时日志与一份转储。
+            if (args.Length > 0 && string.Equals(args[0], "--watchdog-selftest", StringComparison.Ordinal))
+            {
+                return RunWatchdogSelfTest();
+            }
+
             // 可选筛选：只跑名字里含这个关键字的检查（连它依赖的前置检查一起）。
             // 全量一次 50 秒，只改了一个功能时没必要每次都等；能单独跑也逼着每一步
             // 自己准备前置条件，而不是偷偷依赖前面某一步留下的状态。
@@ -62,6 +69,10 @@ namespace SmokeTest
             Directory.CreateDirectory(dataDir);
             Environment.SetEnvironmentVariable("播放器_DATA_DIR", dataDir);
             ResetJournal();
+
+            // 看门狗（1.22.0）：任何一步连续 180 秒没有心跳就写迷你转储、以退出码 3 结束。
+            // 阈值用一个步骤里"合法但很久不泵消息"的上限反推（ffmpeg 等待 60 秒），见 Program.Watchdog.cs。
+            StartWatchdog();
 
             // 默认关掉"在线歌词与封面"：那会在切歌时真的去联网，
             // 既让测试依赖网络、又会给每一步平白加上几秒。
@@ -145,6 +156,7 @@ namespace SmokeTest
             catch (Exception ex)
             {
                 Log(1, "Core.Initialize 失败: " + ex);
+                StopWatchdog();
                 return 1;
             }
 
@@ -154,6 +166,7 @@ namespace SmokeTest
             foreach (var step in selected)
             {
                 stepIndex++;
+                SetWatchdogStep(step.Name);
                 Journal($"开始 第 {stepIndex}/{selected.Count} 步：{step.Name}");
 
                 var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -176,12 +189,14 @@ namespace SmokeTest
                 if (!passed)
                 {
                     PrintTimings(timings);
+                    StopWatchdog();
                     return 1;
                 }
             }
 
             PrintTimings(timings);
             Journal("全部完成");
+            StopWatchdog();
 
             TryDeleteDirectory(dataDir);
 

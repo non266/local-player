@@ -11,13 +11,20 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 42,959 行 / **182 个文件** |
-| `Core/` | 15,680 行 / 82 个文件 |
-| `Ui/` | 13,022 行 / 59 个文件 |
-| `MainForm*` 这一族 partial | 14,180 行 / **40 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 26,615 行 / 85 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 44,406 行 / **187 个文件** |
+| `Core/` | 16,556 行 / 85 个文件 |
+| `Ui/` | 13,422 行 / 60 个文件 |
+| `MainForm*` 这一族 partial | 14,341 行 / **41 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 28,239 行 / 90 个文件 |
 
-> 数字最后一次量是在 **2026-11-15（1.22.0：Ogg / Opus / APE 标签 + 媒体信息更详细 + 冒烟看门狗）**。
+> 数字最后一次量是在 **2026-11-16（1.23.0：字幕外观 + WMA/ASF·Ogg-FLAC·Theora 标签 + 串流最近地址）**。
+> 1.23.0 产品侧多出 `Core/AsfTagReader`、`Core/SubtitleAppearance`、`Core/RecentStreams`、
+> `MainForm.Streams`、`Ui/SubtitleAppearanceDialog`（`Core` 82 → 85 个文件、`MainForm*` 40 → 41、
+> `Ui` 59 → 60），`OggTagReader` 补了 Ogg-FLAC / Theora，`PlayerEngine` 的内核参数多了字幕外观；
+> 冒烟多出 `Program.Tags.More` / `Program.Fixtures.Asf` / `Program.SubtitleAppearance` /
+> `Program.Video.SubtitleAppearance` / `Program.RecentStreams`（第 8 / 9 / 13 / 22 项里的新段，
+> **不新增步骤 / 编号**：仍是 27 个运行步骤 / 32 项检查）。
+> 1.22.0 那次（2026-11-15）：产品侧多出 `Core/OggTagReader`、`Core/ApeTagReader`、`Core/MediaDescriptions`
 > 1.22.0 产品侧多出 `Core/OggTagReader`、`Core/ApeTagReader`、`Core/MediaDescriptions`
 > （`Core` 79 → 82 个文件；`FlacTagReader` 的 Vorbis comment / PICTURE 解析改成与 Ogg 共用），
 > `PlayerEngine.DescribeCodec` 修了一个一直传错参数的问题（见 §29）；
@@ -1431,10 +1438,11 @@ APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归�
 ### 29.2 Ogg 的边界（Core/OggTagReader）
 
 - 只读页头（27 字节）+ 段表 + 数据；按页头"继续位"拼包，**一页最多 255 段**。
-- 第一个包认编解码（\x01vorbis / OpusHead / Speex   ），第二个包去前缀后交给 Vorbis comment；
-  读到评论包就停，不扫音频页。
+- 第一个包认编解码（\x01vorbis / OpusHead / Speex   / **\x7fFLAC / \x80theora**，1.23.0 补了后两种）；
+  读到评论包就停（Ogg-FLAC 例外：评论块与图片块是两个包，读到"最后一块"才停），不扫音频页。
 - 上限：**32 页 / 2 MB / 单包 8 MB**——解析跑在标签队列的专用线程上，坏文件不能把它拖住。
-- OggS 以外的（含 Ogg-FLAC \x7fFLAC、Theora \x80theora）直接返回，**不猜**。
+- Ogg-FLAC：首包尾部是 `fLaC + STREAMINFO`（采样率 / 声道 / 位深 / 时长）；之后每个包是带 4 字节块头的
+  FLAC 元数据块（类型 4 = 评论、6 = 图片）。Theora：第 2 个包 `0x81 theora` 之后就是 Vorbis comment。
 - 链式 Ogg（多段拼接）只读第一段。
 
 ### 29.3 APE 的边界（Core/ApeTagReader）
@@ -1448,7 +1456,7 @@ APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归�
 ### 29.4 媒体信息（Core/MediaDescriptions + MainForm.Metadata）
 
 - **先量后写**（2026-11-15，640×480 / 25 fps / SAR 4:3 的 mp4）：libvlc 3.0.24 报
-  profile=-1、level=-1、itrate=0、description=null。所以轨道行只写"真有的"：
+  profile=-1、level=-1、bitrate=0、description=null。所以轨道行只写"真有的"：
   分辨率、显示比例（SAR → DAR）、帧率、语言中文名、编码全名。
 - 文件级「总码率」= 文件大小 × 8 ÷ 时长（容器平均），标成「总码率」，不当成轨道码率。
 - H.264 的 Profile@Level 只在 libvlc 真给了 profile / level **且 fourcc 是 H.264** 时才翻译，
@@ -1502,3 +1510,78 @@ APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归�
   `WM_MOUSEMOVE` 就落到滑块上、把它带到真实光标的位置（拖动本来的行为，不是产品 bug）。
   收口三件：检查前把真实光标停到屏幕左上角、结束还原；真实鼠标带跑（拖动状态还在而滑块值变了）
   → 打印原因跳过；拖动状态被清掉（计时器把标签 / 滑块写回播放时间）→ 仍然硬失败。
+---
+
+## 31. 字幕外观（1.23.0）
+
+### 31.1 先跑探针（2026-11-16）
+
+- libvlc 3 里与字幕外观有关的只有 `--freetype-*`（内核级）：`libfreetype_plugin.dll` 确实带
+  `freetype-rel-fontsize` / `fontsize` / `color` / `outline-thickness` / `outline-color` /
+  `background-color` / `background-opacity` 等选项；而 `libvlc.dll` **没有**运行时 API
+  （只有 `libvlc_video_set_spu` / `_spu_delay`），LibVLCSharp 3.10.2 的 `MediaPlayer` 也只有 `SetSpu`。
+- 探针（`播放器_TEST_SUBTITLEPROBE=1`，640×360 黑底 + 外挂 `.srt`，2 秒处截图）实测：
+  - **截图里包含字幕**：有字幕 墨迹 1859，关字幕后 0（所以效果可量，不必抓屏）。
+  - `--freetype-rel-fontsize` 的语义是**分母**（画面高度 ÷ 值），不是"越大越大"：
+    默认（0）字高 20px、30 → 11px、15 → 21px、12 → 27px、8 → 42px。
+  - 只改 `--freetype-color`（如 16711680 红）颜色真的变（红像素 1308）。
+  - **媒体级写法（`:freetype-…`）逐像素与基线相同（1859 / 无颜色）**：一条都不生效，
+    与 `transform` 旋转是同一个结论。
+- 结论：外观参数只能**建内核时**给。会话内不新建内核（1.5.0 之后内核按旋转值缓存，
+  反复新建会重蹈 M8 的坑），所以改设置**下次启动程序生效**——对话框与状态栏都写明。
+
+### 31.2 改动
+
+- `Core/SubtitleAppearance.cs`：四组预设（字号 小/默认/大/特大 → rel-fontsize 30/0/12/8；
+  颜色 白/黄/青/绿；描边 细/粗；背景 淡/浓）+ `Normalize`（未知值退回默认）+
+  `ToCoreArguments()`（**默认一个参数都不生成**）+ `Signature`（日志 / 断言用）。
+- `PlayerEngine`：构造函数多一个 `SubtitleAppearance?` 参数，`CoreArguments(rotation, appearance)`
+  把它拼进内核参数；老重载保留（旋转断言仍在用）。`MainForm` 构造引擎时从设置读一次。
+- `Ui/SubtitleAppearanceDialog.cs` + 「字幕 → 字幕外观…」（代码插入，不改 Designer）：
+  确定后只写设置 + 状态栏说明"下次启动程序生效"；不重载媒体、不新建内核。
+- 设置新增 `SubtitleFontSize` / `SubtitleColor` / `SubtitleOutline` / `SubtitleBackground`
+  （只增字段；`SettingsProfile` 归到「音视频输出」组）。
+
+### 31.3 边界（都写进 README 与介绍）
+
+- **只影响纯文本字幕**（SRT / 内嵌文本轨）：ASS / SSA 走 libass、按字幕文件自己的样式画；
+  DVD 的图形字幕是位图；桌面歌词有自己的字号 / 浓度（`DesktopLyricsAppearanceDialog`）。
+- 预览板是 GDI+ 的**近似**效果，不是 libvlc 的 freetype 渲染。
+- `rel-fontsize` 越小字越大；数值超出预设范围不接受（设置里坏值归一成默认）。
+
+### 31.4 测试
+
+- 第 8 项：默认不生成参数、坏值归一、四个值都进签名、`CoreArguments` 里外观与旋转同时出现、设置 JSON 往返。
+- 第 13 项（真播放）：黑底素材量字号（小 < 默认 × 0.8、特大 ≥ 默认 × 1.8）与颜色（黄色像素 ≥ 200）；
+  白底素材量描边（粗的墨迹 ≥ 细的 1.05 倍）与背景（加背景后下半区平均亮度至少低 8）。
+  截图量不到时打印原因后跳过（三态）；产品变异仍必须红。
+- 变异 B1～B4：不传参数 → 字号不变；颜色恒为绿 → 黄色断言红；签名不含颜色 → 第 8 项红；
+  不传描边 → 粗细无差别。原文见 [1.23.0计划.md](1.23.0计划.md) §10.2。
+
+---
+
+## 32. 串流最近地址（1.23.0）
+
+### 32.1 数据与隐私
+
+- `Core/RecentStreams.cs` 是纯逻辑：只收 `MediaFormats.IsStreamUri`（本地路径 / 空串丢掉）、
+  去重（完全相同的字符串）、最新在前、上限 10 条；`Describe` 去掉 userinfo / query / fragment，
+  只留 `scheme://host:port/…/最后一段`（≤60 字符）——**菜单与日志里不出现账号口令**。
+- `AppSettings.RecentStreams` 在内存里是明文（菜单要显示、点了要播），落盘走
+  `RecentStreamsStored`：逐条 DPAPI（`SecretProtector.ProtectStream`，entropy 与 LrcApi 密钥分开）。
+  解不开的那一条直接丢掉，其余设置不受影响；**导出 / 方案里也是密文**（不把口令写进要转发的文件）。
+- "清除最近地址"是隐私动作：**当场 `_settings.Save()`**，不像别的设置那样等退出。
+
+### 32.2 菜单
+
+- `MainForm.Streams.cs`：运行时把「最近地址」插到「打开网络串流…」之后（不改 Designer），
+  `DropDownOpening` 时重建；空时是灰的「（暂无记录）」；条目 `Tag` 存完整地址，
+  文字只显示 `Describe` 的短标签；末尾「清除最近地址」。
+- 记录点：`OpenUrlDialog` 成功加入列表之后、以及点最近地址本身（移到最前）。
+
+### 32.3 测试
+
+- 第 8 项：归一 / MRU / 上限 10 / 标签脱敏 / 落盘是密文 / 解不开只丢一条 / 本地路径不收 / 清除后磁盘为空。
+- 第 22 项：菜单插在「打开网络串流」之后、条目数 = N + 分隔线 + 清除、文字不含凭据、
+  清除后菜单变灰且**磁盘上也没有**（先落盘一次再清除，否则"只清内存"验不出来）。
+- 变异 C1～C4：明文落盘 → 红；不去重 → 红；上限 11 → 红；清除不落盘 → 红。

@@ -23,7 +23,18 @@ namespace 播放器.Core
         /// 所以"换了旋转值"就必须"换内核"，见 <see cref="EnsureCore"/>。
         /// </para>
         /// </summary>
-        internal static string[] CoreArguments(ScreenRotation rotation)
+        internal static string[] CoreArguments(ScreenRotation rotation) =>
+            CoreArguments(rotation, SubtitleAppearance.Default);
+
+        /// <summary>
+        /// 同 <see cref="CoreArguments(ScreenRotation)"/>，外加字幕外观（1.23.0）。
+        /// <para>
+        /// 外观参数（<c>--freetype-*</c>）实测只有<b>内核级</b>生效：写成媒体选项
+        /// （<c>:freetype-…</c>）画面一动不动——与 <c>transform</c> 旋转是同一个结论
+        /// （见 1.23.0 的探针与计划 §10.1）。所以外观也走这一层；默认外观一个参数都不加。
+        /// </para>
+        /// </summary>
+        internal static string[] CoreArguments(ScreenRotation rotation, SubtitleAppearance? appearance)
         {
             var args = new List<string>
             {
@@ -41,13 +52,15 @@ namespace 播放器.Core
                 args.Add("--transform-type=" + type);
             }
 
+            if (appearance != null) args.AddRange(appearance.ToCoreArguments());
+
             return args.ToArray();
         }
 
         /// <summary>建一套（内核 + 它自己的播放器）并记进缓存（同一个旋转值只建一次）。</summary>
         private CoreSlot CreateSlot(ScreenRotation rotation)
         {
-            var core = new LibVLC(CoreArguments(rotation));
+            var core = new LibVLC(CoreArguments(rotation, _subtitleAppearance));
             var slot = new CoreSlot(core, CreatePlayer(core));
             _cores[rotation] = slot;
             return slot;

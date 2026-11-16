@@ -17,10 +17,12 @@ namespace 播放器.Core
     ///       <c>SYLT</c>（带时间轴歌词）、<c>APIC</c>（封面）、<c>TXXX:LYRICS</c></item>
     /// <item>FLAC：<c>STREAMINFO</c>（采样率/声道/位深）、<c>VORBIS_COMMENT</c>
     ///       （含 <c>LYRICS</c> / <c>UNSYNCEDLYRICS</c>）、<c>PICTURE</c>（封面）</item>
-    /// <item>Ogg（Vorbis / Opus / Speex）：评论包里的 Vorbis comment 与
-    ///       <c>METADATA_BLOCK_PICTURE</c>（base64 封面）</item>
+    /// <item>Ogg（Vorbis / Opus / Speex / FLAC / Theora）：评论包里的 Vorbis comment 与
+    ///       <c>METADATA_BLOCK_PICTURE</c>（base64 封面）/ FLAC 的 PICTURE 块</item>
     /// <item>APE（APEv1 / APEv2）：尾部 <c>APETAGEX</c> 里的文本字段与
     ///       <c>Cover Art (Front)</c> 二进制封面</item>
+    /// <item>ASF（WMA / ASF / WMV）：头对象里的 Content Description 与
+    ///       Extended Content Description（<c>WM/AlbumTitle</c>、<c>WM/Picture</c> 等）</item>
     /// <item>MP4 / M4A：<c>ilst</c> 里的 <c>©nam ©ART ©alb ©day ©gen ©cmt ©lyr covr trkn</c></item>
     /// <item>ID3v1：仅在上面的标签完全读不到时兜底</item>
     /// </list>
@@ -74,7 +76,12 @@ namespace 播放器.Core
             var isMp4 = IsMp4Extension(extension) || (head.Length >= 8 && string.CompareOrdinal(head, 4, "ftyp", 0, 4) == 0);
             var isOgg = head.StartsWith("OggS", StringComparison.Ordinal);
 
-            if (hasId3)
+            if (AsfTagReader.LooksLikeAsf(stream))
+            {
+                // ASF 的头对象是 16 字节 GUID：扩展名（.wma / .asf / .wmv）不可靠，按魔数认。
+                AsfTagReader.ReadAsfTags(stream, tags);
+            }
+            else if (hasId3)
             {
                 // ID3v2 的 total size 只有解析完头部才知道，用返回值带出来。
                 var tagBytes = Id3v2TagReader.ReadId3v2(stream, tags);
@@ -101,7 +108,7 @@ namespace 播放器.Core
             }
             else if (isOgg)
             {
-                // Vorbis / Opus / Speex：从 Ogg 页里取评论包（Ogg-FLAC / Theora 这一轮不认）。
+                // Vorbis / Opus / Speex / FLAC / Theora：从 Ogg 页里取评论包（认哪种由解析器自己判）。
                 OggTagReader.ReadOggTags(stream, tags);
             }
             else if (IsApeExtension(extension) || ApeTagReader.LooksLikeApeTag(stream))

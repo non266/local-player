@@ -90,6 +90,8 @@ namespace SmokeTest
                 if (!CheckHistoryWriteBehind()) return false;
                 if (!CheckSettingsSalvage()) return false;
                 if (!CheckDeinterlaceModes()) return false;
+                if (!CheckSubtitleAppearanceSettings()) return false;
+                if (!CheckRecentStreams()) return false;
 
                 Log(8, "设置 JSON 往返正确，损坏内容可安全降级；播放历史与按文件记住的调整都正确");
                 return true;

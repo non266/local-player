@@ -67,6 +67,57 @@ namespace SmokeTest
             return BuildOggFile(new[] { head, tagsPacket }, -1);
         }
 
+        /// <summary>
+        /// Ogg-FLAC（1.23.0）：首包 0x7F "FLAC" + STREAMINFO，之后每个包是一个带 4 字节块头的元数据块
+        /// （评论块一个包、图片块一个包，图片块打"最后一块"标志）。
+        /// </summary>
+        private static byte[] BuildOggFlac(
+            string title, string artist, string album, string year, string track, string lyrics, byte[] cover)
+        {
+            const int sampleRate = 44100;
+            const int channels = 2;
+            const int bitsPerSample = 16;
+            const long totalSamples = sampleRate * 3L;
+
+            var streamInfo = new byte[34];
+            WriteUInt16BE(streamInfo, 0, 4096);
+            WriteUInt16BE(streamInfo, 2, 4096);
+
+            long packed = ((long)sampleRate << 44)
+                          | ((long)(channels - 1) << 41)
+                          | ((long)(bitsPerSample - 1) << 36)
+                          | totalSamples;
+
+            for (var i = 0; i < 8; i++) streamInfo[10 + i] = (byte)(packed >> (56 - i * 8));
+
+            var comments = BuildTagEntries(title, artist, album, year, track, lyrics, null);
+
+            var first = Concat(
+                new byte[] { 0x7F },
+                Encoding.ASCII.GetBytes("FLAC"),
+                new byte[] { 1, 0 },
+                new byte[] { 0, 3 },                        // 头包数（大端）：STREAMINFO + 评论 + 图片
+                Encoding.ASCII.GetBytes("fLaC"),
+                FlacBlock(0, streamInfo));
+
+            var comment = FlacBlock(4, BuildVorbisComment(comments));
+            var picture = FlacBlock(6, BuildFlacPicture(cover));
+            picture[0] |= 0x80;                              // 最后一块
+
+            return BuildOggFile(new[] { first, comment, picture }, -1);
+        }
+
+        /// <summary>Theora（1.23.0）：0x80 theora 头 + 0x81 theora 评论包 + 0x82 theora setup 包。</summary>
+        private static byte[] BuildOggTheora(string title, string artist, string lyrics)
+        {
+            var ident = Concat(new byte[] { 0x80 }, Encoding.ASCII.GetBytes("theora"), new byte[1]);
+            var comments = BuildTagEntries(title, artist, null, null, null, lyrics, null);
+            var comment = Concat(new byte[] { 0x81 }, Encoding.ASCII.GetBytes("theora"), BuildVorbisComment(comments));
+            var setup = Concat(new byte[] { 0x82 }, Encoding.ASCII.GetBytes("theora"), new byte[3]);
+
+            return BuildOggFile(new[] { ident, comment, setup }, -1);
+        }
+
         private static List<string> BuildTagEntries(
             string title, string artist, string album, string year, string track, string lyrics, byte[] cover)
         {

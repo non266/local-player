@@ -215,7 +215,9 @@ namespace 播放器
 
             AttachSingleInstance(singleInstance);
 
-            _engine = new PlayerEngine(this);
+            // 字幕外观是内核级选项（libvlc 3 的 --freetype-*），只能建内核时给，
+            // 所以在这里读一次设置；改设置后要下次启动才生效（对话框里会写明）。
+            _engine = new PlayerEngine(this, SubtitleAppearance.FromSettings(_settings));
             videoView.MediaPlayer = _engine.Player;
 
             // 播放业务：只认引擎与列表模型，界面通过事件接（见 MainForm.Playback.cs）。

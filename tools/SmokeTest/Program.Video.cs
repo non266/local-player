@@ -28,6 +28,12 @@ namespace SmokeTest
             // 1.22.0 B：「媒体信息」页要写清分辨率 / 显示比例 / 帧率 / 码率 / 语言（素材自己合成）
             if (!CheckMediaInfoRows()) return false;
 
+            // 1.23.0 M0：字幕外观探针（只在 播放器_TEST_SUBTITLEPROBE=1 时跑，只量不判）
+            RunSubtitleAppearanceProbeIfRequested();
+
+            // 1.23.0 M3：字幕外观真播放断言（字号 / 颜色 / 描边 / 背景都要有可测的变化）
+            if (!CheckSubtitleAppearanceRendering()) return false;
+
             var video = Environment.GetEnvironmentVariable("播放器_TEST_VIDEO");
 
             if (string.IsNullOrWhiteSpace(video) || !File.Exists(video))

@@ -3,12 +3,16 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using 播放器.Core;
+using 播放器.Ui;
 
 namespace 播放器
 {
     /// <summary>字幕与轨道：选字幕文件、关字幕，以及音视频轨菜单。</summary>
     public partial class MainForm : Form
     {
+        /// <summary>「字幕 → 字幕外观…」那一项（运行时插入，不进 Designer；冒烟要按它）。</summary>
+        internal ToolStripMenuItem? SubtitleAppearanceMenuItem { get; private set; }
+
         // =====================================================================
         // F3：按文件记住音轨 / 字幕轨
         //
@@ -365,5 +369,44 @@ namespace 播放器
 
         private static string DescribeTrack(string? name, string category, int id) =>
             string.IsNullOrWhiteSpace(name) ? $"{category} {id}" : name!;
+
+        // ---- 字幕外观（1.23.0）-------------------------------------------------
+
+        /// <summary>
+        /// 把「字幕外观…」插进「字幕」菜单。用代码插入、不改 Designer：
+        /// Designer 那边再加一个字段要同步三处，而且这一项本来就不是命令（没有快捷键）。
+        /// </summary>
+        internal void ConfigureSubtitleAppearanceMenu()
+        {
+            if (SubtitleAppearanceMenuItem != null) return;
+
+            var item = new ToolStripMenuItem("字幕外观(&A)…");
+            item.Click += (s, e) => OpenSubtitleAppearanceDialog();
+
+            SubtitleAppearanceMenuItem = item;
+
+            menuSubtitle.DropDownItems.Add(new ToolStripSeparator());
+            menuSubtitle.DropDownItems.Add(item);
+        }
+
+        /// <summary>
+        /// 字幕外观：只改设置，**不重载媒体**。
+        /// <para>
+        /// libvlc 3 的 <c>--freetype-*</c> 只在建内核时读，而内核在本程序里按旋转值缓存、
+        /// 跟着播放器走（M8 的教训：会话内反复建内核会越攒越多）。所以这里不"立即应用"，
+        /// 而是留到下一次启动——状态栏与对话框都写明，不假装已经变了。
+        /// </para>
+        /// </summary>
+        private void OpenSubtitleAppearanceDialog()
+        {
+            var current = SubtitleAppearance.FromSettings(_settings);
+
+            if (!SubtitleAppearanceDialog.Show(this, _palette, current, out var chosen)) return;
+
+            chosen.ApplyTo(_settings);
+
+            SetStatus($"字幕外观：{chosen.Describe()}"
+                      + "（下次启动程序生效；ASS / SSA 字幕由字幕文件自己的样式决定，不受影响）");
+        }
     }
 }

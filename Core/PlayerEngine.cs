@@ -60,6 +60,13 @@ namespace 播放器.Core
         /// <summary>当前这个内核上带着哪种画面旋转。</summary>
         private ScreenRotation _coreRotation;
 
+        /// <summary>
+        /// 字幕外观（1.23.0）：<b>内核级</b>选项（libvlc 3 的 <c>--freetype-*</c> 实测只有实例级生效），
+        /// 所以它和旋转一样是"建内核时定死"的——改设置要下次启动程序才生效
+        /// （见 <see cref="SubtitleAppearance"/>；会话内不新建内核，避免 M8 那种内核越攒越多）。
+        /// </summary>
+        private readonly SubtitleAppearance _subtitleAppearance;
+
         /// <summary>正在换内核：这期间旧播放器发出来的状态事件要丢掉（那不是在放的东西）。</summary>
         private bool _switchingCore;
 
@@ -88,9 +95,10 @@ namespace 播放器.Core
         /// <summary>相对基准位置已经走了几帧。</summary>
         private int _frameStepIndex;
 
-        public PlayerEngine(ISynchronizeInvoke ui)
+        public PlayerEngine(ISynchronizeInvoke ui, SubtitleAppearance? appearance = null)
         {
             _ui = ui ?? throw new ArgumentNullException(nameof(ui));
+            _subtitleAppearance = appearance ?? SubtitleAppearance.Default;
 
             var slot = CreateSlot(ScreenRotation.None);
             _libVlc = slot.Core;

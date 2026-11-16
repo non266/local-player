@@ -124,6 +124,30 @@ namespace 播放器.Core
             set => LrcApiToken = SecretProtector.Unprotect(value);
         }
 
+        /// <summary>
+        /// 最近打开过的网络串流地址（1.23.0，最多 10 条、最新在前）。
+        /// <para>
+        /// 内存里是明文（菜单要显示、点了要播），<b>落盘一律走 DPAPI 密文</b>
+        /// （见 <see cref="RecentStreamsStored"/>）：地址里常带账号口令或一次性签名参数。
+        /// 只记"打开过"，不记"连上了没有"；换机器 / 换用户解不开的那一条会被丢掉。
+        /// </para>
+        /// </summary>
+        [JsonIgnore]
+        public List<string> RecentStreams { get; set; } = new List<string>();
+
+        /// <summary>最近串流地址在 JSON 里的样子：逐条 <c>dpapi:</c> 密文；解不开的那条直接丢掉。</summary>
+        [JsonPropertyName("RecentStreams")]
+        public List<string> RecentStreamsStored
+        {
+            get => RecentStreams
+                .Select(SecretProtector.ProtectStream)
+                .Where(value => value.Length > 0)
+                .ToList();
+
+            set => RecentStreams = 播放器.Core.RecentStreams.Normalize(
+                (value ?? new List<string>()).Select(SecretProtector.UnprotectStream));
+        }
+
         /// <summary>播放列表的排序依据。</summary>
         public PlaylistSortField SortField { get; set; } = PlaylistSortField.AddedOrder;
 
@@ -272,6 +296,28 @@ namespace 播放器.Core
         }
 
         private string _deinterlace = string.Empty;
+
+        // ---- 字幕外观（1.23.0）------------------------------------------------
+
+        /// <summary>
+        /// 字幕字号 / 颜色 / 描边 / 背景（空串与 -1 都表示"默认、不传参数"）。
+        /// <para>
+        /// ⚠ 这是<b>内核级</b>选项（libvlc 3 的 <c>--freetype-*</c>；实测媒体级写法一个都不生效），
+        /// 所以改完要<b>下次启动程序</b>才生效——见 <see cref="SubtitleAppearance"/>。
+        /// 认不出来的值在读的时候归一成默认（<see cref="SubtitleAppearance.FromSettings"/>）。
+        /// </para>
+        /// <para>ASS / SSA 字幕走 libass，按字幕自己的样式画，不受这几项影响。</para>
+        /// </summary>
+        public string SubtitleFontSize { get; set; } = string.Empty;
+
+        /// <summary>字幕颜色预设；空 = 默认。取值见 <see cref="SubtitleAppearance.Colors"/>。</summary>
+        public string SubtitleColor { get; set; } = string.Empty;
+
+        /// <summary>字幕描边厚度；-1 = 默认。取值见 <see cref="SubtitleAppearance.Outlines"/>。</summary>
+        public int SubtitleOutline { get; set; } = -1;
+
+        /// <summary>字幕背景不透明度；-1 = 默认。取值见 <see cref="SubtitleAppearance.Backgrounds"/>。</summary>
+        public int SubtitleBackground { get; set; } = -1;
 
         /// <summary>选定的音频输出设备标识；空表示系统默认设备。</summary>
         public string AudioDeviceId { get; set; } = string.Empty;

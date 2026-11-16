@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-// Ogg：Vorbis / Opus / Speex 的评论包。
+// Ogg：Vorbis / Opus / Speex / FLAC / Theora 的评论包。
 //
 // Ogg 的文件结构是"页"串起来的：每页一个 27 字节页头 + 一张段表（最多 255 段），
 // 段长 < 255 表示一个包在这里结束，= 255 表示这个包还要接着下一页。
@@ -12,6 +12,14 @@ using System.Text;
 // 评论包里面的内容与 FLAC 的 VORBIS_COMMENT 是同一套结构（小端序：厂商串、条数、
 // 每条"长度 + UTF-8 文本"），所以解析直接复用 <see cref="FlacTagReader"/> 那一份，
 // 不另写一套——两套结构一样的解析器迟早会慢慢漂开。
+//
+// 五种编码的"评论头"形状（1.23.0 补了后两种）：
+//   · Vorbis：第 1 个包以 0x01 "vorbis" 开头，第 2 个包以 0x03 "vorbis" 开头，尾部带 framing bit
+//   · Opus：第 1 个包 "OpusHead"，第 2 个包 "OpusTags"
+//   · Speex：第 2 个包**没有前缀**，直接是 Vorbis comment
+//   · FLAC（Ogg-FLAC）：第 1 个包以 0x7F "FLAC" 开头、尾部是 fLaC + STREAMINFO；
+//     之后每个包是一个**带 4 字节块头**的 FLAC 元数据块（类型 4 = 评论、6 = 图片）
+//   · Theora：第 2 个包以 0x81 "theora" 开头，去掉 7 字节后是 Vorbis comment
 
 namespace 播放器.Core
 {
@@ -31,13 +39,18 @@ namespace 播放器.Core
         private static readonly byte[] OpusHead = Encoding.ASCII.GetBytes("OpusHead");
         private static readonly byte[] OpusTags = Encoding.ASCII.GetBytes("OpusTags");
         private static readonly byte[] SpeexHeader = Encoding.ASCII.GetBytes("Speex   ");
+        private static readonly byte[] FlacHeaderPrefix = { 0x7F, (byte)'F', (byte)'L', (byte)'A', (byte)'C' };
+        private static readonly byte[] TheoraHeaderPrefix = { 0x80, (byte)'t', (byte)'h', (byte)'e', (byte)'o', (byte)'r', (byte)'a' };
+        private static readonly byte[] TheoraCommentPrefix = { 0x81, (byte)'t', (byte)'h', (byte)'e', (byte)'o', (byte)'r', (byte)'a' };
 
         private enum Codec
         {
             Unknown,
             Vorbis,
             Opus,
-            Speex
+            Speex,
+            Flac,
+            Theora
         }
 
         /// <summary>
@@ -122,7 +135,10 @@ namespace 播放器.Core
         }
 
         /// <summary>
-        /// 处理一个拼完的包：第 0 个认编解码，第 1 个是评论头。返回 <c>true</c> 表示"不用再往下读了"。
+        /// 处理一个拼完的包：第 0 个认编解码，其余按编码取评论头。返回 <c>true</c> 表示"不用再往下读了"。
+        /// <para>
+        /// 只有 Ogg-FLAC 会连着读多个包（评论块与图片块各一个包），其余编码读到评论包就停。
+        /// </para>
         /// </summary>
         private static bool HandlePacket(byte[] data, ref Codec codec, ref int packetIndex, MediaTags tags)
         {
@@ -130,15 +146,15 @@ namespace 播放器.Core
             {
                 codec = DetectCodec(data);
 
-                if (codec == Codec.Unknown) return true;    // 认不出来就别猜（Ogg-FLAC / Theora 在这一轮不做）
+                if (codec == Codec.Unknown) return true;    // 认不出来就别猜
 
                 packetIndex = 1;
+
+                // Ogg-FLAC 的 STREAMINFO 藏在首包尾部（采样率 / 声道 / 位深 / 时长）
+                if (codec == Codec.Flac) ReadOggFlacStreamInfo(data, tags);
+
                 return false;
             }
-
-            if (packetIndex > 1) return true;
-
-            packetIndex = 2;
 
             switch (codec)
             {
@@ -157,9 +173,80 @@ namespace 播放器.Core
                     FlacTagReader.ReadVorbisComment(data, tags);
                     return true;
 
+                case Codec.Theora:
+                    // Theora 的评论包以 0x81 "theora" 开头（7 字节），后面是同一套 Vorbis comment。
+                    if (!StartsWith(data, TheoraCommentPrefix)) return true;
+                    FlacTagReader.ReadVorbisComment(data[TheoraCommentPrefix.Length..], tags);
+                    return true;
+
+                case Codec.Flac:
+                    return !ReadOggFlacMetadataBlock(data, tags, out var isLast) || isLast;
+
                 default:
                     return true;
             }
+        }
+
+        /// <summary>
+        /// Ogg-FLAC 的首包：0x7F "FLAC" + 主 / 次版本 + 头包数（2 字节大端）+ "fLaC" + STREAMINFO 块。
+        /// 认得出来就把 STREAMINFO 交给 FLAC 那份解析（采样率 / 声道 / 位深 / 时长）。
+        /// </summary>
+        private static void ReadOggFlacStreamInfo(byte[] data, MediaTags tags)
+        {
+            // 5（0x7F + FLAC）+ 1 主版本 + 1 次版本 + 2 头包数 = 9，然后是 "fLaC"
+            const int flacMarker = 9;
+
+            if (data.Length < flacMarker + 4 + 4 + 34) return;
+
+            if (data[flacMarker] != (byte)'f' || data[flacMarker + 1] != (byte)'L' ||
+                data[flacMarker + 2] != (byte)'a' || data[flacMarker + 3] != (byte)'C')
+                return;
+
+            var block = flacMarker + 4;
+
+            // 块头：1 字节（类型 + 最后一块标志）+ 3 字节长度（大端）
+            var type = data[block] & 0x7F;
+            var length = (data[block + 1] << 16) | (data[block + 2] << 8) | data[block + 3];
+
+            if (type != 0 || length < 34 || block + 4 + 34 > data.Length) return;
+
+            var streamInfo = new byte[34];
+            Array.Copy(data, block + 4, streamInfo, 0, 34);
+
+            FlacTagReader.ReadFlacStreamInfo(streamInfo, tags);
+        }
+
+        /// <summary>
+        /// Ogg-FLAC 的元数据块包：4 字节块头（类型 + 最后一块标志 + 3 字节长度）+ 块数据。
+        /// 类型 4 = Vorbis comment、6 = PICTURE，其余跳过。返回 <c>false</c> 表示"这不是一个元数据块"。
+        /// </summary>
+        private static bool ReadOggFlacMetadataBlock(byte[] data, MediaTags tags, out bool isLast)
+        {
+            isLast = false;
+
+            if (data.Length < 4) return false;
+
+            isLast = (data[0] & 0x80) != 0;
+
+            var type = data[0] & 0x7F;
+            var length = (data[1] << 16) | (data[2] << 8) | data[3];
+
+            if (length < 0 || 4 + length > data.Length) return false;
+
+            var block = new byte[length];
+            Array.Copy(data, 4, block, 0, length);
+
+            switch (type)
+            {
+                case 4:
+                    FlacTagReader.ReadVorbisComment(block, tags);
+                    break;
+                case 6:
+                    FlacTagReader.ReadFlacPicture(block, tags);
+                    break;
+            }
+
+            return true;
         }
 
         private static Codec DetectCodec(byte[] data)
@@ -167,6 +254,8 @@ namespace 播放器.Core
             if (StartsWith(data, VorbisHeaderPrefix)) return Codec.Vorbis;
             if (StartsWith(data, OpusHead)) return Codec.Opus;
             if (StartsWith(data, SpeexHeader)) return Codec.Speex;
+            if (StartsWith(data, FlacHeaderPrefix)) return Codec.Flac;
+            if (StartsWith(data, TheoraHeaderPrefix)) return Codec.Theora;
             return Codec.Unknown;
         }
 

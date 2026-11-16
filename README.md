@@ -16,6 +16,9 @@ MP3 / FLAC / APE / WAV / AAC / M4A / OGG / Opus / WMA…… 以及外挂字幕�
 
 **播放**
 - 打开文件 / 文件夹（递归扫描）/ 网络串流（http、https、rtsp、rtmp、udp 等）
+- **最近地址**（1.23.0）：`文件 → 最近地址` 列最近打开过的 10 条网络串流（最新在前，
+  `&1`～`&9` 一键），末尾是「清除最近地址」。地址里常带账号口令或一次性签名参数，
+  所以**落盘用 DPAPI 加密**、菜单只显示去掉凭据与参数的短标签，清除会**当场写盘**
 - **打开光盘**（1.11.0，`文件 → 打开光盘`）：每次下拉按本机现在的光驱重建（USB 光驱、换盘都不用重启）。
   **DVD-Video**（盘里有 `VIDEO_TS`）先出**光盘菜单**（1.16.0）：菜单在屏上时方向键移动、回车确认，
   这几下才归菜单，平时方向键仍是快退 / 音量；想跳过菜单就直接进正片，用
@@ -146,9 +149,9 @@ MP3 / FLAC / APE / WAV / AAC / M4A / OGG / Opus / WMA…… 以及外挂字幕�
 - 右侧可折叠侧栏，顶部三个标签：**歌词 / 封面 / 媒体信息**；宽度可拖，整栏可关掉
 - 歌词按优先级自动寻找四类来源：
   1. 同目录同名 `.lrc`（也认 `艺术家 - 曲名.lrc`）
-  2. **文件内嵌歌词**——FLAC 与 Ogg（Vorbis / Opus / Speex）的 Vorbis comment
+  2. **文件内嵌歌词**——FLAC 与 Ogg（Vorbis / Opus / Speex / FLAC / Theora）的 Vorbis comment
      `LYRICS` / `UNSYNCEDLYRICS`、MP3 的 ID3v2 `USLT` 与 `SYLT`、MP4 / M4A 的 `©lyr`、
-     APE 标签的 `Lyrics`
+     APE 标签的 `Lyrics`、ASF（WMA）的 `WM/Lyrics`
   3. 同目录同名 `.txt`（纯文本兜底）
 - 带时间轴的歌词高亮当前行并平滑滚动，**点任意一行直接跳到那一句**；
   **鼠标停在某一行上会弹出这一句对应的时间点**（`时:分:秒`），配合点击跳转不用猜哪句在哪
@@ -376,6 +379,11 @@ MP3 / FLAC / APE / WAV / AAC / M4A / OGG / Opus / WMA…… 以及外挂字幕�
   如果这个文件后来换过压制版本、记住的那条轨不在了，就保持默认，不会硬塞一条别的。
   用 `V` 关字幕是**临时看一眼**，不写这份记忆；要"这部片子以后都关"用
   「字幕轨道 → 关闭字幕」
+- **字幕外观**（1.23.0，`字幕 → 字幕外观…`）：字号（小 / 默认 / 大 / 特大）、颜色（白 / 黄 / 青 / 绿）、
+  描边（细 / 粗）、背景（淡 / 浓）。参数是 libvlc 的 `--freetype-*`，**只能在建内核时设置**，
+  所以保存后**下次启动程序生效**（对话框与状态栏都写明，不假装已经变了）。
+  它只管**纯文本字幕**（SRT / 内嵌文本轨）；**ASS / SSA 走 libass**、DVD 的图形字幕是位图，
+  这两种都由字幕文件 / 光盘自己决定样式，不受这里影响；桌面歌词也有自己的字号与浓度设置
 
 **主题**
 - 5 套内置主题：跟随系统 / 浅色 / 深色 / OLED 纯黑 / VLC 橙
@@ -554,7 +562,7 @@ Core/                  与界面无关的核心逻辑
   PlaylistFile.cs        m3u / m3u8 读写（原子写；另有"读出全部条目、不过滤不存在的文件"）
   PlaylistLibrary*.cs    歌单库：命名保存 / 列出（自然排序）/ 载入 / 改名 / 删除 / 导入（4 份：主文件 / 顺序 / 目录与名字 / 增删改）
   PlaylistLibraryController.cs 当前歌单名 / 未保存标记 / 替换前该问哪一句（对话框由窗体提供）
-  SettingsProfile.cs     设置的分组（7 组，60 项各有归属）+ 按组把一份方案并进当前设置
+  SettingsProfile.cs     设置的分组（7 组，65 项各有归属）+ 按组把一份方案并进当前设置
   SettingsLibrary.cs     设置方案库：命名保存 / 列出（自然排序）/ 载入 / 改名 / 删除 / 导入 / 导出
   SavedName.cs           「按名字存成一个文件」共用的名字规则（歌单库与方案库同一套）
   MediaFormats.cs        支持的扩展名与文件对话框过滤器（含"这是不是一个位置：网络流 / 光盘"）
@@ -567,10 +575,13 @@ Core/                  与界面无关的核心逻辑
   PerFileAdjustments.cs  按文件记住的调整：三样各记各的，改一次就落盘（存储仍在 history.json）
   TimeFormatter.cs       时间格式化与时间码解析
   MediaTags.cs           标签数据模型（标题、内嵌歌词、内嵌封面、文件头规格）
-  TagReader*.cs          自己解析 ID3v2 / FLAC / MP4 / ID3v1 / Ogg（Vorbis·Opus·Speex）/ APEv1·APEv2
-                         的标签、歌词与封面（门面 + 8 个帮手类：六种格式 + 文本解码 / 字节读写）
+  TagReader*.cs          自己解析 ID3v2 / FLAC / MP4 / ID3v1 / Ogg（Vorbis·Opus·Speex·FLAC·Theora）/
+                         APEv1·APEv2 / ASF（WMA·ASF·WMV）的标签、歌词与封面
+                         （门面 + 9 个帮手类：七种格式 + 文本解码 / 字节读写）
   MediaDescriptions.cs   媒体信息里要算一下才给人看的：语言中文名、显示比例（SAR→DAR）、
                          码率单位、H.264 的 Profile@Level、方位与投影（纯函数，边界可直接断言）
+  SubtitleAppearance.cs  字幕外观（字号 / 颜色 / 描边 / 背景）：预设、归一、内核参数（默认不生成）
+  RecentStreams.cs       最近打开过的串流地址：去重 / 最新在前 / 上限 10 / 菜单脱敏标签（纯逻辑）
   LrcApi*.cs             LrcAPI 客户端：在线歌词与封面（两代接口、鉴权、挑最像的一条）
                          （5 份：主文件 / 数据形状 / 端点与纯函数 / JSON / 网络）
   OnlineLyricsService.cs 在线歌词与封面：会话缓存、缺什么才联网、取消、请求编排、失败只说一次
@@ -617,6 +628,7 @@ Ui/                    可复用的界面零件
   DesktopLyricsWindow*.cs 桌面歌词：无边框置顶小窗，自动宽高、可拖动、可锁定穿透
                          （7 份：主文件 / 原生互操作 / 行为 / 文字 / 摆位 / 绘制 + 控制条）
   DesktopLyricsAppearanceDialog.cs 桌面歌词外观（字号 / 浓度滑块 + 实时预览）
+  SubtitleAppearanceDialog.cs 字幕外观（字号 / 颜色 / 描边 / 背景四组下拉 + 近似预览）
   FontManagerDialog.cs   已导入字体的管理（自绘预览列表 + 删除 + 导入）
   PlaylistLibraryDialog*.cs 歌单窗口：列出全部歌单 + 载入 / 追加 / 新建 / 重命名 / 删除 / 拖入导入
                          （7 份：主文件 / 布局 / 列表 / 单份操作 / 拖动换位 / 批量重命名 / 拖入导入）
@@ -641,6 +653,7 @@ MainForm.Search.cs     搜索过滤、排序、拖动换位
 MainForm.Playlists.cs  「播放列表」菜单：歌单库（保存 / 覆盖 / 载入 / 改名 / 删除）+ m3u 导入导出
 MainForm.SettingsProfiles.cs 「设置方案」菜单：多套设置、当前方案、按组载入、改动自动写回
 MainForm.History.cs    播放记忆：续播位置与最近播放
+MainForm.Streams.cs    「文件 → 最近地址」：串流地址的菜单、脱敏标签、清除当场落盘
 MainForm.Theme.cs      主题应用与切换
 MainForm.Sidebar.cs    侧栏装配与布局：显示 / 隐藏、宽度与分隔条、视图菜单里那几项
 MainForm.Metadata.cs   曲目元数据：异步读标签 / 歌词、回填侧栏与桌面歌词、「媒体信息」页
@@ -652,7 +665,7 @@ MainForm.Floating.cs   侧栏 / 播放列表脱离主窗口并吸附到主窗口
 MainForm.DesktopLyrics.cs 桌面歌词的菜单、选项、位置持久化与生命周期
 MainForm.OnlineLyrics.cs 在线歌词与封面：自动/手动获取、菜单、会话内缓存
 MainForm.Lyrics.cs     歌词时间轴偏移：菜单 / 右键菜单 / 热键、按文件记住与应用
-MainForm.Subtitle.cs   字幕与轨道：字幕文件、开 / 关字幕、音视频轨菜单（按文件记住）
+MainForm.Subtitle.cs   字幕与轨道：字幕文件、开 / 关字幕、音视频轨菜单（按文件记住）、字幕外观
 MainForm.VideoMenu.cs  画面右键菜单：字幕轨道 / 音轨 / 播放控制 / 全屏（全屏里唯一入口）
 MainForm.Fullscreen.cs 全屏入口的薄层（进出 / 进度条都在 Ui/FullscreenModule）
 MainForm.WindowMode.cs 「视图 → 窗口模式 / 迷你模式」菜单、勾选与门禁（形态在 Ui/WindowSurfaceController）
@@ -862,7 +875,8 @@ dotnet SmokeTest.dll 侧栏
 $env:播放器_TEST_PAINT = "1"
 dotnet SmokeTest.dll 侧栏
 
-# 只想验某一块时按名字筛（全量一次约 240～290 秒：1.22.0 实测 286.0 / 247.2 / 239.9 秒，机器负载不同差很多；筛选只要十几秒到半分钟）：
+# 只想验某一块时按名字筛（全量一次约 260～280 秒：1.23.0 实测 279.7 / 279.1 / 260.1 秒，
+# 干净树 release-check 里的全量 257.9 秒；机器负载不同差很多，筛选一般十几秒到一分钟）：
 dotnet SmokeTest.dll 桌面歌词      # 第 9 项检查（样本）+ 第 15 项：桌面歌词与歌词字体
 dotnet SmokeTest.dll 逐帧          # 只跑视频功能那一步（需要 播放器_TEST_VIDEO）
 dotnet SmokeTest.dll 侧栏          # 第 9 项检查（样本）+ 第 11 项
@@ -899,6 +913,16 @@ dotnet SmokeTest.dll 日志
 # Ogg / Opus 的真实文件探针（GATED，调 ffmpeg 现造 .opus / .ogg）：验真正的 Ogg 页 + 编码器写的评论包
 $env:播放器_TEST_OGGPROBE = "1"
 dotnet SmokeTest.dll 标签与歌词
+
+# 真实 ASF / Ogg-FLAC / Theora 文件探针（GATED，调 ffmpeg 现造 .wma / .ogv / .oga）：
+# 验真实编码器写的容器头（缺哪个编码器就跳过哪一个，不算失败）
+$env:播放器_TEST_TAGPROBE = "1"
+dotnet SmokeTest.dll 标签与歌词
+
+# 字幕外观探针（GATED，只量不判）：截图 / 抓屏里有没有字幕、内核级 / 媒体级 --freetype-* 变不变画面
+# （1.23.0 实测：截图含字幕；内核级生效，媒体级写法完全不生效 → 外观只能在建内核时设）
+$env:播放器_TEST_SUBTITLEPROBE = "1"
+dotnet SmokeTest.dll 视频功能与逐帧
 
 # 媒体信息字段探针（只量不判）：打印 libvlc 报的 Profile / Level / Bitrate / SAR / 方位与最终那几行
 $env:播放器_TEST_VIDEOPROBE = "1"
@@ -1643,6 +1667,9 @@ libvlc 只暴露 `Media.Meta()` 的十几个字段，**没有歌词**，也不�
 | --- | --- |
 | ID3v2.2 / v2.3 / v2.4 | `TIT2 TPE1 TALB TCON TRCK COMM`、`USLT`（纯文本歌词）、`SYLT`（带时间轴）、`APIC`（封面）、`TXXX:LYRICS` |
 | FLAC | `STREAMINFO`（采样率 / 声道 / 位深 / 时长）、`VORBIS_COMMENT`（含 `LYRICS`）、`PICTURE` |
+| Ogg（1.22.0 / 1.23.0） | Vorbis / Opus / Speex 的评论包；**Ogg-FLAC** 的 STREAMINFO + 评论块 + PICTURE 块；**Theora** 的 `0x81 theora` 评论包。封面是 `METADATA_BLOCK_PICTURE`（base64）或 FLAC 的 PICTURE 块 |
+| APE（1.22.0） | 尾部 `APETAGEX`（v1 / v2）的文本字段与 `Cover Art (Front)` 封面 |
+| ASF（1.23.0，WMA / ASF / WMV） | Content Description（标题 / 作者 / 描述）与 Extended Content Description（`WM/AlbumTitle`、`WM/Year`、`WM/TrackNumber`、`WM/Genre`、`WM/Lyrics`、`WM/Picture`） |
 | MP4 / M4A | `ilst` 里的 `©nam ©ART ©alb ©day ©gen ©cmt ©lyr covr trkn` |
 | ID3v1 | 最后 128 字节，只在前面的标签全部为空时兜底 |
 
@@ -2722,9 +2749,17 @@ x64 进程**根本无法加载**另外两个，LibVLCSharp 也是按进程架构
   **选了什么也不会发生**，1.7.0 把它删了（不是改名、也不是映射成某个滤镜），
   真正的"自动"要内核级 `--deinterlace=-1`，那是另一件事（见 [docs/1.7.0计划.md](docs/1.7.0计划.md) 的 F9）。
   探针留在 `tools\SmokeTest\Program.Video.Interlaced.cs`，设 `播放器_TEST_INTERLACED=1` 可重跑。
-- 标签解析覆盖 ID3v2 / FLAC / MP4 / ID3v1 / Ogg（Vorbis / Opus / Speex 的评论包）/
-  APEv1 / APEv2（1.22.0）；**WMA（ASF）、Ogg-FLAC、Ogg-Theora 没有解析**，
-  这些格式的歌词请放同目录同名 `.lrc`（外挂歌词对所有格式都有效）。
+- 标签解析覆盖 ID3v2 / FLAC / MP4 / ID3v1 / Ogg（Vorbis / Opus / Speex / FLAC / Theora 的评论包）/
+  APEv1 / APEv2（1.22.0）/ ASF（WMA / ASF / WMV，1.23.0）。两条边界：ASF 的 DRM / WMA Pro
+  与 ASF 的 Metadata Object 不解析；Ogg 里的封面受 32 页 / 2 MB 上限约束（≳ 1.5～2 MB 读不到）。
+  这些格式想显示歌词仍可以放同目录同名 `.lrc`（外挂歌词对所有格式都有效）。
+- **字幕外观只影响纯文本字幕**（1.23.0）：ASS / SSA 走 libass、按字幕文件自己的样式画，
+  DVD 的图形字幕是位图；桌面歌词另有自己的字号 / 浓度。参数是内核级的
+  （`--freetype-*`，实测媒体级写法不生效），所以**保存后下次启动程序生效**；
+  对话框里的预览板是 GDI+ 的近似效果，不是 libvlc 的 freetype 渲染。
+- **最近地址只记"打开过"**（1.23.0）：死链也会在列表里；落盘是 DPAPI 密文
+  （与 LrcApi 密钥用不同 entropy），换 Windows 用户 / 换机器后解不开的那条会被丢掉；
+  设置方案与导出文件里也是密文（不往别的机器带）；菜单只显示去掉 userinfo / query 的短标签。
 - **媒体信息里的轨道码率 / Profile / Level 多半读不到**（libvlc 3 实测对 mp4 报 `profile=-1`、
   `level=-1`、`bitrate=0`）：轨道行里没有这几项就是"libvlc 没给"，不是没做；
   文件级的「总码率」是按"文件大小 ÷ 时长"算的容器平均，不是某一条轨道的码率。

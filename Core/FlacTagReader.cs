@@ -53,7 +53,10 @@ namespace 播放器.Core
         }
 
         /// <summary>STREAMINFO：34 字节，尾部打包了采样率、声道数、位深和总样本数。</summary>
-        private static void ReadFlacStreamInfo(byte[] data, MediaTags tags)
+        /// <remarks>
+        /// internal：Ogg-FLAC 的首包尾部也是同一段 STREAMINFO（1.23.0），两处共用一份解析。
+        /// </remarks>
+        internal static void ReadFlacStreamInfo(byte[] data, MediaTags tags)
         {
             // 第 10~17 字节共 64 位：20 位采样率 | 3 位(声道数-1) | 5 位(位深-1) | 36 位总样本数
             if (data.Length < 18) return;

@@ -10,7 +10,8 @@ namespace SmokeTest
         // 样本全部按各格式规范手工合成，因此这项检查不依赖任何外部媒体文件，
         // 覆盖：FLAC（Vorbis comment + PICTURE + STREAMINFO）、
         // ID3v2.3 / v2.4（含 GBK、UTF-16、USLT、TXXX、SYLT、APIC）、ID3v1、MP4 ilst、
-        // Ogg（Vorbis / Opus / Speex，含跨页评论包与 METADATA_BLOCK_PICTURE）、APEv1 / APEv2。
+        // Ogg（Vorbis / Opus / Speex / FLAC / Theora，含跨页评论包、METADATA_BLOCK_PICTURE、PICTURE 块）、
+        // APEv1 / APEv2、ASF（WMA / ASF / WMV）。
         // -----------------------------------------------------------------
 
         private static bool TestTagAndLyrics()
@@ -28,9 +29,10 @@ namespace SmokeTest
             if (!CheckId3v1Tags(folder)) return false;
             if (!CheckMp4Tags(folder)) return false;
             if (!CheckOggAndApeTags(folder)) return false;
+            if (!CheckMoreTags(folder)) return false;
             if (!CheckLrcParsing(folder)) return false;
 
-            Log(9, "标签与歌词解析全部正确（FLAC / ID3v2.3 / ID3v2.4 / ID3v1 / MP4 / Ogg·Opus·Speex / APE / LRC）");
+            Log(9, "标签与歌词解析全部正确（FLAC / ID3v2.3 / ID3v2.4 / ID3v1 / MP4 / Ogg·Opus·Speex·FLAC·Theora / APE / ASF / LRC）");
             return true;
         }
 

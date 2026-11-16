@@ -77,8 +77,14 @@ namespace 播放器
             menuClearResume.Click += (s, e) => ClearAllResumePositions();
             menuFileRecent.DropDownOpening += (s, e) => RebuildRecentMenu();
 
+            // 1.23.0：文件 → 最近地址（串流地址，落盘加密、菜单只显示脱敏短标签）
+            ConfigureRecentStreamsMenu();
+
             // ---- 字幕菜单 ----
             menuSubtitle.DropDownOpening += (s, e) => UpdateSubtitleToggleText();
+
+            // 1.23.0：字幕外观（内置参数只有建内核时能设，保存后下次启动生效）
+            ConfigureSubtitleAppearanceMenu();
 
             // ---- 视图菜单 ----
             menuViewPlaylist.CheckedChanged += OnShowPlaylistChanged;

@@ -98,7 +98,8 @@ namespace 播放器.Core
             },
             [SettingsSection.Output] = new[]
             {
-                "Equalizer", "NormalizeVolume", "Deinterlace", "AudioDeviceId", "AudioDeviceModule"
+                "Equalizer", "NormalizeVolume", "Deinterlace", "AudioDeviceId", "AudioDeviceModule",
+                "SubtitleFontSize", "SubtitleColor", "SubtitleOutline", "SubtitleBackground"
             },
             [SettingsSection.Behavior] = new[]
             {
@@ -107,7 +108,7 @@ namespace 播放器.Core
             [SettingsSection.Session] = new[]
             {
                 "LastDirectory", "CurrentPlaylistName", "CurrentSettingsProfileName",
-                "LastPlaylist", "LastPlaylistIndex"
+                "LastPlaylist", "LastPlaylistIndex", "RecentStreams"
             }
         };
 
@@ -131,9 +132,9 @@ namespace 播放器.Core
             SettingsSection.Interface => "主题、播放列表与侧栏、窗口置顶、托盘、排序方式",
             SettingsSection.Windows => "窗口位置与大小、分栏宽度、悬浮窗的位置与吸附、桌面歌词的位置",
             SettingsSection.Lyrics => "歌词字体、在线歌词与封面（含服务地址与密钥）、桌面歌词的外观",
-            SettingsSection.Output => "均衡器、音量均衡、音频输出设备、去隔行",
+            SettingsSection.Output => "均衡器、音量均衡、音频输出设备、去隔行、字幕外观",
             SettingsSection.Behavior => "记住播放进度、启动时是否恢复上次的播放列表、全局媒体键、诊断日志",
-            SettingsSection.Session => "上次打开目录、上次的播放列表、当前歌单、当前方案",
+            SettingsSection.Session => "上次打开目录、上次的播放列表、当前歌单、当前方案、最近串流地址",
             _ => string.Empty
         };
 
@@ -214,6 +215,16 @@ namespace 播放器.Core
 
             foreach (var name in Properties(section))
             {
+                // RecentStreams 在 JSON 里是逐条 DPAPI 密文，而 DPAPI 每次加密的结果都不同：
+                // 按 JSON 比会永远"有差异"。这一项比明文列表（内容才是用户关心的）。
+                if (name == "RecentStreams")
+                {
+                    if (!current.RecentStreams.SequenceEqual(incoming.RecentStreams, StringComparer.Ordinal))
+                        differences++;
+
+                    continue;
+                }
+
                 var left = mine.TryGetPropertyValue(name, out var a) ? a?.ToJsonString() : null;
                 var right = theirs.TryGetPropertyValue(name, out var b) ? b?.ToJsonString() : null;
 

@@ -84,6 +84,7 @@ namespace 播放器
             if (string.IsNullOrWhiteSpace(url)) return;
 
             AddPathsWithFolders(new[] { url }, AddPlayback.Always);
+            RememberRecentStream(url);
         }
 
         /// <summary>

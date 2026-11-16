@@ -25,8 +25,12 @@ namespace 播放器.Core
 
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("播放器.LrcApiToken.v1");
 
+        /// <summary>串流地址用另一份 entropy：两处密文就算被互换也解不出对方的内容。</summary>
+        private static readonly byte[] StreamEntropy = Encoding.UTF8.GetBytes("播放器.RecentStream.v1");
+
         private static bool _warnedProtect;
         private static bool _warnedUnprotect;
+        private static bool _warnedStream;
 
         /// <summary>冒烟测试用：模拟"这台机器上 DPAPI 不可用"。默认 false。</summary>
         internal static bool FailForTest;
@@ -111,6 +115,66 @@ namespace 播放器.Core
                     _warnedUnprotect = true;
                     AppLog.Warn("LrcApi 密钥：密文读不出来（可能是别的 Windows 用户 / 别的机器存下的），"
                                 + "已按未配置处理——要用的服务请重新填一次密钥");
+                }
+
+                return string.Empty;
+            }
+        }
+        /// <summary>
+        /// 保存"最近打开的串流地址"用的加密（1.23.0）。和密钥同一条规矩、但用另一份 entropy：
+        /// 加密失败退回明文（宁可和以前一样，也不静默丢地址）；解不开返回空串（调用方丢掉这一条）。
+        /// </summary>
+        public static string ProtectStream(string? plain)
+        {
+            var text = plain ?? string.Empty;
+
+            if (text.Length == 0) return string.Empty;
+            if (IsProtected(text)) return text;
+
+            if (FailForTest) return text;
+
+            try
+            {
+                var bytes = ProtectedData.Protect(
+                    Encoding.UTF8.GetBytes(text), StreamEntropy, DataProtectionScope.CurrentUser);
+
+                return Prefix + Convert.ToBase64String(bytes);
+            }
+            catch (Exception ex)
+            {
+                if (!_warnedStream)
+                {
+                    _warnedStream = true;
+                    AppLog.Warn("最近串流地址：加密不了（" + ex.GetType().Name + "），这次按明文保存", ex);
+                }
+
+                return text;
+            }
+        }
+
+        /// <summary>解开一条串流地址；解不开（换机器 / 换用户 / 坏了）返回空串，由调用方丢掉这一条。</summary>
+        public static string UnprotectStream(string? stored)
+        {
+            var text = stored ?? string.Empty;
+
+            if (!IsProtected(text)) return text;
+
+            if (FailForTest) return string.Empty;
+
+            try
+            {
+                var raw = Convert.FromBase64String(text.Substring(Prefix.Length));
+                var bytes = ProtectedData.Unprotect(raw, StreamEntropy, DataProtectionScope.CurrentUser);
+
+                return Encoding.UTF8.GetString(bytes);
+            }
+            catch (Exception)
+            {
+                if (!_warnedStream)
+                {
+                    _warnedStream = true;
+                    AppLog.Warn("最近串流地址：密文读不出来（可能是别的 Windows 用户 / 别的机器存下的），"
+                                + "这一条已丢弃；其余设置不受影响");
                 }
 
                 return string.Empty;

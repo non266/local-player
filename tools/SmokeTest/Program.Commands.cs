@@ -28,7 +28,8 @@ namespace SmokeTest
 
                 form.AddPathsForTest(new[] { wav });
 
-                return CheckCommandSurfaces(form) && CheckCommandStates(form) && CheckCommandHelp(form);
+                return CheckCommandSurfaces(form) && CheckCommandStates(form) && CheckCommandHelp(form) &&
+                       CheckRecentStreamsMenu(form);
             }
             catch (Exception ex)
             {

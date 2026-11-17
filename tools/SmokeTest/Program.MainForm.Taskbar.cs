@@ -11,7 +11,7 @@ namespace SmokeTest
         /// <c>ThumbBarAddButtons</c>，Explorer 收下调用照样返回 <c>S_OK</c>，代码就把"已挂上"
         /// 置了真，之后再也不会重试（1.11.0 修的就是这个）。
         /// 冒烟能验的是这条时序不变式 + 点击能控制播放 + 没媒体时会置灰；
-        /// <b>系统界面上到底画没画出来只能人眼看</b>——README 与 CHANGELOG 里都写着。
+        /// <b>系统界面上到底画没画出来只能人眼看</b>——参考手册与 CHANGELOG 里都写着。
         /// </para>
         /// </summary>
         private static bool CheckTaskbarThumbnailButtons(Form form)

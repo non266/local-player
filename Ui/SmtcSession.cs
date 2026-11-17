@@ -28,7 +28,7 @@ namespace 播放器.Ui
     /// 不必再手写 vtable、也不必自己揉 HSTRING。
     /// 早先那一版"手写 COM"的写法（连同踩到的
     /// <c>UnmanagedType.IInspectable</c> / <c>UnmanagedType.HString</c> 两个运行时限制）
-    /// 记在 [README 的实现要点] 与 CHANGELOG 里，留作"为什么当初绕了远路"的档案。
+    /// 记在 [docs/参考手册.md] 与 CHANGELOG 里，留作"为什么当初绕了远路"的档案。
     /// </para>
     /// <para>
     /// 只有一处还得手写：<c>GetForWindow</c> 属于**头文件里的互操作接口**

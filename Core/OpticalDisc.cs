@@ -21,7 +21,7 @@ namespace 播放器.Core
         /// <summary>DVD-Video：根目录有 <c>VIDEO_TS</c>。</summary>
         DvdVideo,
 
-        /// <summary>蓝光：根目录有 <c>BDMV</c>。<b>1.11.0 只识别，不支持播放</b>（见 README 的已知限制）。</summary>
+        /// <summary>蓝光：根目录有 <c>BDMV</c>。<b>1.11.0 只识别，不支持播放</b>（见 docs/参考手册.md 的已知限制）。</summary>
         BluRay,
 
         /// <summary>音频 CD：根目录只有 <c>*.cda</c> 那种。</summary>

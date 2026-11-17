@@ -331,7 +331,7 @@ namespace 播放器.Core
         /// <c>yadif</c>、<c>yadif2x</c>、<c>phosphor</c>、<c>ivtc</c>）。
         /// 读进来的值一律过一遍 <see cref="DeinterlaceModes.Normalize"/>：认不出来的（包括 1.7.0
         /// 之前存下的 <c>auto</c>）都归成"关闭"——libvlc 3 的播放器级接口不认 <c>auto</c>，
-        /// 它从前就是个按了没反应的选项（见 README 的 R8 实测）。</para>
+        /// 它从前就是个按了没反应的选项（见 docs/参考手册.md 的去隔行实测）。</para>
         /// </summary>
         public string Deinterlace
         {

@@ -23,11 +23,32 @@ namespace 播放器.Core
         /// <summary>最多收多少个媒体文件。超了就地停，并置 <see cref="MediaScanResult.Truncated"/>。</summary>
         internal int MaxFiles { get; set; } = 100_000;
 
+        /// <summary>
+        /// 要不要跟进目录联接 / 符号链接（默认跟，保持本地目录的旧行为）。
+        /// <para>
+        /// 文件浏览器里"添加整个文件夹"用 <see cref="LocalBounded"/>：既限层数 / 条数，
+        /// 也不跟重解析点。链接指回上层时，跟进就是无限递归——不能等它真的跑满再说。
+        /// </para>
+        /// </summary>
+        internal bool FollowReparsePoints { get; set; } = true;
+
         /// <summary>不设上限（本地目录沿用的旧行为）。</summary>
         internal static MediaScanLimits Unlimited() => new MediaScanLimits
         {
             MaxDepth = int.MaxValue,
             MaxFiles = int.MaxValue
+        };
+
+        /// <summary>
+        /// 从文件浏览器发起的"整个文件夹"导入：有界、不跟重解析点。
+        /// <para>32 层足够放 歌手 / 专辑 / CD1 / 曲目 这种结构；再多就说明目录形态不寻常，
+        /// 宁可截断并明说，也不要让一次点击扫上十分钟。</para>
+        /// </summary>
+        internal static MediaScanLimits LocalBounded() => new MediaScanLimits
+        {
+            MaxDepth = 32,
+            MaxFiles = 200_000,
+            FollowReparsePoints = false
         };
     }
 
@@ -123,7 +144,11 @@ namespace 播放器.Core
                 }
 
                 foreach (var child in SafeDirectories(current))
+                {
+                    if (!limits.FollowReparsePoints && IsReparsePoint(child)) continue;
+
                     pending.Push((child, depth + 1));
+                }
             }
 
             result.Files.Sort(StringComparer.CurrentCultureIgnoreCase);
@@ -162,6 +187,18 @@ namespace 播放器.Core
             catch (UnauthorizedAccessException) { return Array.Empty<string>(); }
             catch (DirectoryNotFoundException) { return Array.Empty<string>(); }
             catch (IOException) { return Array.Empty<string>(); }
+        }
+
+        /// <summary>是不是目录联接 / 符号链接（读不到属性时按"不是"处理，最多多扫一层）。</summary>
+        private static bool IsReparsePoint(string folder)
+        {
+            try
+            {
+                return (File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0;
+            }
+            catch (UnauthorizedAccessException) { return false; }
+            catch (DirectoryNotFoundException) { return false; }
+            catch (IOException) { return false; }
         }
 
         /// <summary>这一层还有没有子目录（判"深度上限"是不是真的截掉了东西）。</summary>

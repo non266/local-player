@@ -11,19 +11,27 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 44,406 行 / **187 个文件** |
-| `Core/` | 16,556 行 / 85 个文件 |
-| `Ui/` | 13,422 行 / 60 个文件 |
-| `MainForm*` 这一族 partial | 14,341 行 / **41 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 28,239 行 / 90 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 47,656 行 / **195 个文件** |
+| `Core/` | 17,574 行 / 88 个文件 |
+| `Ui/` | 14,954 行 / 63 个文件 |
+| `MainForm*` 这一族 partial | 15,051 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 29,184 行 / 91 个文件 |
 
-> 数字最后一次量是在 **2026-11-16（1.23.0：字幕外观 + WMA/ASF·Ogg-FLAC·Theora 标签 + 串流最近地址）**。
+> 数字最后一次量是在 **2026-11-17（1.24.0：内置文件浏览器）**。
+> 1.24.0 产品侧多出 `Core/FileBrowserPaths`、`Core/FileBrowserService`、`Core/FileBrowserState`、
+> `Ui/FileIcons`、`Ui/FileBrowserView`（2 份 partial）、`MainForm.FileBrowser`、
+> `MainForm.Floating.FileBrowser`（`Core` 85 → 88、`Ui` 60 → 63、`MainForm*` 41 → 43）；
+> `MediaScan` 加了 `FollowReparsePoints` 与 `LocalBounded()`，`AddPathsWithFolders` 加了有界本地递归，
+> 三个悬浮窗（侧栏 / 播放列表 / 文件浏览器）共用一套吸附；冒烟多出 `Program.FileBrowser`
+> （现在是 **28 个运行步骤 / 33 项检查**；新文件是第 28 个运行步骤 / 第 33 项检查），
+> `Program.Sidebar` 的绘制循环从四页变五页。
+>
 > 1.23.0 产品侧多出 `Core/AsfTagReader`、`Core/SubtitleAppearance`、`Core/RecentStreams`、
 > `MainForm.Streams`、`Ui/SubtitleAppearanceDialog`（`Core` 82 → 85 个文件、`MainForm*` 40 → 41、
 > `Ui` 59 → 60），`OggTagReader` 补了 Ogg-FLAC / Theora，`PlayerEngine` 的内核参数多了字幕外观；
 > 冒烟多出 `Program.Tags.More` / `Program.Fixtures.Asf` / `Program.SubtitleAppearance` /
 > `Program.Video.SubtitleAppearance` / `Program.RecentStreams`（第 8 / 9 / 13 / 22 项里的新段，
-> **不新增步骤 / 编号**：仍是 27 个运行步骤 / 32 项检查）。
+> **不新增步骤 / 编号**：当时是 27 个运行步骤 / 32 项检查）。
 > 1.22.0 那次（2026-11-15）：产品侧多出 `Core/OggTagReader`、`Core/ApeTagReader`、`Core/MediaDescriptions`
 > 1.22.0 产品侧多出 `Core/OggTagReader`、`Core/ApeTagReader`、`Core/MediaDescriptions`
 > （`Core` 79 → 82 个文件；`FlacTagReader` 的 Vorbis comment / PICTURE 解析改成与 Ogg 共用），
@@ -728,11 +736,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 27 个运行步骤 / 32 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 28 个运行步骤 / 33 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（27 个运行步骤 / 32 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（28 个运行步骤 / 33 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -1471,7 +1479,7 @@ APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归�
   （坏 base64、截断 footer、截断页）；gated 播放器_TEST_OGGPROBE=1 用 ffmpeg 现造真实
   .opus / .ogg 再读一遍。
 - 第 13 项：MediaDescriptions 的纯逻辑边界 + 真播放样本的「媒体信息」行断言
-  （含"不出现 462h / @ /   kbps / und"）；gated 播放器_TEST_VIDEOPROBE=1 打原始字段。
+  （含"不出现 462h / @ / 0 kbps / und"）；gated 播放器_TEST_VIDEOPROBE=1 打原始字段。
 - 变异 A1～A6 / B1～B4；原文见 [1.22.0计划.md](1.22.0计划.md) §10。
 
 ---
@@ -1487,7 +1495,7 @@ APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归�
 
 - PumpMessages 每转一圈、Journal 每写一行都刷新一次单调时钟（Stopwatch.GetTimestamp()），
   同时记下"当前是哪一步"。
-- 阈值默认 **180 秒**，播放器_TEST_WATCHDOG（秒）可改、  关掉。
+- 阈值默认 **180 秒**，播放器_TEST_WATCHDOG（秒）可改、0 关掉。
   依据：合法但很久不泵消息的操作只有 ffmpeg 等待（≤60 秒）与 Media.Parse（≤15 秒）；
   网络那几条实测 82～93 秒但都在后台线程，界面照泵——**泵消息就不算挂死**。
 - 触发时：先把「疑似挂死：第 X 步 / 已 N 秒」写进 smoke-journal.txt（快、且即使写转储失败也留下），
@@ -1585,3 +1593,83 @@ APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归�
 - 第 22 项：菜单插在「打开网络串流」之后、条目数 = N + 分隔线 + 清除、文字不含凭据、
   清除后菜单变灰且**磁盘上也没有**（先落盘一次再清除，否则"只清内存"验不出来）。
 - 变异 C1～C4：明文落盘 → 红；不去重 → 红；上限 11 → 红；清除不落盘 → 红。
+
+---
+
+## 33. 文件浏览器（1.24.0）
+
+### 33.1 为什么是侧栏第 5 页，而不是文件夹树
+
+侧栏默认只有 300 DIP 宽。树 + 列表会把两边都挤到不可读，所以这一版是
+**单列表 + 地址栏 + 返回 / 前进 / 上级 / 刷新 + 位置菜单**：地址栏已经能到任意目录，
+收藏与最近浏览补"常去的地方"，不需要再养一棵树。文件页是侧栏第 5 个标签，也可用
+「视图 → 文件浏览器分离为独立窗口」单独搬出去（`SidebarTab.Files = 4`）。
+
+### 33.2 数据所有权
+
+| 数据 | 主人 | 规则 |
+| --- | --- | --- |
+| 当前目录、返回 / 前进栈、收藏、最近浏览、排序、显示所有文件 | `Core/FileBrowserState` | 纯对象，不碰磁盘；历史 50 条、收藏 20 条、最近 10 条 |
+| 一次目录读取的结果 | `Core/FileBrowserService` | 阻塞读当前一层；20,000 项上限；磁盘列表不读卷标 / 不碰 `IsReady` |
+| 地址归一、父目录、短标签 | `Core/FileBrowserPaths` | 纯路径逻辑，一次磁盘都不碰 |
+| 动作（播放 / 添加 / 下一首 / 整文件夹） | `MainForm.FileBrowser` | 只调现有 `AddPathsWithFolders` / `AddPathsToPlaylist` / `PlayIndex` / `PlaybackQueue` |
+| 视图 | `Ui/FileBrowserView` | 只发事件；后台读取由它起，但结果回 UI 线程才改控件 |
+
+文件页**不认识 VLC**，播放列表也**不认识文件页**。这样以后换文件页的布局或换播放流程，
+两边不会互相牵连。
+
+### 33.3 UI 线程零 I/O 与过期结果
+
+- `ReadDirectory` / `ListRoots` 是阻塞方法，`FileBrowserView.StartLoad` 在 `Task.Run` 上跑；
+  导航调用只做路径归一、改状态、起任务，直接返回。
+- 每次导航取消上一条的 `CancellationTokenSource`，并递增代际号；结果回到 UI 线程时
+  `version != _loadVersion` 就丢掉。慢目录（离线 UNC 的 SMB 超时）不会盖掉用户后来点的目录。
+- CTS **不在 `CancelLoad` 里 Dispose**：读取线程可能还在用 token 的 `WaitHandle`；
+  真正的释放放在任务结束后的 `CompleteLoad`。
+- 单目录最多 20,000 项；只读当前一层。超过上限时截断并在状态行说明
+  "已达显示上限，只列出了一部分"。
+- 错误口径：不存在 / 无权限 / 不是文件夹 / 驱动器未就绪 / IO 失败分别说清；
+  第一次恢复的上次目录打不开时回「此电脑」，不反复重试。
+- 键盘：焦点在文件列表时，无修饰的方向键 / PageUp / PageDown / Home / End 显式还给
+  `ListView`；回车打开、Backspace 上级、F5 刷新、Alt+←/→ 后退 / 前进；
+  **Delete 被吞掉**——既不删文件，也绝不能漏到播放列表的"移除"上。
+
+### 33.4 有界递归
+
+文件浏览器里"添加整个文件夹 / 播放整个文件夹"才递归，走
+`MediaScanner.Walk(folder, MediaScanLimits.LocalBounded(), …)`：**32 层 / 200,000 文件 /
+不跟重解析点**。链接 / 目录联接指回上层时不会无限递归；触到上限时状态栏说"只扫了一部分"。
+`MediaScanLimits.FollowReparsePoints` 默认 true，现有本地"打开文件夹"行为不变；
+网络导入默认不跟。
+
+### 33.5 分离窗口
+
+- 三个悬浮窗（侧栏 / 播放列表 / 文件浏览器）共用 `MainForm.Floating.cs` 的保存、吸附与全屏隐藏；
+  `FloatingPanel` 枚举分派"哪一个是哪一个"。
+- 文件页分离时控件搬进 owned Form，侧栏该页显示「已分离」+「归位」；
+  点窗口 ✕ 等同归位。归位默认打开侧栏并切到文件页（用户动作），
+  但载入设置方案时归位**不**打开侧栏（`revealInSidebar: false`），不推翻方案里的"侧栏收起"。
+- 位置 / 大小 / 吸附状态存在 `FileBrowserWindowX/Y/Width/Height`、`FileBrowserSnap`、
+  `FileBrowserSnapOffset`；关窗与退出都会写。
+- 全屏时统一隐藏，退出全屏按设置恢复；简化形态（音频 / 迷你）里文件页随侧栏收起，
+  已分离的窗口保持可用，菜单项按"是否已分离"动态可用。
+
+### 33.6 设置与文档
+
+新增 13 个设置字段，归「界面与主题」（分离 / 排序 / 显示所有）、
+「窗口与悬浮」（几何 / 吸附）、「会话」（最后目录 / 收藏 / 最近）。
+排序依据存**字符串**（`FileBrowserSort`），不用新枚举落盘——`JsonStringEnumConverter`
+碰到未知值会让整份设置读不出来，这是项目里已有的坑。
+设置方案与导出里是明文路径（不是凭据，和最近串流地址不同，不加密）。
+唯一的前向兼容代价：`SidebarPage` 新增 `Files`，1.23 及更老版本读到会走设置抢救。
+
+### 33.7 测试
+
+- 第 33 项（第 28 个运行步骤）：路径归一、历史 / 收藏 / 最近、当前层读取与过滤、
+  四种排序、20,000 上限截断、错误与取消、32 层有界递归、真窗体导航、假 I/O 600 ms
+  证明导航 < 200 ms、慢 A / 快 B 的代际丢弃、播放 / 下一首 / 递归加文件夹、
+  Delete 不误删、分离 / 吸附 / 归位 / 窗口 ✕ 归位 / 跨重启恢复。
+- GATED：`播放器_TEST_FILEBROWSERPROBE=1` 造 5,000 个空文件，只量读取耗时 / 条数 / 内存。
+- 变异 8 条（同步读取 / 去掉代际 / 忽略显示所有 / 文件夹不排前 / 前进栈不清 /
+  收藏上限失效 / 整文件夹只加一层 / 分离状态不落盘），原文见
+  [1.24.0计划.md](1.24.0计划.md) §10.2。

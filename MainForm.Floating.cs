@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using 播放器.Core;
@@ -43,19 +44,37 @@ namespace 播放器
             WindowSnapEdge.Left, WindowSnapEdge.Right, WindowSnapEdge.Top, WindowSnapEdge.Bottom
         };
 
+        /// <summary>三个可以搬出主窗口的面板。吸附 / 保存 / 主题都按这个枚举分派。</summary>
+        private enum FloatingPanel
+        {
+            Sidebar,
+            Playlist,
+            FileBrowser
+        }
+
         private Form? _sidebarWindow;
         private Form? _playlistWindow;
+        private Form? _fileBrowserWindow;
 
         /// <summary>只读入口：分离出去的侧栏窗口（给冒烟测试用）。</summary>
         internal Form? SidebarWindow => _sidebarWindow;
+
+        /// <summary>只读入口：分离出去的文件浏览器窗口（给冒烟测试用）。</summary>
+        internal Form? FileBrowserWindow => _fileBrowserWindow;
 
         private WindowSnapEdge _sidebarSnap = WindowSnapEdge.None;
 
         /// <summary>只读入口：侧栏悬浮窗贴在哪条边上（给冒烟测试用）。</summary>
         internal WindowSnapEdge SidebarSnap => _sidebarSnap;
+
+        /// <summary>只读入口：文件浏览器窗口贴在哪条边上（给冒烟测试用）。</summary>
+        internal WindowSnapEdge FileBrowserSnap => _fileBrowserSnap;
+
         private WindowSnapEdge _playlistSnap = WindowSnapEdge.None;
+        private WindowSnapEdge _fileBrowserSnap = WindowSnapEdge.None;
         private int _sidebarSnapOffset;
         private int _playlistSnapOffset;
+        private int _fileBrowserSnapOffset;
 
         /// <summary>正在由程序摆放悬浮窗，忽略随之而来的 Move 通知（否则会自己触发自己）。</summary>
         private bool _adjustingFloating;
@@ -129,7 +148,7 @@ namespace 播放器
                 _sidebarSnap);
 
             // 归位之后就没有"悬浮窗"了，吸附状态一并清掉。
-            ForgetSnap(isSidebar: true);
+            ForgetSnap(FloatingPanel.Sidebar);
 
             // 先断开引用与事件，避免 Dispose 时的 FormClosing 又绕回来
             _sidebarWindow = null;
@@ -219,7 +238,7 @@ namespace 播放器
                 edge => _settings.PlaylistSnap = edge,
                 _playlistSnap);
 
-            ForgetSnap(isSidebar: false);
+            ForgetSnap(FloatingPanel.Playlist);
 
             _playlistWindow = null;
             window.FormClosing -= OnPlaylistWindowClosing;
@@ -249,7 +268,7 @@ namespace 播放器
         // =====================================================================
 
         private Form CreateFloatingWindow(
-            string title, int x, int y, int width, int height, Size defaultSize)
+            string title, int x, int y, int width, int height, Size defaultSize, Size? minimumSize = null)
         {
             var window = new Form
             {
@@ -259,7 +278,7 @@ namespace 播放器
                 MinimizeBox = false,
                 MaximizeBox = false,
                 StartPosition = FormStartPosition.Manual,
-                MinimumSize = new Size(FloatingWindowMinimumWidth, FloatingWindowMinimumHeight),
+                MinimumSize = minimumSize ?? new Size(FloatingWindowMinimumWidth, FloatingWindowMinimumHeight),
                 Font = UiFonts.Sidebar,
                 ClientSize = width > 0 && height > 0
                     ? new Size(width, height)
@@ -360,23 +379,83 @@ namespace 播放器
             if (sender is Form { Visible: true }) LayoutAttachedWindows();
         }
 
-        private bool IsSidebarWindow(Form window) => ReferenceEquals(window, _sidebarWindow);
-
-        private void ForgetSnap(bool isSidebar)
+        private FloatingPanel? FloatingPanelOf(Form? window)
         {
-            if (isSidebar)
+            if (window == null) return null;
+            if (ReferenceEquals(window, _sidebarWindow)) return FloatingPanel.Sidebar;
+            if (ReferenceEquals(window, _playlistWindow)) return FloatingPanel.Playlist;
+            if (ReferenceEquals(window, _fileBrowserWindow)) return FloatingPanel.FileBrowser;
+
+            return null;
+        }
+
+        private WindowSnapEdge SnapOf(FloatingPanel panel) => panel switch
+        {
+            FloatingPanel.Sidebar => _sidebarSnap,
+            FloatingPanel.Playlist => _playlistSnap,
+            FloatingPanel.FileBrowser => _fileBrowserSnap,
+            _ => WindowSnapEdge.None
+        };
+
+        private void SetSnap(FloatingPanel panel, WindowSnapEdge edge)
+        {
+            switch (panel)
             {
-                _sidebarSnap = WindowSnapEdge.None;
-                _sidebarSnapOffset = 0;
-                _settings.SidebarSnap = WindowSnapEdge.None;
-                _settings.SidebarSnapOffset = 0;
+                case FloatingPanel.Sidebar:
+                    _sidebarSnap = edge;
+                    break;
+                case FloatingPanel.Playlist:
+                    _playlistSnap = edge;
+                    break;
+                case FloatingPanel.FileBrowser:
+                    _fileBrowserSnap = edge;
+                    break;
             }
-            else
+        }
+
+        private void SetSnapOffset(FloatingPanel panel, int offset)
+        {
+            switch (panel)
             {
-                _playlistSnap = WindowSnapEdge.None;
-                _playlistSnapOffset = 0;
-                _settings.PlaylistSnap = WindowSnapEdge.None;
-                _settings.PlaylistSnapOffset = 0;
+                case FloatingPanel.Sidebar:
+                    _sidebarSnapOffset = offset;
+                    break;
+                case FloatingPanel.Playlist:
+                    _playlistSnapOffset = offset;
+                    break;
+                case FloatingPanel.FileBrowser:
+                    _fileBrowserSnapOffset = offset;
+                    break;
+            }
+        }
+
+        private static string FloatingName(FloatingPanel panel) => panel switch
+        {
+            FloatingPanel.Sidebar => "侧栏",
+            FloatingPanel.Playlist => "播放列表",
+            FloatingPanel.FileBrowser => "文件浏览器",
+            _ => "窗口"
+        };
+
+        private void ForgetSnap(FloatingPanel panel)
+        {
+            SetSnap(panel, WindowSnapEdge.None);
+            SetSnapOffset(panel, 0);
+
+            switch (panel)
+            {
+                case FloatingPanel.Sidebar:
+                    _settings.SidebarSnap = WindowSnapEdge.None;
+                    _settings.SidebarSnapOffset = 0;
+                    break;
+                case FloatingPanel.Playlist:
+                    _settings.PlaylistSnap = WindowSnapEdge.None;
+                    _settings.PlaylistSnapOffset = 0;
+                    break;
+                case FloatingPanel.FileBrowser:
+                    _settings.FileBrowserSnap = WindowSnapEdge.None;
+                    _settings.FileBrowserSnapOffset = 0;
+                    break;
             }
         }
 
@@ -389,28 +468,26 @@ namespace 播放器
             if (IsFullscreen || !window.Visible) return;
             if (window.WindowState != FormWindowState.Normal) return;
 
-            var isSidebar = IsSidebarWindow(window);
-            var current = isSidebar ? _sidebarSnap : _playlistSnap;
+            var panel = FloatingPanelOf(window);
+            if (panel == null) return;
+
+            var current = SnapOf(panel.Value);
             var next = ResolveSnapEdge(window, current);
 
             if (next != WindowSnapEdge.None)
             {
                 // 用户可能是沿着贴合边在滑：先按当前位置更新偏移，
                 // 否则它会一直弹回最初贴上去的那个位置。
-                var offset = OffsetFor(Bounds, window.Bounds, next);
-
-                if (isSidebar) _sidebarSnapOffset = offset;
-                else _playlistSnapOffset = offset;
+                SetSnapOffset(panel.Value, OffsetFor(Bounds, window.Bounds, next));
             }
 
             if (next != current)
             {
-                if (isSidebar) _sidebarSnap = next;
-                else _playlistSnap = next;
+                SetSnap(panel.Value, next);
 
                 SetStatus(next == WindowSnapEdge.None
-                    ? (isSidebar ? "侧栏已脱离主窗口" : "播放列表已脱离主窗口")
-                    : (isSidebar ? "侧栏" : "播放列表") + "已吸附到主窗口" + SnapEdgeName(next));
+                    ? FloatingName(panel.Value) + "已脱离主窗口"
+                    : FloatingName(panel.Value) + "已吸附到主窗口" + SnapEdgeName(next));
             }
 
             if (next == WindowSnapEdge.None) return;
@@ -433,7 +510,7 @@ namespace 播放器
             if (WindowState == FormWindowState.Minimized) return;
 
             var hasAttached = false;
-            foreach (var edge in new[] { _sidebarSnap, _playlistSnap })
+            foreach (var edge in new[] { _sidebarSnap, _playlistSnap, _fileBrowserSnap })
             {
                 if (edge != WindowSnapEdge.None)
                 {
@@ -455,11 +532,36 @@ namespace 播放器
             }
         }
 
-        /// <summary>按当前吸附状态摆放两个悬浮窗。调用方负责置 <see cref="_adjustingFloating"/>。</summary>
+        /// <summary>按当前吸附状态摆放三个悬浮窗。调用方负责置 <see cref="_adjustingFloating"/>。</summary>
         private void LayoutAttachedWindowsCore()
         {
-            ApplySnapPosition(_sidebarWindow, _sidebarSnap, _sidebarSnapOffset, _playlistWindow, _playlistSnap);
-            ApplySnapPosition(_playlistWindow, _playlistSnap, _playlistSnapOffset, _sidebarWindow, _sidebarSnap);
+            var all = new (Form? Window, WindowSnapEdge Edge)[]
+            {
+                (_sidebarWindow, _sidebarSnap),
+                (_playlistWindow, _playlistSnap),
+                (_fileBrowserWindow, _fileBrowserSnap)
+            };
+
+            ApplySnapPosition(_sidebarWindow, _sidebarSnap, _sidebarSnapOffset, OthersOf(all, _sidebarWindow));
+            ApplySnapPosition(_playlistWindow, _playlistSnap, _playlistSnapOffset, OthersOf(all, _playlistWindow));
+            ApplySnapPosition(_fileBrowserWindow, _fileBrowserSnap, _fileBrowserSnapOffset, OthersOf(all, _fileBrowserWindow));
+        }
+
+        /// <summary>取"除自己以外、当前可见的悬浮窗"，用来沿同一条边让位。</summary>
+        private static (Form? Window, WindowSnapEdge Edge)[] OthersOf(
+            (Form? Window, WindowSnapEdge Edge)[] all, Form? current)
+        {
+            var others = new List<(Form? Window, WindowSnapEdge Edge)>();
+
+            foreach (var item in all)
+            {
+                if (item.Window == null) continue;
+                if (ReferenceEquals(item.Window, current)) continue;
+
+                others.Add(item);
+            }
+
+            return others.ToArray();
         }
 
         /// <summary>判断应该吸附到哪条边；没有合适的就返回 <see cref="WindowSnapEdge.None"/>。</summary>
@@ -545,13 +647,12 @@ namespace 播放器
             _ => string.Empty
         };
 
-        /// <summary>把一个吸附中的悬浮窗摆到位。</summary>
+        /// <summary>把一个吸附中的悬浮窗摆到位；同一条边上的其它窗口先沿边让开。</summary>
         private void ApplySnapPosition(
             Form? window,
             WindowSnapEdge edge,
             int offset,
-            Form? other,
-            WindowSnapEdge otherEdge)
+            IReadOnlyList<(Form? Window, WindowSnapEdge Edge)> others)
         {
             if (window == null || edge == WindowSnapEdge.None || !window.Visible) return;
             if (window.WindowState != FormWindowState.Normal) return;
@@ -586,28 +687,40 @@ namespace 播放器
                     break;
             }
 
-            // 另一个窗口也贴在同一条边上时，沿边让开，别叠在一起。
-            if (other != null && otherEdge == edge && other.Visible)
-            {
-                var otherBounds = other.Bounds;
-                var span = vertical ? size.Height : size.Width;
-                var otherStart = vertical ? otherBounds.Top : otherBounds.Left;
-                var otherSpan = vertical ? otherBounds.Height : otherBounds.Width;
-                var along = vertical ? y : x;
+            var span = vertical ? size.Height : size.Width;
+            var along = vertical ? y : x;
 
-                if (along < otherStart + otherSpan && otherStart < along + span)
+            // 多个窗口可能贴在同一条边上：逐轮沿边让开，最多几轮就稳定下来
+            // （窗口只有三个，不会出现需要迭代很多次的情况）。
+            for (var pass = 0; pass < 4; pass++)
+            {
+                var moved = false;
+
+                foreach (var (other, otherEdge) in others)
                 {
+                    if (other == null || otherEdge != edge || !other.Visible) continue;
+
+                    var otherBounds = other.Bounds;
+                    var otherStart = vertical ? otherBounds.Top : otherBounds.Left;
+                    var otherSpan = vertical ? otherBounds.Height : otherBounds.Width;
+
+                    if (along >= otherStart + otherSpan || otherStart >= along + span) continue;
+
                     var gap = SnapPixels(SnapStackGap);
 
                     // 往"离另一个窗口更远"的那一侧让，尽量少挪动。
                     along = along >= otherStart
                         ? otherStart + otherSpan + gap
                         : otherStart - span - gap;
+
+                    moved = true;
                 }
 
-                if (vertical) y = along;
-                else x = along;
+                if (!moved) break;
             }
+
+            if (vertical) y = along;
+            else x = along;
 
             var target = ClampToWorkingArea(new Point(x, y), size);
 
@@ -650,6 +763,7 @@ namespace 播放器
         {
             if (_settings.SidebarFloating) SetSidebarFloating(true);
             if (_settings.PlaylistFloating) SetPlaylistFloating(true);
+            if (_settings.FileBrowserFloating) SetFileBrowserFloating(true);
         }
 
         /// <summary>主题变化时同步悬浮窗。</summary>
@@ -657,6 +771,7 @@ namespace 播放器
         {
             if (_sidebarWindow != null) ApplyFloatingWindowTheme(_sidebarWindow);
             if (_playlistWindow != null) ApplyFloatingWindowTheme(_playlistWindow);
+            if (_fileBrowserWindow != null) ApplyFloatingWindowTheme(_fileBrowserWindow);
         }
 
         /// <summary>
@@ -699,6 +814,23 @@ namespace 播放器
 
                 _settings.PlaylistSnapOffset = _playlistSnapOffset;
             }
+
+            if (_fileBrowserWindow != null)
+            {
+                RememberFloatingBounds(
+                    _fileBrowserWindow,
+                    (x, y, w, h) =>
+                    {
+                        _settings.FileBrowserWindowX = x;
+                        _settings.FileBrowserWindowY = y;
+                        _settings.FileBrowserWindowWidth = w;
+                        _settings.FileBrowserWindowHeight = h;
+                    },
+                    edge => _settings.FileBrowserSnap = edge,
+                    _fileBrowserSnap);
+
+                _settings.FileBrowserSnapOffset = _fileBrowserSnapOffset;
+            }
         }
 
         /// <summary>全屏时把悬浮窗收起来，退出全屏再按设置放回去。</summary>
@@ -708,11 +840,13 @@ namespace 播放器
             {
                 _sidebarWindow?.Hide();
                 _playlistWindow?.Hide();
+                _fileBrowserWindow?.Hide();
                 return;
             }
 
             if (_sidebarWindow != null && _settings.ShowSidebar) _sidebarWindow.Show();
             if (_playlistWindow != null && _settings.ShowPlaylist) _playlistWindow.Show();
+            if (_fileBrowserWindow != null && _settings.FileBrowserFloating) _fileBrowserWindow.Show();
 
             // 全屏期间主窗口的尺寸整个变了，放回来之后要重新贴齐。
             LayoutAttachedWindows();

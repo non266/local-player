@@ -44,6 +44,15 @@ namespace 播放器
             if (IsTypingTarget(msg) && !IsCommandKeyWhileTyping(keyData))
                 return base.ProcessCmdKey(ref msg, keyData);
 
+            // 文件列表里的方向键 / PageUp/PageDown/Home/End 必须还给 ListView，
+            // 否则会被命令目录当成"快进 / 快退 / 音量 / 上一个 / 下一个"。
+            if (ShouldPassFileBrowserNavigationKey(msg, keyData))
+                return base.ProcessCmdKey(ref msg, keyData);
+
+            // 文件列表里自己接住的几个键：回车打开、Backspace 上级、F5 刷新、Alt+←/→ 后退/前进。
+            // Delete 在这里吞掉：既不删文件，也不能漏到"从播放列表移除"。
+            if (TryHandleFileBrowserKey(msg, keyData)) return true;
+
             // 1.16.0：DVD 菜单在屏上时，方向键 / 回车先交给 libvlc 的菜单导航。
             // 平时它们仍是快退 / 快进 / 音量（由下面的命令目录处理），所以这里必须**先判菜单**。
             if (TryNavigateDiscMenu(keyData)) return true;
@@ -141,6 +150,83 @@ namespace 播放器
 
             var code = keyData & Keys.KeyCode;
             return code >= Keys.F1 && code <= Keys.F24;
+        }
+
+        /// <summary>焦点是不是在文件页（列表或地址框）里。</summary>
+        private bool IsFileBrowserFocused(Message msg)
+        {
+            var view = sidebarPanel.FileBrowser;
+
+            Control? control = msg.HWnd != IntPtr.Zero
+                ? Control.FromHandle(msg.HWnd)
+                : FocusedControl();
+
+            if (control == null) return false;
+
+            return ReferenceEquals(control, view) || view.Contains(control);
+        }
+
+        private Control? FocusedControl()
+        {
+            Control? control = this;
+
+            while (control is ContainerControl container && container.ActiveControl != null)
+                control = container.ActiveControl;
+
+            return control;
+        }
+
+        /// <summary>列表自己的导航键：不带修饰时原样交给 ListView。</summary>
+        private bool ShouldPassFileBrowserNavigationKey(Message msg, Keys keyData)
+        {
+            if (!IsFileBrowserFocused(msg)) return false;
+
+            if ((keyData & (Keys.Control | Keys.Alt | Keys.Shift)) != Keys.None) return false;
+
+            return (keyData & Keys.KeyCode) is
+                Keys.Up or Keys.Down or Keys.Left or Keys.Right or
+                Keys.PageUp or Keys.PageDown or Keys.Home or Keys.End;
+        }
+
+        /// <summary>文件页自己处理的键；返回 true 表示这条按键已经消化。</summary>
+        private bool TryHandleFileBrowserKey(Message msg, Keys keyData)
+        {
+            if (!IsFileBrowserFocused(msg)) return false;
+
+            var view = sidebarPanel.FileBrowser;
+
+            if (keyData == (Keys.Alt | Keys.Left))
+            {
+                view.GoBack();
+                return true;
+            }
+
+            if (keyData == (Keys.Alt | Keys.Right))
+            {
+                view.GoForward();
+                return true;
+            }
+
+            switch (keyData)
+            {
+                case Keys.Enter:
+                    view.ActivateSelection();
+                    return true;
+
+                case Keys.Back:
+                    view.GoUp();
+                    return true;
+
+                case Keys.F5:
+                    view.Reload();
+                    return true;
+
+                case Keys.Delete:
+                    // 文件浏览器不删文件，也绝不能让这个键落到播放列表的"移除"上。
+                    return true;
+            }
+
+            return false;
         }
     }
 }

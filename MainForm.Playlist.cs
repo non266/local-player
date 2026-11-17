@@ -525,11 +525,18 @@ namespace 播放器
         /// <summary>一批后台扫描的产物：本地目录找到的、网络那一路解析出来的、有没有被取消。</summary>
         private readonly struct ScanOutcome
         {
-            internal ScanOutcome(List<string> local, NetworkPathImportResult network, bool cancelled)
+            internal ScanOutcome(
+                List<string> local,
+                NetworkPathImportResult network,
+                bool cancelled,
+                bool localTruncated,
+                MediaScanLimits localLimits)
             {
                 Local = local;
                 Network = network;
                 Cancelled = cancelled;
+                LocalTruncated = localTruncated;
+                LocalLimits = localLimits;
             }
 
             internal List<string> Local { get; }
@@ -537,6 +544,10 @@ namespace 播放器
             internal NetworkPathImportResult Network { get; }
 
             internal bool Cancelled { get; }
+
+            internal bool LocalTruncated { get; }
+
+            internal MediaScanLimits LocalLimits { get; }
         }
 
 
@@ -555,7 +566,8 @@ namespace 播放器
         /// 离线时这一步会等满 SMB 超时，但等的是后台线程，窗口照常能用。
         /// </para>
         /// </summary>
-        private void AddPathsWithFolders(IEnumerable<string> paths, AddPlayback playback)
+        private void AddPathsWithFolders(
+            IEnumerable<string> paths, AddPlayback playback, bool boundedLocalFolders = false)
         {
             var list = paths
                 .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -616,10 +628,14 @@ namespace 播放器
             Task.Run(() =>
             {
                 var found = new List<string>();
+                var localTruncated = false;
+                var localLimits = boundedLocalFolders
+                    ? MediaScanLimits.LocalBounded()
+                    : MediaScanLimits.Unlimited();
 
                 foreach (var folder in folders)
                 {
-                    // 本地目录没有条数上限（1.17.0 只给网络那一侧收口），但取消照样生效：
+                    // 本地目录默认没有条数上限（1.17.0 只给网络那一侧收口），但取消照样生效：
                     // 在文件夹之间看一眼，不必把整棵树扫完才响应。
                     if (token.IsCancellationRequested) break;
 
@@ -627,7 +643,17 @@ namespace 播放器
 
                     try
                     {
-                        found.AddRange(MediaFormats.EnumerateMediaFiles(folder, true));
+                        if (boundedLocalFolders)
+                        {
+                            // 文件浏览器发起的递归导入：有界、不跟重解析点。
+                            var scan = MediaScanner.Walk(folder, localLimits, token, null);
+                            found.AddRange(scan.Files);
+                            if (scan.Truncated) localTruncated = true;
+                        }
+                        else
+                        {
+                            found.AddRange(MediaFormats.EnumerateMediaFiles(folder, true));
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -642,7 +668,8 @@ namespace 播放器
                 // 网络这一路自己吞异常（逐条 try/catch），这里不会因为一条离线路径整批失败。
                 var imported = _networkImport.Run(network, token, _ => NoteScanFound());
 
-                return new ScanOutcome(found, imported, token.IsCancellationRequested);
+                return new ScanOutcome(
+                    found, imported, token.IsCancellationRequested, localTruncated, localLimits);
             }).ContinueWith(
                 task => PostScannedFiles(task, playback, batch),
                 CancellationToken.None,
@@ -723,8 +750,13 @@ namespace 播放器
                         }
                         else
                         {
-                            SetStatus(DescribeScanResult(added.Count, imported, outcome.Local.Count,
-                                _networkImport.Limits));
+                            SetStatus(DescribeScanResult(
+                                added.Count,
+                                imported,
+                                outcome.Local.Count,
+                                _networkImport.Limits,
+                                outcome.LocalTruncated,
+                                outcome.LocalLimits));
 
                             if (ShouldAutoPlay(playback, added.Count > 0)) PlayIndex(added[0]);
                         }
@@ -753,7 +785,9 @@ namespace 播放器
             int addedCount,
             NetworkPathImportResult imported,
             int localFilesFound,
-            MediaScanLimits limits)
+            MediaScanLimits networkLimits,
+            bool localTruncated,
+            MediaScanLimits localLimits)
         {
             var parts = new List<string>();
 
@@ -761,7 +795,11 @@ namespace 播放器
 
             // 触到上限必须说出来：不能让用户以为"这个目录就这么点东西"。
             if (imported.Truncated)
-                parts.Add($"网络目录太大，已达扫描上限（{limits.MaxDepth} 层 / {limits.MaxFiles:N0} 个文件），"
+                parts.Add($"网络目录太大，已达扫描上限（{networkLimits.MaxDepth} 层 / {networkLimits.MaxFiles:N0} 个文件），"
+                          + "只扫了一部分");
+
+            if (localTruncated)
+                parts.Add($"文件夹太大或层级太深，已达扫描上限（{localLimits.MaxDepth} 层 / {localLimits.MaxFiles:N0} 个文件），"
                           + "只扫了一部分");
 
             if (imported.Unreachable.Count > 0)

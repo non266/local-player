@@ -410,6 +410,7 @@ namespace 播放器
             _surfaces.RestorePlacement();
             ClampToWorkingArea();
             ApplyFloatingWindowsFromSettings();
+            ApplyFileBrowserSettings();
             ApplyDesktopLyricsFromSettings();
         }
 
@@ -420,6 +421,9 @@ namespace 播放器
             if ((_sidebarWindow != null) != _settings.SidebarFloating) SetSidebarFloating(_settings.SidebarFloating);
 
             if ((_playlistWindow != null) != _settings.PlaylistFloating) SetPlaylistFloating(_settings.PlaylistFloating);
+
+            if ((_fileBrowserWindow != null) != _settings.FileBrowserFloating)
+                SetFileBrowserFloating(_settings.FileBrowserFloating, revealInSidebar: false);
         }
 
         /// <summary>按设置把桌面歌词调成该有的样子（开 / 关、样式、位置）。</summary>

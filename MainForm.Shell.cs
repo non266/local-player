@@ -444,6 +444,7 @@ namespace 播放器
             // ShowPlaylist / ShowSidebar 由各自的 Apply*Visibility 维护（要考虑"已分离"的情况），
             // 这里不要再用分隔条的折叠状态去反推，否则分离状态下会被改成 false。
             _settings.SidebarPage = sidebarPanel.ActiveTab;
+            SyncFileBrowserSettings();
             _settings.LastPlaylist = _playlist.GetPaths();
             _settings.LastPlaylistIndex = _playlist.CurrentIndex;
             _settings.CurrentPlaylistName = _playlists.CurrentName;

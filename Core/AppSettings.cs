@@ -205,6 +205,50 @@ namespace 播放器.Core
         /// <summary>播放列表吸附时，沿贴合边方向相对主窗口左上角的偏移（像素）。</summary>
         public int PlaylistSnapOffset { get; set; }
 
+        // ---- 文件浏览器（1.24.0）--------------------------------------------
+
+        /// <summary>文件页是否已分离为独立窗口。</summary>
+        public bool FileBrowserFloating { get; set; }
+
+        /// <summary>独立文件浏览器窗口的位置与大小；宽高为 0 表示尚未保存过。</summary>
+        public int FileBrowserWindowX { get; set; }
+
+        public int FileBrowserWindowY { get; set; }
+
+        public int FileBrowserWindowWidth { get; set; }
+
+        public int FileBrowserWindowHeight { get; set; }
+
+        /// <summary>独立文件浏览器窗口吸附在主窗口的哪条边上。</summary>
+        public WindowSnapEdge FileBrowserSnap { get; set; } = WindowSnapEdge.None;
+
+        /// <summary>文件浏览器窗口吸附时，沿贴合边方向相对主窗口左上角的偏移（像素）。</summary>
+        public int FileBrowserSnapOffset { get; set; }
+
+        /// <summary>文件列表的排序依据（名称 / 大小 / 修改时间 / 类型）。</summary>
+        public string FileBrowserSort
+        {
+            get => _fileBrowserSort;
+            set => _fileBrowserSort = FileSortFields.Normalize(value);
+        }
+
+        private string _fileBrowserSort = FileSortFields.ByName;
+
+        /// <summary>文件列表是否降序。</summary>
+        public bool FileBrowserSortDescending { get; set; }
+
+        /// <summary>是否连不支持播放的文件与隐藏 / 系统项一起显示。</summary>
+        public bool FileBrowserShowAllFiles { get; set; }
+
+        /// <summary>上次浏览的目录；空串表示"此电脑"。</summary>
+        public string FileBrowserLastPath { get; set; } = string.Empty;
+
+        /// <summary>收藏的目录（最多 20 条，最新在前；路径明文，与最近串流地址不同，不含凭据）。</summary>
+        public List<string> FileBrowserFavorites { get; set; } = new List<string>();
+
+        /// <summary>最近浏览的目录（最多 10 条，最新在前）。死链保留，点开时如实报错。</summary>
+        public List<string> FileBrowserRecent { get; set; } = new List<string>();
+
         /// <summary>关闭窗口时是缩到系统托盘，还是直接退出。</summary>
         public bool MinimizeToTray { get; set; }
 
@@ -569,6 +613,15 @@ namespace 播放器.Core
                 parsed.LastDirectory ??= string.Empty;
                 parsed.AspectRatio ??= string.Empty;
                 parsed.LastPlaylist ??= new List<string>();
+
+                // 文件浏览器：坏路径 / 坏排序值都归默认，不把异常带进界面；
+                // 收藏与最近只留"能当目录的绝对路径"，手改出来的相对路径 / 串流地址直接丢掉。
+                parsed.FileBrowserFavorites = FileBrowserState.NormalizeList(
+                    parsed.FileBrowserFavorites, FileBrowserState.FavoriteCapacity);
+                parsed.FileBrowserRecent = FileBrowserState.NormalizeList(
+                    parsed.FileBrowserRecent, FileBrowserState.RecentCapacity);
+                parsed.FileBrowserLastPath = FileBrowserPaths.NormalizeStored(parsed.FileBrowserLastPath);
+                parsed.FileBrowserSort = FileSortFields.Normalize(parsed.FileBrowserSort);
                 parsed.CurrentPlaylistName = (parsed.CurrentPlaylistName ?? string.Empty).Trim();
                 parsed.CurrentSettingsProfileName = (parsed.CurrentSettingsProfileName ?? string.Empty).Trim();
                 parsed.AudioDeviceId ??= string.Empty;

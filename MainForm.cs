@@ -262,6 +262,10 @@ namespace 播放器
             ApplyTheme(_settings.Theme);
             _themeReady = true;
 
+            // 文件页的设置要赶在 ApplySettings 之前装好：那一步可能把侧栏切到「文件」页，
+            // 而视图一旦拿到句柄就会开始读目录，晚了就会先读一个空路径。
+            InitializeFileBrowser();
+
             WireEvents();
             ApplySettings();
             InitializeTray();

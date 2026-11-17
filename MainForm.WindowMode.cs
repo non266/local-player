@@ -117,6 +117,8 @@ namespace 播放器
             // 迷你模式固定置顶：这一项在迷你里点不出效果，置灰并靠勾选状态说明。
             menuViewTopMost.Enabled = !IsMiniWindow;
 
+            UpdateFileBrowserMenuState();
+
             UpdateWindowModeChecks();
         }
 

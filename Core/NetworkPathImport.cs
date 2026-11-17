@@ -49,8 +49,11 @@ namespace 播放器.Core
             set;
         } = (folder, limits, token, onFile) => MediaScanner.Walk(folder, limits, token, onFile);
 
-        /// <summary>递归枚举的上限。<b>只对网络路径生效</b>（本地目录沿用无限的那条路）。</summary>
-        internal MediaScanLimits Limits { get; set; } = new MediaScanLimits();
+        /// <summary>
+        /// 递归枚举的上限。<b>只对网络路径生效</b>（本地目录沿用无限的那条路）。
+        /// 网络位置不跟重解析点：共享目录里的联接指回上层时同样会无限递归。
+        /// </summary>
+        internal MediaScanLimits Limits { get; set; } = new MediaScanLimits { FollowReparsePoints = false };
 
         /// <summary>读一个 m3u / m3u8（默认走 <see cref="PlaylistFile.Load"/>）。测试可以替换。</summary>
         internal Func<string, List<string>> ReadPlaylist { get; set; } = PlaylistFile.Load;

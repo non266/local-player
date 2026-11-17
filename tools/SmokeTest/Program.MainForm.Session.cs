@@ -198,7 +198,8 @@ namespace SmokeTest
                     var status = ReadStatus(form);
 
                     if (!status.Contains("空列表", StringComparison.Ordinal) &&
-                        !status.Contains("没注册上", StringComparison.Ordinal))
+                        !status.Contains("没注册上", StringComparison.Ordinal) &&
+                        !status.Contains("注册失败", StringComparison.Ordinal))
                     {
                         Log(6, $"启动开关检查：空着启动，但状态栏没说（「{status}」）");
                         return false;

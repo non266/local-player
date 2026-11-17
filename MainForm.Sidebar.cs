@@ -48,6 +48,7 @@ namespace 播放器
         private void ConfigureMetadataMenus()
         {
             ConfigureSidebarMenus();
+            ConfigureFileBrowserMenu();
             ConfigureDesktopLyricsMenu();
             ConfigureOnlineLookupMenu();
             ConfigureLyricsOffsetMenu();

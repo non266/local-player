@@ -6,7 +6,7 @@ using 播放器.Core;
 
 namespace 播放器.Ui
 {
-    /// <summary>侧栏的四个页面。</summary>
+    /// <summary>侧栏的五个页面。</summary>
     public enum SidebarTab
     {
         /// <summary>歌词。</summary>
@@ -19,13 +19,16 @@ namespace 播放器.Ui
         Info = 2,
 
         /// <summary>视频工具（去隔行、音画同步、逐帧）。</summary>
-        Video = 3
+        Video = 3,
+
+        /// <summary>文件浏览器（1.24.0；可单独分离成独立窗口）。</summary>
+        Files = 4
     }
 
     /// <summary>
-    /// 右侧可折叠的侧栏：顶部是标签条，下面依次是歌词 / 封面 / 媒体信息。
+    /// 右侧可折叠的侧栏：顶部是标签条，下面是歌词 / 封面 / 媒体信息 / 视频工具 / 文件。
     /// <para>
-    /// 三个页面共用同一块区域，一次只显示一个，所以侧栏宽度不会被内容反复撑开，
+    /// 五个页面共用同一块区域，一次只显示一个，所以侧栏宽度不会被内容反复撑开，
     /// 主界面的布局始终稳定。
     /// </para>
     /// <para>
@@ -42,6 +45,11 @@ namespace 播放器.Ui
         private readonly CoverView _cover;
         private readonly InfoView _info;
         private readonly VideoToolsView _videoTools;
+        private readonly FileBrowserView _fileBrowser;
+        private readonly Panel _fileBrowserHost;
+        private readonly Panel _fileBrowserPlaceholder;
+        private readonly Label _filePlaceholderLabel;
+        private readonly Button _fileDockButton;
         private readonly WheelForwarder _wheelForwarder;
 
         private SidebarTab _activeTab = SidebarTab.Lyrics;
@@ -58,11 +66,31 @@ namespace 播放器.Ui
             _info = new InfoView { Dock = DockStyle.Fill, Visible = false };
             _videoTools = new VideoToolsView { Dock = DockStyle.Fill, Visible = false };
 
+            _fileBrowser = new FileBrowserView { Dock = DockStyle.Fill };
+            _fileBrowserHost = new Panel { Dock = DockStyle.Fill, Visible = false };
+            _fileBrowserPlaceholder = new Panel { Dock = DockStyle.Fill, Visible = false };
+            _filePlaceholderLabel = new Label
+            {
+                Text = "文件浏览器已分离到独立窗口",
+                TextAlign = ContentAlignment.MiddleCenter,
+                AutoSize = false
+            };
+            _fileDockButton = new Button { Text = "归位", AutoSize = false };
+            _fileDockButton.Click += (s, e) => FileBrowserDockRequested?.Invoke(this, EventArgs.Empty);
+
+            _fileBrowserPlaceholder.Controls.Add(_filePlaceholderLabel);
+            _fileBrowserPlaceholder.Controls.Add(_fileDockButton);
+            _fileBrowserPlaceholder.Resize += (s, e) => LayoutFileBrowserPlaceholder();
+
+            _fileBrowserHost.Controls.Add(_fileBrowser);
+            _fileBrowserHost.Controls.Add(_fileBrowserPlaceholder);
+
             // 先加的在最底层：歌词在最下面，其余依次盖在上面，靠 Visible 切换
             _host.Controls.Add(_lyrics);
             _host.Controls.Add(_cover);
             _host.Controls.Add(_info);
             _host.Controls.Add(_videoTools);
+            _host.Controls.Add(_fileBrowserHost);
 
             Controls.Add(_host);
             Controls.Add(_tabs);
@@ -81,6 +109,9 @@ namespace 播放器.Ui
         /// <summary>用户点了歌词里的一行，请求跳转到该时间点。</summary>
         public event EventHandler<TimeSpan>? SeekRequested;
 
+        /// <summary>文件页已被分离出去，用户点了「归位」。</summary>
+        public event EventHandler? FileBrowserDockRequested;
+
         /// <summary>当前页面。</summary>
         public SidebarTab ActiveTab
         {
@@ -96,11 +127,66 @@ namespace 播放器.Ui
                 _cover.Visible = value == SidebarTab.Cover;
                 _info.Visible = value == SidebarTab.Info;
                 _videoTools.Visible = value == SidebarTab.Video;
+                _fileBrowserHost.Visible = value == SidebarTab.Files;
+
+                if (value == SidebarTab.Files) _fileBrowser.EnsureLoaded();
             }
         }
 
         /// <summary>「画面」页，供主窗体接线。</summary>
         public VideoToolsView VideoTools => _videoTools;
+
+        /// <summary>「文件」页，供主窗体接线。</summary>
+        public FileBrowserView FileBrowser => _fileBrowser;
+
+        /// <summary>文件页当前是否被搬进了独立窗口（冒烟测试用）。</summary>
+        internal bool FileBrowserDetached => _fileBrowserPlaceholder.Visible;
+
+        /// <summary>
+        /// 把文件页交出去（主窗体负责把它塞进独立窗口），侧栏留下「已分离」占位。
+        /// </summary>
+        internal FileBrowserView DetachFileBrowser()
+        {
+            _fileBrowserHost.Controls.Remove(_fileBrowser);
+            _fileBrowserPlaceholder.Visible = true;
+            _fileBrowserPlaceholder.BringToFront();
+            LayoutFileBrowserPlaceholder();
+            return _fileBrowser;
+        }
+
+        /// <summary>把文件页搬回侧栏并隐藏占位。</summary>
+        internal void AttachFileBrowser(FileBrowserView view)
+        {
+            _fileBrowserPlaceholder.Visible = false;
+
+            view.Dock = DockStyle.Fill;
+            view.Visible = true;
+
+            _fileBrowserHost.Controls.Add(view);
+            view.BringToFront();
+            view.EnsureLoaded();
+        }
+
+        private void LayoutFileBrowserPlaceholder()
+        {
+            var scale = DeviceDpi / 96f;
+            int Scaled(int value) => (int)Math.Round(value * scale);
+
+            var width = Math.Max(1, _fileBrowserPlaceholder.ClientSize.Width);
+            var height = Math.Max(1, _fileBrowserPlaceholder.ClientSize.Height);
+
+            _filePlaceholderLabel.SetBounds(
+                Scaled(12),
+                Math.Max(0, height / 2 - Scaled(52)),
+                Math.Max(1, width - Scaled(24)),
+                Scaled(56));
+
+            _fileDockButton.SetBounds(
+                Math.Max(0, (width - Scaled(88)) / 2),
+                Math.Max(0, height / 2 + Scaled(12)),
+                Scaled(88),
+                Scaled(28));
+        }
 
         /// <summary>替换当前曲目的全部内容。</summary>
         /// <param name="pending">标签还在读（1.19.0）：封面页先写「正在读取标签…」、封面留空。</param>
@@ -148,22 +234,34 @@ namespace 播放器.Ui
             _cover.ApplyPalette(palette);
             _info.ApplyPalette(palette);
             _videoTools.ApplyPalette(palette);
+            _fileBrowser.ApplyPalette(palette);
+
+            _fileBrowserHost.BackColor = palette.PanelBack;
+            _fileBrowserPlaceholder.BackColor = palette.PanelBack;
+            _filePlaceholderLabel.ForeColor = palette.HintFore;
+
+            _fileDockButton.FlatStyle = FlatStyle.Flat;
+            _fileDockButton.BackColor = palette.MenuBack;
+            _fileDockButton.ForeColor = palette.MenuFore;
+            _fileDockButton.FlatAppearance.BorderColor = palette.MenuBorder;
         }
 
         /// <summary>列表类控件的滚动条要交给系统 API 才能变深色。</summary>
         public void ApplyNativeTheme(bool dark)
         {
-            if (!_info.IsHandleCreated) return;
+            if (_info.IsHandleCreated)
+            {
+                NativeTheme.ApplyListView(_info.Handle, dark);
+                _info.Invalidate();
+            }
 
-            NativeTheme.ApplyListView(_info.Handle, dark);
-            _info.Invalidate();
+            _fileBrowser.ApplyNativeTheme(dark);
         }
 
         /// <summary>把滚轮转交给歌词页；返回 true 表示消息已被消化。</summary>
         private bool TryForwardWheel(IntPtr wParam, IntPtr lParam)
         {
             if (!Visible || !IsHandleCreated) return false;
-            if (_activeTab != SidebarTab.Lyrics) return false;
 
             // lParam 的低字是 x、高字是 y（屏幕坐标）；wParam 的高字才是滚动量。
             var position = (long)lParam;
@@ -173,6 +271,14 @@ namespace 播放器.Ui
 
             var delta = HighWord((long)wParam);
             if (delta == 0) return false;
+
+            if (_activeTab == SidebarTab.Files)
+            {
+                _fileBrowser.ScrollBy(delta);
+                return true;
+            }
+
+            if (_activeTab != SidebarTab.Lyrics) return false;
 
             _lyrics.ScrollBy(delta);
             return true;

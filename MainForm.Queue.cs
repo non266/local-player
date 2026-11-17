@@ -83,15 +83,38 @@ namespace 播放器
                 return;
             }
 
-            var added = 0;
-            var already = 0;
-            var full = 0;
+            var paths = new List<string>();
 
             foreach (var index in indexes)
             {
                 if (index < 0 || index >= _playlist.Count) continue;
 
-                switch (_queue.Enqueue(_playlist.Items[index].FilePath))
+                paths.Add(_playlist.Items[index].FilePath);
+            }
+
+            QueuePathsForNext(paths);
+        }
+
+        /// <summary>
+        /// 把一批路径排进「下一首播放」；文件浏览器与播放列表右键共用这一条。
+        /// </summary>
+        private void QueuePathsForNext(IReadOnlyList<string> paths)
+        {
+            if (paths.Count == 0)
+            {
+                SetStatus("先选一项，再点「下一首播放」");
+                return;
+            }
+
+            var added = 0;
+            var already = 0;
+            var full = 0;
+
+            foreach (var path in paths)
+            {
+                if (string.IsNullOrWhiteSpace(path)) continue;
+
+                switch (_queue.Enqueue(path))
                 {
                     case QueueAddResult.Added:
                         added++;

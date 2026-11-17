@@ -167,6 +167,12 @@ namespace 播放器
 
             if (_playlistWindow is { IsHandleCreated: true })
                 NativeTheme.ApplyTitleBar(_playlistWindow.Handle, p.IsDark);
+
+            if (_fileBrowserWindow is { IsHandleCreated: true })
+            {
+                NativeTheme.ApplyTitleBar(_fileBrowserWindow.Handle, p.IsDark);
+                FileBrowser.ApplyNativeTheme(p.IsDark);
+            }
         }
 
         private void UpdateThemeMenuChecks(ThemeId id)

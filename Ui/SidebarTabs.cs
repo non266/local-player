@@ -5,16 +5,16 @@ using System.Windows.Forms;
 namespace 播放器.Ui
 {
     /// <summary>
-    /// 侧栏顶部的标签条：三个等宽标签加一个折叠按钮，全部自绘以跟随主题。
+    /// 侧栏顶部的标签条：五个等宽标签加一个折叠按钮，全部自绘以跟随主题。
     /// <para>
     /// 没用 <see cref="TabControl"/> 是因为它的标签外观由系统绘制，
     /// 深色主题下要么白得刺眼，要么得整套 owner-draw 重写；
-    /// 这里只有三个标签，直接画反而更省事、样式也统一。
+    /// 这里只有五个标签，直接画反而更省事、样式也统一。
     /// </para>
     /// </summary>
     internal sealed class SidebarTabs : Control
     {
-        private static readonly string[] Titles = { "歌词", "封面", "信息", "视频" };
+        private static readonly string[] Titles = { "歌词", "封面", "信息", "视频", "文件" };
 
         /// <summary>折叠按钮占的宽度（未按 DPI 缩放）。</summary>
         private const int CollapseWidth = 28;
@@ -44,7 +44,7 @@ namespace 播放器.Ui
             Font = UiFonts.Sidebar;
 
             AccessibleName = "侧栏页面";
-            AccessibleDescription = "用左右方向键切换页面，Enter 选中，Ctrl+Enter 折叠侧栏";
+            AccessibleDescription = "五个页面：歌词、封面、信息、视频、文件；用左右方向键切换，Enter 选中，Ctrl+Enter 折叠侧栏";
             AccessibleRole = AccessibleRole.PageTabList;
         }
 

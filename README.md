@@ -8,7 +8,8 @@
 [参考手册](docs/参考手册.md) ·
 [架构](docs/ARCHITECTURE.md) ·
 [维护](docs/维护手册.md) ·
-[变更](CHANGELOG.md)
+[变更](CHANGELOG.md) ·
+[MIT](LICENSE)
 
 ## 功能速览
 
@@ -174,6 +175,14 @@ native/              VLC 原包里缺的 DVD 插件（来源与哈希）
   若频繁出现请附日志与转储。
 
 更完整的边界与实测数据见 [docs/介绍.md](docs/介绍.md) 与 [docs/参考手册.md](docs/参考手册.md)。
+
+## 许可证
+
+本仓库自己的源码使用 [MIT 许可证](LICENSE)，版权归 `non266`（2026）。
+
+随包分发的第三方组件仍按各自许可证：libvlc 与 LibVLCSharp 是 **LGPL-2.1-or-later**；
+VLC 的部分插件（包括 `native/` 下的两个 DVD 插件）是 **GPLv2+**，其余见各自发行包。
+MIT 只覆盖本项目的代码，不改变这些组件的许可证。
 
 ---
 项目地址：<https://github.com/non266/local-player>

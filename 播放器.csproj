@@ -56,6 +56,14 @@
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 发行包（便携 zip / 安装程序）里也带一份许可证：MIT 要求随副本附带版权与许可声明。 -->
+    <None Update="LICENSE">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
   <!--
     随包的 DVD 访问插件（1.11.0 的 F13）。
     VideoLAN.LibVLC.Windows 3.0.24 的 plugins\access 里**没有** dvdread / dvdnav，

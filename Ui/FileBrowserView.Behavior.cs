@@ -150,15 +150,13 @@ namespace 播放器.Ui
             _initialLoadPending = false;
             _isRoots = result.IsRoots;
             _entries = result.Entries;
+            _truncated = result.Truncated;
 
             FileBrowserService.Sort(_entries, _state.SortField, _state.SortDescending);
 
             FillList();
-
-            if (result.Truncated)
-                SetStatus(DescribeCount(result.Truncated), false);
-            else
-                SetStatus(DescribeCount(false), false);
+            UpdateStatusCount();
+            ApplyPendingSelection();
 
             _state.NoteSuccessfulLoad(target);
             UpdateAddressText();
@@ -169,6 +167,8 @@ namespace 播放器.Ui
         private void FinishWithError(string message)
         {
             _entries = new List<FileBrowserEntry>();
+            _truncated = false;
+            _pendingSelectPath = null;
             FillList();
             UpdateNavigationButtons();
             ReportStatus(message, true);
@@ -214,6 +214,8 @@ namespace 播放器.Ui
 
         private void NavigateToPath(string? path)
         {
+            ResetFilter();
+            _pendingSelectPath = null;
             _state.Navigate(path);
             UpdateAddressText();
             UpdateNavigationButtons();
@@ -224,6 +226,8 @@ namespace 播放器.Ui
         {
             if (!_state.TryGoBack(out _)) return;
 
+            ResetFilter();
+            _pendingSelectPath = null;
             UpdateAddressText();
             UpdateNavigationButtons();
             StartLoad();
@@ -233,6 +237,8 @@ namespace 播放器.Ui
         {
             if (!_state.TryGoForward(out _)) return;
 
+            ResetFilter();
+            _pendingSelectPath = null;
             UpdateAddressText();
             UpdateNavigationButtons();
             StartLoad();
@@ -263,13 +269,18 @@ namespace 播放器.Ui
             var icons = _icons;
             var imageIndex = icons?.IndexOf(FileBrowserKind.Other) ?? 0;
 
+            _visibleEntries = _entries
+                .Where(entry => FileBrowserFilter.Matches(entry, _query)
+                                && FileBrowserFilter.MatchesType(entry, _typeFilter))
+                .ToList();
+
             _list.BeginUpdate();
 
             try
             {
                 _list.Items.Clear();
 
-                foreach (var entry in _entries)
+                foreach (var entry in _visibleEntries)
                 {
                     var item = new ListViewItem(entry.Name)
                     {
@@ -290,20 +301,194 @@ namespace 播放器.Ui
             UpdateSortHeaders();
         }
 
-        private string DescribeCount(bool truncated)
+        private void UpdateStatusCount()
+        {
+            SetStatus(DescribeCount(), false);
+        }
+
+        private string DescribeCount()
         {
             if (_isRoots)
                 return _entries.Count == 0 ? "没有找到可用的磁盘" : $"{_entries.Count} 个驱动器";
 
-            var folders = _entries.Count(entry => entry.IsDirectory);
-
             if (_entries.Count == 0) return "这个文件夹里没有可显示的项目";
 
-            var text = $"{_entries.Count:N0} 项（{folders:N0} 个文件夹）";
+            var filtering = IsFiltering;
+            var visibleCount = _visibleEntries.Count;
+            var visibleFolders = _visibleEntries.Count(entry => entry.IsDirectory);
 
-            if (truncated) text += " · 已达显示上限，只列出了一部分";
+            var text = filtering
+                ? (_typeFilter == FileBrowserTypeFilter.All ? string.Empty : DescribeTypeFilter() + " · ")
+                  + $"筛选 {visibleCount:N0}/{_entries.Count:N0} 项（{visibleFolders:N0} 个文件夹）"
+                : $"{_entries.Count:N0} 项（{_entries.Count(entry => entry.IsDirectory):N0} 个文件夹）";
+
+            if (_truncated) text += " · 已达显示上限，只列出了一部分";
 
             return text;
+        }
+
+        private string DescribeTypeFilter() => _typeFilter switch
+        {
+            FileBrowserTypeFilter.Video => "只看视频",
+            FileBrowserTypeFilter.Audio => "只看音频",
+            FileBrowserTypeFilter.Subtitle => "只看字幕",
+            FileBrowserTypeFilter.Playlist => "只看播放列表",
+            _ => string.Empty
+        };
+
+        private bool IsFiltering =>
+            !string.IsNullOrWhiteSpace(_query) || _typeFilter != FileBrowserTypeFilter.All;
+
+        /// <summary>搜索 / 类型筛选变化：只重排现有条目，不读磁盘。</summary>
+        private void ApplyFilter()
+        {
+            // 正在读取时不动列表；读完会按当前的查询 / 类型再 FillList。
+            if (_loading) return;
+
+            FillList();
+            UpdateStatusCount();
+        }
+
+        /// <summary>路径变化时清空过滤；F5 刷新保留。</summary>
+        private void ResetFilter()
+        {
+            if (!IsFiltering && _search.Text.Length == 0) return;
+
+            _suppressFilterEvents = true;
+
+            try
+            {
+                _search.Text = string.Empty;
+            }
+            finally
+            {
+                _suppressFilterEvents = false;
+            }
+
+            _query = string.Empty;
+            _typeFilter = FileBrowserTypeFilter.All;
+        }
+
+        private void OnSearchKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape)
+            {
+                ClearSearch();
+                _list.Focus();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            if (e.KeyCode == Keys.Enter)
+            {
+                _list.Focus();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        internal void ClearSearch()
+        {
+            if (_search.Text.Length == 0 && _query.Length == 0) return;
+
+            _suppressFilterEvents = true;
+
+            try
+            {
+                _search.Text = string.Empty;
+            }
+            finally
+            {
+                _suppressFilterEvents = false;
+            }
+
+            _query = string.Empty;
+            ApplyFilter();
+        }
+
+        internal void FocusSearch()
+        {
+            _search.Focus();
+            _search.SelectAll();
+        }
+
+        internal void ClearSearchForTest() => ClearSearch();
+
+        internal void SetTypeFilterForTest(FileBrowserTypeFilter filter) => SetTypeFilter(filter);
+
+        private void SetTypeFilter(FileBrowserTypeFilter filter)
+        {
+            if (_typeFilter == filter) return;
+
+            _typeFilter = filter;
+            ApplyFilter();
+        }
+
+        /// <summary>定位：导航到文件所在目录，并在读完目录后选中它。</summary>
+        internal void NavigateToFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                ReportStatus("文件已经不在了：" + path, true);
+                return;
+            }
+
+            var directory = Path.GetDirectoryName(path);
+
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                ReportStatus("这个文件没有所在文件夹", true);
+                return;
+            }
+
+            _pendingSelectPath = path;
+
+            // 定位要看得见目标：先把"只看视频 / 搜索"这类临时视图清掉。
+            ResetFilter();
+
+            if (!_loading
+                && _loadedOnce
+                && string.Equals(_state.CurrentPath, directory, StringComparison.OrdinalIgnoreCase))
+            {
+                FillList();
+                UpdateStatusCount();
+                ApplyPendingSelection();
+                return;
+            }
+
+            _state.Navigate(directory);
+            UpdateAddressText();
+            UpdateNavigationButtons();
+            StartLoad();
+        }
+
+        internal void NavigateToFileForTest(string path) => NavigateToFile(path);
+
+        private void ApplyPendingSelection()
+        {
+            var pending = _pendingSelectPath;
+
+            if (pending == null) return;
+
+            _pendingSelectPath = null;
+
+            var item = _list.Items
+                .OfType<ListViewItem>()
+                .FirstOrDefault(row => row.Tag is FileBrowserEntry entry
+                                       && string.Equals(entry.FullPath, pending, StringComparison.OrdinalIgnoreCase));
+
+            if (item == null)
+            {
+                ReportStatus("当前文件不在这个文件夹里：" + pending, true);
+                return;
+            }
+
+            _list.SelectedItems.Clear();
+            item.Selected = true;
+            item.Focused = true;
+            item.EnsureVisible();
+            _list.Focus();
         }
 
         private void UpdateSortHeaders()
@@ -490,6 +675,43 @@ namespace 播放器.Ui
 
             return entries;
         }
+
+        // ---- 拖动到播放列表 ---------------------------------------------------
+
+        private void OnFileItemDrag(object? sender, ItemDragEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left || _loading) return;
+
+            var data = BuildFileDropData();
+            if (data == null) return;
+
+            _list.DoDragDrop(data, DragDropEffects.Copy);
+        }
+
+        /// <summary>
+        /// 拖放数据：同时带 <see cref="DataFormats.FileDrop"/>（外部程序可用）与
+        /// <see cref="FileBrowserDrag.Format"/>（本程序据此把文件夹递归走有界扫描）。
+        /// </summary>
+        private DataObject? BuildFileDropData()
+        {
+            var paths = _list.SelectedItems
+                .Cast<ListViewItem>()
+                .OrderBy(item => item.Index)
+                .Select(item => item.Tag)
+                .OfType<FileBrowserEntry>()
+                .Select(entry => entry.FullPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (paths.Length == 0) return null;
+
+            var data = new DataObject();
+            data.SetData(DataFormats.FileDrop, paths);
+            data.SetData(FileBrowserDrag.Format, paths);
+            return data;
+        }
+
+        internal DataObject? BuildFileDropDataForTest() => BuildFileDropData();
 
         // ---- 排序 / 过滤 -------------------------------------------------------
 
@@ -690,6 +912,11 @@ namespace 播放器.Ui
         {
             ClearMenuItems(_positionMenu.Items);
 
+            var locate = new ToolStripMenuItem("定位当前播放文件(&L)");
+            locate.Click += (s, e) => LocateRequested?.Invoke(this, EventArgs.Empty);
+            _positionMenu.Items.Add(locate);
+            _positionMenu.Items.Add(new ToolStripSeparator());
+
             var computer = new ToolStripMenuItem("此电脑(&T)");
             computer.Click += (s, e) => NavigateTo(null);
             _positionMenu.Items.Add(computer);
@@ -732,6 +959,14 @@ namespace 播放器.Ui
             showAll.Click += (s, e) => SetShowAllFiles(!_state.ShowAllFiles);
             _positionMenu.Items.Add(showAll);
 
+            var type = new ToolStripMenuItem("只看类型(&T)");
+            type.DropDownItems.Add(CreateTypeItem("全部(&A)", FileBrowserTypeFilter.All));
+            type.DropDownItems.Add(CreateTypeItem("视频(&V)", FileBrowserTypeFilter.Video));
+            type.DropDownItems.Add(CreateTypeItem("音频(&M)", FileBrowserTypeFilter.Audio));
+            type.DropDownItems.Add(CreateTypeItem("字幕(&S)", FileBrowserTypeFilter.Subtitle));
+            type.DropDownItems.Add(CreateTypeItem("播放列表(&P)", FileBrowserTypeFilter.Playlist));
+            _positionMenu.Items.Add(type);
+
             var sort = new ToolStripMenuItem("排序(&S)");
 
             sort.DropDownItems.Add(CreateSortItem("名称(&N)", FileSortField.Name));
@@ -751,6 +986,13 @@ namespace 播放器.Ui
         {
             var item = new ToolStripMenuItem(text) { Checked = _state.SortField == field };
             item.Click += (s, e) => SetSort(field, _state.SortDescending);
+            return item;
+        }
+
+        private ToolStripMenuItem CreateTypeItem(string text, FileBrowserTypeFilter filter)
+        {
+            var item = new ToolStripMenuItem(text) { Checked = _typeFilter == filter };
+            item.Click += (s, e) => SetTypeFilter(filter);
             return item;
         }
 

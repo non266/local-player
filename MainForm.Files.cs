@@ -256,20 +256,37 @@ namespace 播放器
                 return;
             }
 
-            if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop))
+            if (e.Data != null
+                && (e.Data.GetDataPresent(FileBrowserDrag.Format)
+                    || e.Data.GetDataPresent(DataFormats.FileDrop)))
+            {
                 e.Effect = DragDropEffects.Copy;
+            }
         }
 
-        private void OnDragDrop(object? sender, DragEventArgs e)
+        private void OnDragDrop(object? sender, DragEventArgs e) => HandleDrop(e.Data);
+
+        /// <summary>冒烟钩子：直接把一次拖放数据交给与真实拖放相同的处理路径。</summary>
+        internal void HandleDropForTest(IDataObject? data) => HandleDrop(data);
+
+        private void HandleDrop(IDataObject? data)
         {
-            if (e.Data?.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0)
-                return;
+            // 文件页拖来的同时带了 FileDrop 与自己的格式：优先按内部格式走，
+            // 这样文件夹递归沿用 1.24.0 的有界扫描，而不是外部拖入那条无界路径。
+            var internalPaths = data?.GetData(FileBrowserDrag.Format) as string[];
+            var fromFileBrowser = internalPaths != null && internalPaths.Length > 0;
+
+            var paths = fromFileBrowser
+                ? internalPaths!
+                : data?.GetData(DataFormats.FileDrop) as string[];
+
+            if (paths == null || paths.Length == 0) return;
 
             // 网络位置不在这里查存在性（离线网络盘会卡满超时）；它是否可用交给播放前的后台探测。
             RememberDirectory(paths.FirstOrDefault(p => !MediaFormats.IsNetworkPath(p) && File.Exists(p)));
 
             // 拖进来的可能是文件夹，展开走后台，别把窗口卡住。
-            AddPathsWithFolders(paths, AddPlayback.IfIdle);
+            AddPathsWithFolders(paths, AddPlayback.IfIdle, boundedLocalFolders: fromFileBrowser);
         }
     }
 }

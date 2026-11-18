@@ -25,7 +25,9 @@ namespace 播放器.Ui
         private readonly Button _positionButton = new Button();
 
         private readonly Panel _toolbar = new Panel();
+        private readonly Panel _filterBar = new Panel();
         private readonly TextBox _address = new TextBox();
+        private readonly TextBox _search = new TextBox();
         private readonly ListView _list = new ListView();
         private readonly ColumnHeader _nameColumn = new ColumnHeader { Text = "名称" };
         private readonly ColumnHeader _sizeColumn = new ColumnHeader { Text = "大小" };
@@ -44,7 +46,14 @@ namespace 播放器.Ui
         private FileBrowserService _service = new FileBrowserService();
         private FileBrowserState _state = new FileBrowserState();
         private List<FileBrowserEntry> _entries = new List<FileBrowserEntry>();
+        private List<FileBrowserEntry> _visibleEntries = new List<FileBrowserEntry>();
         private FileIconSet? _icons;
+
+        private string _query = string.Empty;
+        private FileBrowserTypeFilter _typeFilter = FileBrowserTypeFilter.All;
+        private bool _truncated;
+        private bool _suppressFilterEvents;
+        private string? _pendingSelectPath;
 
         private CancellationTokenSource? _loadCts;
         private int _loadVersion;
@@ -67,12 +76,15 @@ namespace 播放器.Ui
                      | ControlStyles.ResizeRedraw, true);
 
             BuildToolbar();
+            BuildFilterBar();
             BuildList();
             BuildStatus();
 
             // 先加 Fill 再加 Top / Bottom：WinForms 的停靠顺序是反的，
-            // 这样列表占剩下的区域，工具栏与状态行不会被它盖住。
+            // 这样列表占剩下的区域，工具栏 / 搜索行与状态行不会被它盖住。
+            // 搜索行放在工具栏之前加：后加的工具栏先占顶部，搜索行落在它下面。
             Controls.Add(_list);
+            Controls.Add(_filterBar);
             Controls.Add(_toolbar);
             Controls.Add(_status);
 
@@ -101,6 +113,9 @@ namespace 播放器.Ui
         /// <summary>用户点了「清除最近浏览」（主窗体负责当场落盘）。</summary>
         internal event EventHandler? RecentCleared;
 
+        /// <summary>用户点了「定位当前播放文件」；由主窗体去找当前媒体并导航。</summary>
+        internal event EventHandler? LocateRequested;
+
         internal FileBrowserState State => _state;
 
         internal ListView List => _list;
@@ -110,6 +125,11 @@ namespace 播放器.Ui
         internal bool IsLoading => _loading;
 
         internal IReadOnlyList<FileBrowserEntry> Entries => _entries;
+
+        /// <summary>测试钩子：搜索框（设置 Text 会走与用户输入相同的过滤路径）。</summary>
+        internal TextBox SearchBoxForTest => _search;
+
+        internal void SetSearchTextForTest(string value) => _search.Text = value;
 
         /// <summary>测试钩子：换掉目录读取（假的慢 I/O / 固定结果）。</summary>
         [Browsable(false)]
@@ -133,6 +153,10 @@ namespace 播放器.Ui
 
             _address.BackColor = palette.ListBack;
             _address.ForeColor = palette.ListFore;
+
+            _filterBar.BackColor = palette.PanelBack;
+            _search.BackColor = palette.ListBack;
+            _search.ForeColor = palette.ListFore;
 
             _list.BackColor = palette.ListBack;
             _list.ForeColor = palette.ListFore;
@@ -194,6 +218,8 @@ namespace 播放器.Ui
             var sortChanged = _state.SortField != state.SortField || _state.SortDescending != state.SortDescending;
             var wasLoaded = _loadedOnce;
 
+            ResetFilter();
+            _pendingSelectPath = null;
             _state = state;
 
             UpdateAddressText();
@@ -255,6 +281,36 @@ namespace 播放器.Ui
             }
         }
 
+        private void BuildFilterBar()
+        {
+            _filterBar.Dock = DockStyle.Top;
+
+            _search.Dock = DockStyle.Fill;
+            _search.BorderStyle = BorderStyle.FixedSingle;
+            _search.Font = UiFonts.Sidebar;
+            _search.PlaceholderText = "搜索当前文件夹（空格分隔多关键字）";
+            _search.AccessibleName = "搜索当前文件夹";
+            _search.AccessibleDescription = "按文件名筛选当前文件夹，不递归；Esc 清空";
+
+            _search.TextChanged += (s, e) =>
+            {
+                if (_suppressFilterEvents) return;
+                _query = _search.Text;
+                ApplyFilter();
+            };
+
+            _search.KeyDown += OnSearchKeyDown;
+
+            _filterBar.Controls.Add(_search);
+            LayoutFilterBar();
+        }
+
+        private void LayoutFilterBar()
+        {
+            _filterBar.Height = Scaled(30);
+            _filterBar.Padding = new Padding(Scaled(6), Scaled(2), Scaled(6), Scaled(2));
+        }
+
         private void BuildList()
         {
             _list.Dock = DockStyle.Fill;
@@ -281,6 +337,7 @@ namespace 播放器.Ui
             _list.KeyDown += OnListKeyDown;
             _list.ColumnClick += OnColumnClick;
             _list.MouseUp += OnListMouseUp;
+            _list.ItemDrag += OnFileItemDrag;
         }
 
         private void BuildStatus()
@@ -355,6 +412,7 @@ namespace 播放器.Ui
             base.OnHandleCreated(e);
 
             LayoutToolbar();
+            LayoutFilterBar();
             AdjustColumns();
             RebuildIcons();
             ApplyNativeTheme(_nativeDark);
@@ -367,6 +425,7 @@ namespace 播放器.Ui
             base.OnDpiChangedAfterParent(e);
 
             LayoutToolbar();
+            LayoutFilterBar();
             AdjustColumns();
             RebuildIcons();
         }

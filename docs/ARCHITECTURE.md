@@ -11,14 +11,20 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 47,656 行 / **195 个文件** |
-| `Core/` | 17,574 行 / 88 个文件 |
-| `Ui/` | 14,954 行 / 63 个文件 |
-| `MainForm*` 这一族 partial | 15,051 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 29,184 行 / 91 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 48,103 行 / **197 个文件** |
+| `Core/` | 17,655 行 / 90 个文件 |
+| `Ui/` | 15,255 行 / 63 个文件 |
+| `MainForm*` 这一族 partial | 15,116 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 29,482 行 / 91 个文件 |
 
-> 数字最后一次量是在 **2026-11-17（1.24.0：内置文件浏览器）**。
-> 1.24.0 产品侧多出 `Core/FileBrowserPaths`、`Core/FileBrowserService`、`Core/FileBrowserState`、
+> 数字最后一次量是在 **2026-11-18（1.25.0：文件页搜索 / 类型筛选 / 拖放 / 定位）**。
+> 1.25.0 产品侧多出 `Core/FileBrowserFilter`、`Core/FileBrowserDrag`（`Core` 88 → 90、
+> 主程序 195 → 197），`Ui/FileBrowserView` 与 `MainForm.Files` / `MainForm.FileBrowser` 接线；
+> 冒烟仍 91 个文件、**28 个运行步骤 / 33 项检查**（新断言都在第 33 项里，不新增编号），
+> 详情见 §34。
+>
+> 1.24.0 那一版的记录（2026-11-17：内置文件浏览器）：
+> 产品侧多出 `Core/FileBrowserPaths`、`Core/FileBrowserService`、`Core/FileBrowserState`、
 > `Ui/FileIcons`、`Ui/FileBrowserView`（2 份 partial）、`MainForm.FileBrowser`、
 > `MainForm.Floating.FileBrowser`（`Core` 85 → 88、`Ui` 60 → 63、`MainForm*` 41 → 43）；
 > `MediaScan` 加了 `FollowReparsePoints` 与 `LocalBounded()`，`AddPathsWithFolders` 加了有界本地递归，
@@ -1673,3 +1679,62 @@ APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归�
 - 变异 8 条（同步读取 / 去掉代际 / 忽略显示所有 / 文件夹不排前 / 前进栈不清 /
   收藏上限失效 / 整文件夹只加一层 / 分离状态不落盘），原文见
   [1.24.0计划.md](1.24.0计划.md) §10.2。
+
+---
+
+## 34. 文件页搜索 / 类型筛选 / 拖放 / 定位（1.25.0）
+
+### 34.1 搜索与类型筛选：视图态，不碰磁盘
+
+- `Core/FileBrowserFilter` 只做两件纯逻辑：按空白切词、**每个词都要命中文件名**
+  （`OrdinalIgnoreCase`，与关系），以及按 `FileBrowserKind` 判断类型。
+  **文件夹与磁盘在类型筛选下永远通过**——筛的是文件，不能把可导航的入口一起藏掉。
+- 搜索词与类型筛选是 `FileBrowserView` 的临时视图态，不写设置、不发 `StateChanged`。
+  目录导航（打开 / 前进 / 后退 / 上级 / 恢复设置）清空两者；F5 刷新保留。
+- `FillList` 先算 `_visibleEntries = _entries.Where(过滤)`，再建行；`ListViewItem.Tag` 仍是
+  `FileBrowserEntry`，所有动作按对象而不是行下标，筛选不会把"双击的是哪一项"搞错。
+- 状态行的数字来自"总数 / 可见数"；有筛选时写「只看视频 · 筛选 3/12 项」，
+  没有筛选时保持原来的「N 项（M 个文件夹）」。**过滤只在内存里做**，不新增任何目录 I/O。
+- 键盘：搜索框是 `TextBoxBase`，已有的 `IsTypingTarget` 会让字母 / 空格 / Delete 归文本框；
+  `Ctrl+F` 在 `MainForm.Shortcuts` 的文件页分支里聚焦搜索框；`Esc` 清空、`Enter` 返回列表。
+  不引入 ComboBox：类型筛选用「位置」菜单，避免焦点落在下拉框后空格键的去向问题。
+
+### 34.2 拖到播放列表：两个格式，一条有界分支
+
+- `Ui/FileBrowserView.BuildFileDropData` 同时放：
+  - `DataFormats.FileDrop`（资源管理器 / 其它程序能接）；
+  - `FileBrowserDrag.Format`（`"播放器.FileBrowserPaths"`，只给本程序）。
+- `MainForm.Files.HandleDrop` 先看内部格式：有就走
+  `AddPathsWithFolders(..., boundedLocalFolders: true)`；没有才按外部 `FileDrop` 的旧行为。
+  这样**文件页拖进来的文件夹**与右键「添加整个文件夹」共用 32 层 / 200,000 文件的有界扫描，
+  不会从拖放这条路绕过 1.24.0 的边界。拖到外部程序仍按普通 `FileDrop` 处理。
+- 数据对象按 `ListViewItem.Index` 排序、按完整路径去重；拖放不删除 / 不移动 / 不改名。
+- 冒烟不合成真实 OLE 拖动（阻塞式拖放循环），只验数据对象与 `HandleDrop` 的接线；
+  真实拖动是手工验收项。这一点在 1.25.0 计划里写明。
+
+### 34.3 定位当前播放文件
+
+- 入口在文件页「位置」菜单顶部，发出 `LocateRequested`；`MainForm.FileBrowser` 只认
+  `_engine.HasMedia && _engine.CurrentPath`，网络流 / 光盘 / 文件已不在时分别给状态栏说明。
+- `FileBrowserView.NavigateToFile` 清空临时筛选、导航到所在目录，记
+  `_pendingSelectPath`；目录读完（或本来就在当前目录）后按 `FullPath` 选中并 `EnsureVisible`。
+- 侧栏停靠 / 侧栏悬浮 / 文件页分离三种状态都走 `ShowFileBrowser()` 的既有入口：
+  分离窗口 `Show + Activate`，悬浮侧栏打开侧栏窗口，停靠侧栏展开并切到文件页；
+  音频 / 迷你窗口里若文件页不可达，只说明、不强行切换窗口形态。
+
+### 34.4 测试与变异
+
+- 第 33 项（第 28 个运行步骤）里新增：搜索大小写 / 多关键字与关系 / 清空恢复、
+  类型筛选与"文件夹始终在"、`Ctrl+F` 与搜索框打字不被命令层抢、拖放数据两格式、
+  40 层目录拖放只走有界、侧栏与分离窗口定位、状态行筛选数字。
+- 冒烟口径仍是 **28 / 33**，不新增步骤编号；GATED 5,000 文件探针额外打印空查询与两词查询耗时。
+- 8 条变异（搜索恒真 / 或关系 / 大小写敏感 / 忽略类型 / 隐藏文件夹 / 拖放只带一条 /
+  拖放退回无界 / 定位不选中），原文见 [1.25.0计划.md](1.25.0计划.md) §6.2。
+
+### 34.5 边界
+
+- 搜索只筛当前一层，不递归、不建索引；类型筛选只筛文件，文件夹 / 磁盘始终可见。
+- 不新增设置字段（仍 7 组 92 项）；筛选是临时视图态，导航即清。
+- 缩略图、文件夹树、删除 / 改名 / 移动、SMB 自动发现仍不做；缩略图需要单独一轮
+  （大图标懒加载 + 图片缓存 + 网络盘超时），见 1.25.0 计划 §2。
+- 已知 Application Hang 本轮未修；验收环境仍按"关掉其它播放器、每次留间隔"处理。

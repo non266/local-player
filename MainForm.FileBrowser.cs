@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using 播放器.Core;
@@ -43,6 +44,7 @@ namespace 播放器
             view.StatusRequested += (s, text) => SetStatus(text);
             view.StateChanged += (s, e) => SyncFileBrowserSettings();
             view.RecentCleared += (s, e) => SaveFileBrowserSettingsNow();
+            view.LocateRequested += (s, e) => LocateCurrentFileInBrowser();
 
             sidebarPanel.FileBrowserDockRequested += (s, e) => SetFileBrowserFloating(false);
         }
@@ -101,6 +103,48 @@ namespace 播放器
             sidebarPanel.ActiveTab = SidebarTab.Files;
             sidebarPanel.FileBrowser.EnsureLoaded();
         }
+
+        /// <summary>
+        /// 定位当前正在播放的本地文件：打开文件页（或亮出分离窗口），导航到所在目录并选中。
+        /// 网络流 / 光盘没有本地目录，如实说明；不强行切换音频 / 迷你窗口的形态。
+        /// </summary>
+        internal void LocateCurrentFileInBrowser()
+        {
+            var path = _engine.HasMedia ? _engine.CurrentPath : null;
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                SetStatus("当前没有正在播放的文件");
+                return;
+            }
+
+            if (MediaFormats.IsNetworkPath(path) || path.Contains("://", StringComparison.Ordinal))
+            {
+                SetStatus("当前是网络位置 / 光盘，没有本地文件夹可以定位");
+                return;
+            }
+
+            if (!File.Exists(path))
+            {
+                SetStatus("当前播放的文件已经不在了：" + path);
+                return;
+            }
+
+            // 音频 / 迷你窗口里没有停靠的侧栏；文件页若已分离则仍可用。
+            if ((IsAudioWindow || IsMiniWindow) && !_settings.FileBrowserFloating)
+            {
+                ShowFileBrowser();
+                return;
+            }
+
+            ShowFileBrowser();
+
+            if (_settings.FileBrowserFloating && _fileBrowserWindow == null) return;
+
+            sidebarPanel.FileBrowser.NavigateToFile(path);
+        }
+
+        internal void LocateCurrentFileForTest() => LocateCurrentFileInBrowser();
 
         /// <summary>双击文件 / 「播放」：已在列表里就直接播，不在就先加入再播。</summary>
         internal void PlayFileBrowserPaths(IReadOnlyList<string> paths)

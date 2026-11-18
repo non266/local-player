@@ -23,7 +23,7 @@ namespace SmokeTest
                 if (!CheckFileBrowserProbe(root)) return false;
 
                 Log(33, "文件浏览器正常：路径归一、历史 / 收藏 / 最近、当前层读取与过滤、有界递归、"
-                        + "侧栏文件页与分离窗口都按预期工作");
+                        + "搜索 / 只看类型 / 拖到播放列表（有界）/ 定位当前文件、侧栏文件页与分离窗口都按预期工作");
                 return true;
             }
             catch (Exception ex)
@@ -568,6 +568,19 @@ namespace SmokeTest
                     return false;
                 }
 
+                var filterBar = view.SearchBoxForTest.Parent;
+
+                if (filterBar == null || filterBar.Top >= view.List.Top)
+                {
+                    Log(33, "文件页检查：搜索行没有排在列表上方（停靠顺序不对）");
+                    return false;
+                }
+
+                if (!CheckFileBrowserSearchAndFilter(form, view))
+                {
+                    return false;
+                }
+
                 // 假 I/O：迟到 600 ms。导航调用必须立刻返回，且慢结果不能盖掉后一个目录。
                 var slow = Path.Combine(uiRoot, "slow");
                 var fast = Path.Combine(uiRoot, "fast");
@@ -652,6 +665,11 @@ namespace SmokeTest
                     return false;
                 }
 
+                if (!CheckFileBrowserLocate(form, view, uiRoot))
+                {
+                    return false;
+                }
+
                 form.Engine.Stop();
                 PumpMessages(200);
 
@@ -704,6 +722,11 @@ namespace SmokeTest
                     return false;
                 }
 
+                if (!CheckFileBrowserDrag(form, view, root))
+                {
+                    return false;
+                }
+
                 // 分离 / 归位。
                 var floatItem = FindViewMenuItem(form, "文件浏览器分离为独立窗口");
                 if (floatItem == null)
@@ -725,6 +748,20 @@ namespace SmokeTest
                     Log(33, "文件页检查：分离之后侧栏没有留占位");
                     return false;
                 }
+
+                // 分离窗口里定位（不依赖正在播放，直接按路径导航 + 选中）。
+                view.NavigateToFileForTest(Path.Combine(uiRoot, "play.wav"));
+
+                if (!PumpUntil(() => !view.IsLoading
+                                     && view.List.SelectedItems.Count == 1
+                                     && view.List.SelectedItems[0].Text == "play.wav", 6000))
+                {
+                    Log(33, "文件页检查：分离窗口里定位文件之后没有选中它（状态：" + view.StatusText + "）");
+                    return false;
+                }
+
+                view.NavigateForTest(uiRoot);
+                PumpUntil(() => !view.IsLoading && view.List.Items.Count > 0, 6000);
 
                 // 独立窗口也要能吸附主窗口，并跟着主窗口移动。
                 var fileWindow = form.FileBrowserWindow;
@@ -859,7 +896,258 @@ namespace SmokeTest
             }
 
             Log(33, "文件页正常：只读当前层、显示所有、异步导航（<200 ms）、慢结果丢弃、"
-                    + "播放 / 下一首 / 递归加文件夹、Delete 不误删、分离 / 归位与跨重启恢复");
+                    + "搜索 / 只看类型 / 拖放（有界）/ 定位、播放 / 下一首 / 递归加文件夹、"
+                    + "Delete 不误删、分离 / 归位与跨重启恢复");
+            return true;
+        }
+
+        // -----------------------------------------------------------------
+        // 1.25.0：搜索 / 类型筛选 / 拖放 / 定位
+        // -----------------------------------------------------------------
+
+        private static bool CheckFileBrowserSearchAndFilter(播放器.MainForm form, FileBrowserView view)
+        {
+            var all = ListViewNames(view.List);
+            if (all.Count == 0)
+            {
+                Log(33, "文件页检查：搜索测试前列表是空的");
+                return false;
+            }
+
+            view.SetSearchTextForTest("play");
+            var playOnly = ListViewNames(view.List);
+
+            if (playOnly.Count != 1 || !string.Equals(playOnly[0], "play.wav", StringComparison.OrdinalIgnoreCase))
+            {
+                Log(33, "文件页检查：搜索「play」之后列表没有变少（" + string.Join(" / ", playOnly) + "）");
+                return false;
+            }
+
+            if (!view.StatusText.Contains("筛选", StringComparison.Ordinal))
+            {
+                Log(33, "文件页检查：搜索之后状态行没有写筛选结果（" + view.StatusText + "）");
+                return false;
+            }
+
+            view.SetSearchTextForTest("PLAY");
+
+            if (!ListViewNames(view.List).Contains("play.wav", StringComparer.OrdinalIgnoreCase))
+            {
+                Log(33, "文件页检查：搜索大小写不同的文件名没有匹配");
+                return false;
+            }
+
+            view.SetSearchTextForTest("play srt");
+
+            if (view.List.Items.Count != 0)
+            {
+                Log(33, "文件页检查：搜索两个关键字时匹配了只含一个关键字的项（"
+                        + string.Join(" / ", ListViewNames(view.List)) + "）");
+                return false;
+            }
+
+            view.ClearSearchForTest();
+
+            if (view.List.Items.Count != all.Count)
+            {
+                Log(33, "文件页检查：清空搜索之后没有恢复全部条目（" + view.List.Items.Count + " / " + all.Count + "）");
+                return false;
+            }
+
+            view.SetTypeFilterForTest(FileBrowserTypeFilter.Video);
+            var videos = ListViewNames(view.List);
+
+            if (!videos.Contains("movie.mkv", StringComparer.OrdinalIgnoreCase))
+            {
+                Log(33, "文件页检查：只看视频时没有留下视频文件（" + string.Join(" / ", videos) + "）");
+                return false;
+            }
+
+            if (videos.Contains("play.wav", StringComparer.OrdinalIgnoreCase))
+            {
+                Log(33, "文件页检查：只看视频时音频还在（" + string.Join(" / ", videos) + "）");
+                return false;
+            }
+
+            if (!videos.Contains("nested", StringComparer.OrdinalIgnoreCase))
+            {
+                Log(33, "文件页检查：只看视频时文件夹被藏了（" + string.Join(" / ", videos) + "）");
+                return false;
+            }
+
+            view.SetTypeFilterForTest(FileBrowserTypeFilter.Audio);
+            var audios = ListViewNames(view.List);
+
+            if (!audios.Contains("play.wav", StringComparer.OrdinalIgnoreCase)
+                || audios.Contains("movie.mkv", StringComparer.OrdinalIgnoreCase)
+                || !audios.Contains("nested", StringComparer.OrdinalIgnoreCase))
+            {
+                Log(33, "文件页检查：只看音频时视频还在，或文件夹被藏了（" + string.Join(" / ", audios) + "）");
+                return false;
+            }
+
+            view.SetTypeFilterForTest(FileBrowserTypeFilter.All);
+
+            if (view.List.Items.Count != all.Count)
+            {
+                Log(33, "文件页检查：切回「全部」之后没有恢复全部条目（"
+                        + view.List.Items.Count + " / " + all.Count + "）");
+                return false;
+            }
+
+            // Ctrl+F 从列表把焦点送进搜索框；在搜索框里按空格 / Delete 不能被命令层抢走。
+            view.List.Focus();
+
+            if (!form.ProcessFileBrowserShortcutForTest(Keys.Control | Keys.F))
+            {
+                Log(33, "文件页检查：Ctrl+F 没有被窗口接住");
+                return false;
+            }
+
+            if (!view.SearchBoxForTest.Focused)
+            {
+                Log(33, "文件页检查：Ctrl+F 之后焦点不在搜索框里");
+                return false;
+            }
+
+            if (form.ProcessShortcut(Keys.Space))
+            {
+                Log(33, "文件页检查：搜索框里按空格被命令层吃掉了");
+                return false;
+            }
+
+            if (form.ProcessShortcut(Keys.Delete))
+            {
+                Log(33, "文件页检查：搜索框里按 Delete 被命令层吃掉了");
+                return false;
+            }
+
+            view.ClearSearchForTest();
+            view.List.Focus();
+            PumpMessages(100);
+            return true;
+        }
+
+        private static bool CheckFileBrowserLocate(播放器.MainForm form, FileBrowserView view, string uiRoot)
+        {
+            // 先离开目标目录，证明定位真的导航回去了，而不是本来就在。
+            view.NavigateForTest(Path.Combine(uiRoot, "nested"));
+
+            if (!PumpUntil(() => !view.IsLoading, 4000))
+            {
+                Log(33, "文件页检查：定位测试前导航到 nested 没有结束");
+                return false;
+            }
+
+            form.LocateCurrentFileForTest();
+
+            if (!PumpUntil(() => !view.IsLoading
+                                 && view.List.SelectedItems.Count == 1
+                                 && view.List.SelectedItems[0].Text == "play.wav", 6000))
+            {
+                Log(33, "文件页检查：定位当前播放文件之后没有选中它（状态：" + view.StatusText + "）");
+                return false;
+            }
+
+            if (!string.Equals(view.State.CurrentPath, uiRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                Log(33, "文件页检查：定位之后没有回到文件所在目录（" + view.State.CurrentPath + "）");
+                return false;
+            }
+
+            // 搜索框里按空格不能变成播放 / 暂停。
+            if (form.Engine.IsPlaying)
+            {
+                view.SearchBoxForTest.Focus();
+                form.ProcessShortcut(Keys.Space);
+                PumpMessages(100);
+
+                if (!form.Engine.IsPlaying)
+                {
+                    Log(33, "文件页检查：在搜索框里按空格把播放暂停了");
+                    return false;
+                }
+            }
+
+            view.ClearSearchForTest();
+            view.List.Focus();
+            return true;
+        }
+
+        private static bool CheckFileBrowserDrag(播放器.MainForm form, FileBrowserView view, string root)
+        {
+            view.List.SelectedItems.Clear();
+
+            foreach (var name in new[] { "play.wav", "movie.mkv", "nested" })
+            {
+                var item = view.List.Items
+                    .Cast<ListViewItem>()
+                    .FirstOrDefault(row => string.Equals(row.Text, name, StringComparison.OrdinalIgnoreCase));
+
+                if (item == null)
+                {
+                    Log(33, "文件页检查：拖放测试找不到「" + name + "」");
+                    return false;
+                }
+
+                item.Selected = true;
+            }
+
+            var data = view.BuildFileDropDataForTest();
+
+            if (data == null)
+            {
+                Log(33, "文件页检查：拖放数据为空");
+                return false;
+            }
+
+            if (!data.TryGetData<string[]>(DataFormats.FileDrop, out var fileDrop)
+                || fileDrop == null
+                || fileDrop.Length != 3)
+            {
+                Log(33, $"文件页检查：拖放数据里 FileDrop 路径数量不对（{fileDrop?.Length ?? 0}，期望 3）");
+                return false;
+            }
+
+            if (!data.TryGetData<string[]>(FileBrowserDrag.Format, out var internalPaths)
+                || internalPaths == null
+                || internalPaths.Length != 3)
+            {
+                Log(33, $"文件页检查：拖放数据里内部路径数量不对（{internalPaths?.Length ?? 0}，期望 3）");
+                return false;
+            }
+
+            // 40 层目录：内部格式必须走有界扫描，深处的文件不能进来。
+            var deep = Path.Combine(root, "deep-drag");
+            var folder = deep;
+
+            for (var i = 0; i < 40; i++)
+            {
+                folder = Path.Combine(folder, "d" + i.ToString("D2"));
+                Directory.CreateDirectory(folder);
+            }
+
+            File.WriteAllText(Path.Combine(folder, "deep.mp3"), "deep");
+
+            var drop = new DataObject();
+            drop.SetData(DataFormats.FileDrop, new[] { deep });
+            drop.SetData(FileBrowserDrag.Format, new[] { deep });
+
+            form.HandleDropForTest(drop);
+
+            if (!PumpUntil(() => !form.IsScanning, 8000))
+            {
+                Log(33, "文件页检查：拖放文件夹之后扫描没有结束");
+                return false;
+            }
+
+            if (form.Playlist.Items.Any(item => item.FilePath.EndsWith("deep.mp3", StringComparison.OrdinalIgnoreCase)))
+            {
+                Log(33, "文件页检查：拖放 40 层目录深处的文件被无界加了进来");
+                return false;
+            }
+
+            view.List.SelectedItems.Clear();
             return true;
         }
 
@@ -885,9 +1173,19 @@ namespace SmokeTest
             var result = service.ReadDirectory(probeRoot, showAllFiles: false, CancellationToken.None);
             watch.Stop();
 
+            var filterWatch = Stopwatch.StartNew();
+            var emptyMatches = result.Entries.Count(entry => FileBrowserFilter.Matches(entry, string.Empty));
+            filterWatch.Stop();
+
+            var queryWatch = Stopwatch.StartNew();
+            var queryMatches = result.Entries.Count(entry => FileBrowserFilter.Matches(entry, "p0 000"));
+            queryWatch.Stop();
+
             Log(33, $"文件浏览器探针：5,000 个文件读取 {watch.ElapsedMilliseconds} ms、"
                     + $"{result.Entries.Count} 条、截断 {result.Truncated}、"
-                    + $"托管内存 {GC.GetTotalMemory(false) / 1024} KB");
+                    + $"托管内存 {GC.GetTotalMemory(false) / 1024} KB；"
+                    + $"过滤空查询 {filterWatch.ElapsedMilliseconds} ms / {emptyMatches} 条、"
+                    + $"两词查询 {queryWatch.ElapsedMilliseconds} ms / {queryMatches} 条");
 
             return true;
         }

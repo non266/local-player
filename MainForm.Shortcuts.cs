@@ -221,6 +221,10 @@ namespace 播放器
                     view.Reload();
                     return true;
 
+                case Keys.Control | Keys.F:
+                    view.FocusSearch();
+                    return true;
+
                 case Keys.Delete:
                     // 文件浏览器不删文件，也绝不能让这个键落到播放列表的"移除"上。
                     return true;

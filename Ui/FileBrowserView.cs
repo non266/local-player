@@ -28,9 +28,11 @@ namespace 播放器.Ui
         private readonly Panel _filterBar = new Panel();
         private readonly TextBox _address = new TextBox();
         private readonly TextBox _search = new TextBox();
+        private readonly CheckBox _recursiveSearch = new CheckBox();
         private readonly ListView _list = new ListView();
         private readonly ColumnHeader _nameColumn = new ColumnHeader { Text = "名称" };
         private readonly ColumnHeader _sizeColumn = new ColumnHeader { Text = "大小" };
+        private readonly ColumnHeader _folderColumn = new ColumnHeader { Text = "位置" };
         private readonly Label _status = new Label();
 
         private readonly ContextMenuStrip _contextMenu = new ContextMenuStrip();
@@ -53,7 +55,21 @@ namespace 播放器.Ui
         private FileBrowserTypeFilter _typeFilter = FileBrowserTypeFilter.All;
         private bool _truncated;
         private bool _suppressFilterEvents;
+        private bool _suppressScopeEvents;
         private string? _pendingSelectPath;
+
+        private FileBrowserSearch _searchService = new FileBrowserSearch();
+        private List<FileBrowserEntry> _searchResults = new List<FileBrowserEntry>();
+        private bool _searchActive;
+        private bool _searching;
+        private string _searchQuery = string.Empty;
+        private int _searchFolders;
+        private int _searchEntries;
+        private int _searchFound;
+        private int _searchUnreadable;
+        private bool _searchTruncated;
+        private CancellationTokenSource? _searchCts;
+        private int _searchVersion;
 
         private CancellationTokenSource? _loadCts;
         private int _loadVersion;
@@ -129,6 +145,9 @@ namespace 播放器.Ui
         /// <summary>测试钩子：搜索框（设置 Text 会走与用户输入相同的过滤路径）。</summary>
         internal TextBox SearchBoxForTest => _search;
 
+        /// <summary>测试钩子：搜索范围开关（真实控件，用来验焦点与空格键）。</summary>
+        internal CheckBox ScopeToggleForTest => _recursiveSearch;
+
         internal void SetSearchTextForTest(string value) => _search.Text = value;
 
         /// <summary>测试钩子：换掉目录读取（假的慢 I/O / 固定结果）。</summary>
@@ -157,6 +176,12 @@ namespace 播放器.Ui
             _filterBar.BackColor = palette.PanelBack;
             _search.BackColor = palette.ListBack;
             _search.ForeColor = palette.ListFore;
+
+            _recursiveSearch.BackColor = palette.MenuBack;
+            _recursiveSearch.ForeColor = palette.MenuFore;
+            _recursiveSearch.FlatAppearance.BorderColor = palette.MenuBorder;
+            _recursiveSearch.FlatAppearance.MouseOverBackColor = palette.MenuHoverBack;
+            _recursiveSearch.FlatAppearance.MouseDownBackColor = palette.MenuHoverBack;
 
             _list.BackColor = palette.ListBack;
             _list.ForeColor = palette.ListFore;
@@ -285,12 +310,21 @@ namespace 播放器.Ui
         {
             _filterBar.Dock = DockStyle.Top;
 
-            _search.Dock = DockStyle.Fill;
+            _search.Dock = DockStyle.None;
             _search.BorderStyle = BorderStyle.FixedSingle;
             _search.Font = UiFonts.Sidebar;
-            _search.PlaceholderText = "搜索当前文件夹（空格分隔多关键字）";
             _search.AccessibleName = "搜索当前文件夹";
-            _search.AccessibleDescription = "按文件名筛选当前文件夹，不递归；Esc 清空";
+
+            _recursiveSearch.Dock = DockStyle.None;
+            _recursiveSearch.AutoSize = false;
+            _recursiveSearch.Appearance = Appearance.Button;
+            _recursiveSearch.FlatStyle = FlatStyle.Flat;
+            _recursiveSearch.TextAlign = ContentAlignment.MiddleCenter;
+            _recursiveSearch.TabStop = true;
+            _recursiveSearch.Text = "含子文件夹";
+            _recursiveSearch.AccessibleName = "搜索子文件夹";
+            _recursiveSearch.AccessibleDescription =
+                "勾选后按 Enter 搜索当前文件夹及子文件夹；输入时不会扫盘";
 
             _search.TextChanged += (s, e) =>
             {
@@ -301,14 +335,49 @@ namespace 播放器.Ui
 
             _search.KeyDown += OnSearchKeyDown;
 
+            _recursiveSearch.CheckedChanged += (s, e) => OnRecursiveSearchChanged();
+
             _filterBar.Controls.Add(_search);
+            _filterBar.Controls.Add(_recursiveSearch);
+
+            UpdateSearchPlaceholder();
             LayoutFilterBar();
         }
 
         private void LayoutFilterBar()
         {
             _filterBar.Height = Scaled(30);
-            _filterBar.Padding = new Padding(Scaled(6), Scaled(2), Scaled(6), Scaled(2));
+            _filterBar.Padding = Padding.Empty;
+
+            var pad = Scaled(6);
+            var gap = Scaled(4);
+            var top = Scaled(4);
+            var height = Scaled(22);
+            var scopeWidth = Scaled(88);
+            var right = Width - pad;
+
+            _recursiveSearch.SetBounds(
+                Math.Max(pad, right - scopeWidth),
+                top,
+                scopeWidth,
+                height);
+
+            _search.SetBounds(
+                pad,
+                top,
+                Math.Max(0, right - scopeWidth - gap - pad),
+                height);
+        }
+
+        private void UpdateSearchPlaceholder()
+        {
+            _search.PlaceholderText = _recursiveSearch.Checked
+                ? "输入关键字，按 Enter 搜索子文件夹"
+                : "搜索当前文件夹（空格分隔多关键字）";
+
+            _search.AccessibleDescription = _recursiveSearch.Checked
+                ? "输入关键字后按 Enter 搜索当前文件夹及子文件夹，不建索引；Esc 清空"
+                : "按文件名筛选当前文件夹，不递归；Esc 清空";
         }
 
         private void BuildList()
@@ -329,9 +398,11 @@ namespace 播放器.Ui
             _nameColumn.Width = Scaled(160);
             _sizeColumn.Width = Scaled(78);
             _sizeColumn.TextAlign = HorizontalAlignment.Right;
+            _folderColumn.Width = 0;
 
             _list.Columns.Add(_nameColumn);
             _list.Columns.Add(_sizeColumn);
+            _list.Columns.Add(_folderColumn);
 
             _list.DoubleClick += (s, e) => ActivateSelection();
             _list.KeyDown += OnListKeyDown;
@@ -392,8 +463,11 @@ namespace 播放器.Ui
             if (width <= 0) return;
 
             var size = Scaled(78);
+            var folder = _searchActive || _searching ? Scaled(84) : 0;
+
             _sizeColumn.Width = size;
-            _nameColumn.Width = Math.Max(Scaled(100), width - size - 4);
+            _folderColumn.Width = folder;
+            _nameColumn.Width = Math.Max(Scaled(100), width - size - folder - 4);
         }
 
         private void RebuildIcons()
@@ -416,6 +490,7 @@ namespace 播放器.Ui
             AdjustColumns();
             RebuildIcons();
             ApplyNativeTheme(_nativeDark);
+            UpdateSearchScopeEnabled();
 
             if (Visible) EnsureLoaded();
         }
@@ -435,6 +510,7 @@ namespace 播放器.Ui
             base.OnResize(e);
 
             LayoutToolbar();
+            LayoutFilterBar();
             AdjustColumns();
         }
 
@@ -450,6 +526,7 @@ namespace 播放器.Ui
             if (disposing)
             {
                 CancelLoad();
+                CancelSearch();
                 _icons?.Dispose();
                 _icons = null;
                 _contextMenu.Dispose();

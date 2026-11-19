@@ -287,7 +287,11 @@ namespace 播放器.Core
         private static int CompareName(FileBrowserEntry left, FileBrowserEntry right) =>
             string.Compare(left.Name, right.Name, StringComparison.CurrentCultureIgnoreCase);
 
-        private static FileBrowserEntry? CreateEntry(FileSystemInfo info, bool showAllFiles)
+        /// <summary>
+        /// 把一条 <see cref="FileSystemInfo"/> 变成列表行；隐藏 / 系统 / 不支持的类型按
+        /// <paramref name="showAllFiles"/> 过滤。文件页的当前层读取与递归搜索共用这一处。
+        /// </summary>
+        internal static FileBrowserEntry? CreateEntry(FileSystemInfo info, bool showAllFiles)
         {
             FileAttributes attributes;
 

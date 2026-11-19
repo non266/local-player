@@ -8,7 +8,7 @@ namespace 播放器
 {
     /// <summary>
     /// 快捷键：主窗口上的所有按键都从 <see cref="ProcessCmdKey"/> 走。
-    /// <para>只有"打字的地方"（文本框、搜索框）会让出按键，见 <see cref="IsTypingTarget"/>。</para>
+    /// <para>只有"打字的地方"（文本框、搜索框）与可聚焦开关会让出按键，见 <see cref="IsTypingTarget"/>。</para>
     /// </summary>
     public partial class MainForm : Form
     {
@@ -116,7 +116,7 @@ namespace 播放器
         }
 
         /// <summary>
-        /// 这一次按键是不是打在一个文本框（搜索框）里。
+        /// 这一次按键是不是打在一个文本框（搜索框）或可聚焦开关上。
         /// <para>
         /// 先看消息本身的落点：真实按键时 <c>ProcessCmdKey</c> 拿到的就是那条原始消息，
         /// 它的窗口句柄就是焦点控件，最可靠。
@@ -126,18 +126,22 @@ namespace 播放器
         /// 不能无条件混用两种判断：那样在"焦点还留在搜索框上、但按键是发给列表的"这种
         /// 情况下会误判成打字，把快捷键整体挡掉。
         /// </para>
+        /// <para>
+        /// <see cref="CheckBox"/> 也在这里：文件页的「含子文件夹」是一个可聚焦开关，
+        /// 空格 / 回车必须归它；否则会被命令层当成播放 / 暂停或打开选中项。
+        /// </para>
         /// </summary>
         private bool IsTypingTarget(Message msg)
         {
             if (msg.HWnd != IntPtr.Zero)
-                return Control.FromHandle(msg.HWnd) is TextBoxBase;
+                return Control.FromHandle(msg.HWnd) is TextBoxBase or CheckBox;
 
             Control? control = this;
 
             while (control is ContainerControl container && container.ActiveControl != null)
                 control = container.ActiveControl;
 
-            return control is TextBoxBase;
+            return control is TextBoxBase or CheckBox;
         }
 
         /// <summary>

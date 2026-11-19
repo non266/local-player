@@ -18,12 +18,14 @@ namespace SmokeTest
                 if (!CheckFileBrowserPaths()) return false;
                 if (!CheckFileBrowserState()) return false;
                 if (!CheckFileBrowserService(root)) return false;
+                if (!CheckFileBrowserRecursiveSearchCore(root)) return false;
                 if (!CheckMediaScannerBounded(root)) return false;
                 if (!CheckFileBrowserMainForm(root)) return false;
                 if (!CheckFileBrowserProbe(root)) return false;
 
                 Log(33, "文件浏览器正常：路径归一、历史 / 收藏 / 最近、当前层读取与过滤、有界递归、"
-                        + "搜索 / 只看类型 / 拖到播放列表（有界）/ 定位当前文件、侧栏文件页与分离窗口都按预期工作");
+                        + "搜索 / 只看类型 / 拖到播放列表（有界）/ 定位当前文件、"
+                        + "递归搜索（有界 / 可取消 / 相对位置）、侧栏文件页与分离窗口都按预期工作");
                 return true;
             }
             catch (Exception ex)
@@ -491,6 +493,30 @@ namespace SmokeTest
             File.WriteAllText(hidden, "hidden");
             File.SetAttributes(hidden, FileAttributes.Hidden);
 
+            // 1.26.0 递归搜索：根层 / 两层子目录各一个同名文件，外加隐藏项与一条超过 32 层的深链。
+            File.WriteAllText(Path.Combine(uiRoot, "search-hit.mp3"), "hit");
+            File.WriteAllText(Path.Combine(uiRoot, "nested", "search-hit.mp4"), "hit");
+            File.WriteAllText(Path.Combine(uiRoot, "nested", "sub", "search-hit.srt"), "hit");
+
+            var hiddenFolder = Path.Combine(uiRoot, "hidden-dir");
+            Directory.CreateDirectory(hiddenFolder);
+            File.WriteAllText(Path.Combine(hiddenFolder, "hidden-hit.mp3"), "hit");
+            File.SetAttributes(hiddenFolder, File.GetAttributes(hiddenFolder) | FileAttributes.Hidden);
+
+            File.WriteAllText(Path.Combine(uiRoot, "hidden-hit.mp3"), "hit");
+            File.SetAttributes(Path.Combine(uiRoot, "hidden-hit.mp3"), FileAttributes.Hidden);
+
+            var searchDeep = Path.Combine(uiRoot, "search-deep");
+            var searchCurrent = searchDeep;
+
+            for (var depth = 0; depth < 40; depth++)
+            {
+                searchCurrent = Path.Combine(searchCurrent, "d" + depth.ToString("D2"));
+                Directory.CreateDirectory(searchCurrent);
+            }
+
+            File.WriteAllText(Path.Combine(searchCurrent, "deep-hit.mp3"), "hit");
+
             // 前面几步可能把侧栏 / 播放列表留在分离状态；这里从"都停靠、文件页关闭"开始。
             var settings = AppSettings.Load();
             settings.SidebarFloating = false;
@@ -577,6 +603,11 @@ namespace SmokeTest
                 }
 
                 if (!CheckFileBrowserSearchAndFilter(form, view))
+                {
+                    return false;
+                }
+
+                if (!CheckFileBrowserRecursiveSearch(form, view, uiRoot))
                 {
                     return false;
                 }
@@ -1181,11 +1212,35 @@ namespace SmokeTest
             var queryMatches = result.Entries.Count(entry => FileBrowserFilter.Matches(entry, "p0 000"));
             queryWatch.Stop();
 
+            // 递归搜索探针：50 个文件夹 × 100 个文件，查询「p」命中全部。只量不判。
+            var tree = Path.Combine(probeRoot, "tree");
+
+            for (var folderIndex = 0; folderIndex < 50; folderIndex++)
+            {
+                var child = Path.Combine(tree, "f" + folderIndex.ToString("D2"));
+                Directory.CreateDirectory(child);
+
+                for (var fileIndex = 0; fileIndex < 100; fileIndex++)
+                {
+                    File.WriteAllBytes(
+                        Path.Combine(child, "p" + fileIndex.ToString("D3") + ".mp3"),
+                        Array.Empty<byte>());
+                }
+            }
+
+            var searchWatch = Stopwatch.StartNew();
+            var searchResult = new FileBrowserSearch()
+                .Search(tree, "p", showAllFiles: false, CancellationToken.None, null);
+            searchWatch.Stop();
+
             Log(33, $"文件浏览器探针：5,000 个文件读取 {watch.ElapsedMilliseconds} ms、"
                     + $"{result.Entries.Count} 条、截断 {result.Truncated}、"
                     + $"托管内存 {GC.GetTotalMemory(false) / 1024} KB；"
                     + $"过滤空查询 {filterWatch.ElapsedMilliseconds} ms / {emptyMatches} 条、"
-                    + $"两词查询 {queryWatch.ElapsedMilliseconds} ms / {queryMatches} 条");
+                    + $"两词查询 {queryWatch.ElapsedMilliseconds} ms / {queryMatches} 条；"
+                    + $"递归搜索 {searchWatch.ElapsedMilliseconds} ms / {searchResult.Entries.Count} 条 / "
+                    + $"{searchResult.FoldersVisited} 个文件夹 / 截断 {searchResult.Truncated}、"
+                    + $"托管内存 {GC.GetTotalMemory(false) / 1024} KB");
 
             return true;
         }

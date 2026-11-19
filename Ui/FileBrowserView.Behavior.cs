@@ -259,6 +259,17 @@ namespace 播放器.Ui
                 return;
             }
 
+            if (_searchActive || _searching)
+            {
+                if (!string.IsNullOrWhiteSpace(_searchQuery))
+                {
+                    StartRecursiveSearch();
+                    return;
+                }
+
+                CancelSearch();
+            }
+
             StartLoad();
         }
 
@@ -268,10 +279,21 @@ namespace 播放器.Ui
         {
             var icons = _icons;
             var imageIndex = icons?.IndexOf(FileBrowserKind.Other) ?? 0;
+            var source = _searchActive ? _searchResults : _entries;
 
-            _visibleEntries = _entries
-                .Where(entry => FileBrowserFilter.Matches(entry, _query)
-                                && FileBrowserFilter.MatchesType(entry, _typeFilter))
+            _visibleEntries = source
+                .Where(entry =>
+                {
+                    // 递归结果已经由搜索按查询筛过；这里只再应用「只看类型」。
+                    if (_searchActive) return FileBrowserFilter.MatchesType(entry, _typeFilter);
+
+                    // 勾了「含子文件夹」但还没按 Enter：列表显示当前层全部条目，
+                    // 查询词先不生效；否则会看起来像“搜索没反应”。
+                    if (_recursiveSearch.Checked) return FileBrowserFilter.MatchesType(entry, _typeFilter);
+
+                    return FileBrowserFilter.Matches(entry, _query)
+                           && FileBrowserFilter.MatchesType(entry, _typeFilter);
+                })
                 .ToList();
 
             _list.BeginUpdate();
@@ -290,6 +312,7 @@ namespace 播放器.Ui
                     };
 
                     item.SubItems.Add(entry.SizeText);
+                    item.SubItems.Add(FileBrowserPaths.RelativeFolder(_state.CurrentPath, entry.FullPath));
                     _list.Items.Add(item);
                 }
             }
@@ -298,6 +321,7 @@ namespace 播放器.Ui
                 _list.EndUpdate();
             }
 
+            AdjustColumns();
             UpdateSortHeaders();
         }
 
@@ -310,6 +334,15 @@ namespace 播放器.Ui
         {
             if (_isRoots)
                 return _entries.Count == 0 ? "没有找到可用的磁盘" : $"{_entries.Count} 个驱动器";
+
+            if (_searchActive) return DescribeSearchResult();
+
+            if (_recursiveSearch.Checked && !_searching)
+            {
+                return string.IsNullOrWhiteSpace(_query)
+                    ? "含子文件夹：输入关键字后按 Enter 搜索"
+                    : $"含子文件夹：按 Enter 搜索「{_query.Trim()}」";
+            }
 
             if (_entries.Count == 0) return "这个文件夹里没有可显示的项目";
 
@@ -339,58 +372,88 @@ namespace 播放器.Ui
         private bool IsFiltering =>
             !string.IsNullOrWhiteSpace(_query) || _typeFilter != FileBrowserTypeFilter.All;
 
-        /// <summary>搜索 / 类型筛选变化：只重排现有条目，不读磁盘。</summary>
+        /// <summary>
+        /// 搜索 / 类型筛选变化：只重排现有条目，不读磁盘。
+        /// 递归结果是一个快照：查询一改就丢掉旧结果并回到当前层，按 Enter 再搜。
+        /// </summary>
         private void ApplyFilter()
         {
             // 正在读取时不动列表；读完会按当前的查询 / 类型再 FillList。
             if (_loading) return;
 
+            if (_searching || _searchActive)
+            {
+                var sameQuery = string.Equals(_query.Trim(), _searchQuery, StringComparison.Ordinal);
+
+                if (!sameQuery || string.IsNullOrWhiteSpace(_query))
+                {
+                    CancelSearch();
+                }
+                else if (_searching)
+                {
+                    // 正在搜同一个查询：改「只看类型」只记下来，等结果回来再应用，
+                    // 不能让 FillList 把“正在搜索”的状态行盖掉。
+                    return;
+                }
+            }
+
             FillList();
             UpdateStatusCount();
         }
 
-        /// <summary>路径变化时清空过滤；F5 刷新保留。</summary>
+        /// <summary>路径变化时清空过滤与搜索范围；F5 刷新保留。</summary>
         private void ResetFilter()
         {
-            if (!IsFiltering && _search.Text.Length == 0) return;
+            CancelSearch();
 
-            _suppressFilterEvents = true;
+            if (_search.Text.Length > 0)
+            {
+                _suppressFilterEvents = true;
 
-            try
-            {
-                _search.Text = string.Empty;
-            }
-            finally
-            {
-                _suppressFilterEvents = false;
+                try
+                {
+                    _search.Text = string.Empty;
+                }
+                finally
+                {
+                    _suppressFilterEvents = false;
+                }
             }
 
             _query = string.Empty;
             _typeFilter = FileBrowserTypeFilter.All;
+            SetRecursiveChecked(false);
+            UpdateSearchPlaceholder();
         }
 
         private void OnSearchKeyDown(object? sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Escape)
+            if (!HandleSearchKey(e.KeyCode)) return;
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+
+        private bool HandleSearchKey(Keys key)
+        {
+            if (key == Keys.Escape)
             {
                 ClearSearch();
                 _list.Focus();
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                return;
+                return true;
             }
 
-            if (e.KeyCode == Keys.Enter)
-            {
-                _list.Focus();
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-            }
+            if (key != Keys.Enter) return false;
+
+            if (_recursiveSearch.Checked) StartRecursiveSearch();
+
+            _list.Focus();
+            return true;
         }
 
         internal void ClearSearch()
         {
-            if (_search.Text.Length == 0 && _query.Length == 0) return;
+            CancelSearch();
 
             _suppressFilterEvents = true;
 
@@ -416,6 +479,56 @@ namespace 播放器.Ui
         internal void ClearSearchForTest() => ClearSearch();
 
         internal void SetTypeFilterForTest(FileBrowserTypeFilter filter) => SetTypeFilter(filter);
+
+        internal void SetRecursiveSearchForTest(bool value) => _recursiveSearch.Checked = value;
+
+        internal bool IsRecursiveSearchForTest() => _recursiveSearch.Checked;
+
+        internal bool IsSearchingForTest() => _searching;
+
+        internal bool IsSearchActiveForTest() => _searchActive;
+
+        internal bool ProcessSearchKeyForTest(Keys key) => HandleSearchKey(key);
+
+        internal void SetSearchServiceForTest(FileBrowserSearch service) =>
+            _searchService = service ?? new FileBrowserSearch();
+
+        private void OnRecursiveSearchChanged()
+        {
+            UpdateSearchPlaceholder();
+
+            if (_suppressScopeEvents) return;
+
+            if (!_recursiveSearch.Checked) CancelSearch();
+
+            ApplyFilter();
+        }
+
+        private void SetRecursiveChecked(bool value)
+        {
+            if (_recursiveSearch.Checked == value) return;
+
+            _suppressScopeEvents = true;
+
+            try
+            {
+                _recursiveSearch.Checked = value;
+            }
+            finally
+            {
+                _suppressScopeEvents = false;
+            }
+
+            UpdateSearchPlaceholder();
+        }
+
+        private void UpdateSearchScopeEnabled()
+        {
+            var enabled = _state.CurrentPath != null;
+            _recursiveSearch.Enabled = enabled;
+
+            if (!enabled) SetRecursiveChecked(false);
+        }
 
         private void SetTypeFilter(FileBrowserTypeFilter filter)
         {
@@ -464,6 +577,238 @@ namespace 播放器.Ui
         }
 
         internal void NavigateToFileForTest(string path) => NavigateToFile(path);
+
+        // ---- 递归搜索 ---------------------------------------------------------
+
+        /// <summary>按当前查询搜索当前文件夹及子文件夹；只由 Enter / 测试触发，打字不扫盘。</summary>
+        private void StartRecursiveSearch()
+        {
+            var root = _state.CurrentPath;
+            var query = _query.Trim();
+
+            if (root == null)
+            {
+                ReportStatus("先进入一个文件夹，再搜索子文件夹", true);
+                return;
+            }
+
+            if (query.Length == 0)
+            {
+                SetStatus("输入关键字后按 Enter 搜索子文件夹", false);
+                return;
+            }
+
+            if (_loading)
+            {
+                SetStatus("目录还在读取，读完再按 Enter 搜索", true);
+                return;
+            }
+
+            CancelSearch();
+
+            var cts = new CancellationTokenSource();
+            _searchCts = cts;
+
+            var version = ++_searchVersion;
+            var showAll = _state.ShowAllFiles;
+
+            _searchQuery = query;
+            _searching = true;
+            _searchActive = false;
+            _searchResults.Clear();
+            _searchFolders = 0;
+            _searchEntries = 0;
+            _searchFound = 0;
+            _searchUnreadable = 0;
+            _searchTruncated = false;
+
+            _list.BeginUpdate();
+
+            try
+            {
+                _list.Items.Clear();
+            }
+            finally
+            {
+                _list.EndUpdate();
+            }
+
+            _visibleEntries = new List<FileBrowserEntry>();
+            AdjustColumns();
+            SetStatus(DescribeSearchProgress(), false);
+
+            var progress = new SearchProgressRelay(this, version);
+            var token = cts.Token;
+
+            Task.Run(
+                    () => _searchService.Search(root, query, showAll, token, progress),
+                    token)
+                .ContinueWith(
+                    task => CompleteSearch(version, task, cts),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+        }
+
+        private void CompleteSearch(
+            int version, Task<FileBrowserSearchResult> task, CancellationTokenSource cts)
+        {
+            try
+            {
+                if (IsDisposed || !IsHandleCreated) return;
+
+                try
+                {
+                    BeginInvoke(new Action(() => ApplySearch(version, task)));
+                }
+                catch (InvalidOperationException)
+                {
+                    // 窗口正在销毁：结果丢掉。
+                }
+            }
+            finally
+            {
+                if (ReferenceEquals(_searchCts, cts)) _searchCts = null;
+
+                cts.Dispose();
+            }
+        }
+
+        private void ApplySearch(int version, Task<FileBrowserSearchResult> task)
+        {
+            if (version != _searchVersion || IsDisposed) return;
+
+            _searching = false;
+
+            if (task.IsCanceled) return;
+
+            if (!task.IsCompletedSuccessfully)
+            {
+                AppLog.Swallowed("文件页递归搜索任务失败", task.Exception!);
+                _searchActive = false;
+                _searchResults.Clear();
+                FillList();
+                ReportStatus("搜索失败，详情见日志", true);
+                return;
+            }
+
+            var result = task.Result;
+
+            _searchFolders = result.FoldersVisited;
+            _searchEntries = result.EntriesVisited;
+            _searchFound = result.Entries.Count;
+            _searchUnreadable = result.UnreadableFolders;
+            _searchTruncated = result.Truncated;
+
+            if (result.Cancelled) return;
+
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                _searchActive = false;
+                _searchResults.Clear();
+                FillList();
+                ReportStatus(result.Error, true);
+                return;
+            }
+
+            _searchResults = result.Entries;
+            _searchActive = true;
+
+            FileBrowserService.Sort(_searchResults, _state.SortField, _state.SortDescending);
+
+            FillList();
+            UpdateStatusCount();
+        }
+
+        private void CancelSearch()
+        {
+            var cts = _searchCts;
+            _searchCts = null;
+
+            if (cts != null)
+            {
+                try
+                {
+                    cts.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // 任务刚好结束并释放了 CTS。
+                }
+            }
+
+            _searchVersion++;
+            _searching = false;
+            _searchActive = false;
+            _searchResults.Clear();
+            _searchFound = 0;
+        }
+
+        private void ApplySearchProgress(int version, FileBrowserSearchProgress progress)
+        {
+            if (IsDisposed || version != _searchVersion || !_searching) return;
+
+            _searchFolders = progress.FoldersVisited;
+            _searchEntries = progress.EntriesVisited;
+            _searchFound = progress.Results;
+            SetStatus(DescribeSearchProgress(), false);
+        }
+
+        private string DescribeSearchProgress() =>
+            $"正在搜索子文件夹…（看了 {_searchFolders:N0} 个文件夹 / {_searchEntries:N0} 项 / "
+            + $"找到 {_searchFound:N0} 个） · 按 Esc 取消";
+
+        /// <summary>
+        /// 把后台的进度搬回 UI 线程。<b>不要用 <see cref="Progress{T}"/> 依赖 <c>SynchronizationContext</c></b>：
+        /// 测试宿主里它可能是空的，回调会跑到线程池上，晚到的进度就能把完成后的状态行盖掉。
+        /// </summary>
+        private sealed class SearchProgressRelay : IProgress<FileBrowserSearchProgress>
+        {
+            private readonly FileBrowserView _owner;
+            private readonly int _version;
+
+            internal SearchProgressRelay(FileBrowserView owner, int version)
+            {
+                _owner = owner;
+                _version = version;
+            }
+
+            public void Report(FileBrowserSearchProgress value)
+            {
+                if (_owner.IsDisposed || !_owner.IsHandleCreated) return;
+
+                try
+                {
+                    _owner.BeginInvoke(new Action(() => _owner.ApplySearchProgress(_version, value)));
+                }
+                catch (InvalidOperationException)
+                {
+                    // 窗口正在销毁。
+                }
+            }
+        }
+
+        private string DescribeSearchResult()
+        {
+            var type = _typeFilter == FileBrowserTypeFilter.All
+                ? string.Empty
+                : DescribeTypeFilter() + " · ";
+
+            var text = $"含子文件夹 · {type}搜索「{_searchQuery}」：{_visibleEntries.Count:N0} 项";
+
+            if (_visibleEntries.Count != _searchResults.Count)
+                text += $" / {_searchResults.Count:N0}";
+
+            text += $" · 看了 {_searchFolders:N0} 个文件夹 / {_searchEntries:N0} 项";
+
+            if (_searchUnreadable > 0)
+                text += $" · {_searchUnreadable:N0} 个文件夹读不了";
+
+            if (_searchTruncated)
+                text += " · 已达搜索上限，只找到一部分";
+
+            return text;
+        }
 
         private void ApplyPendingSelection()
         {
@@ -517,6 +862,7 @@ namespace 播放器.Ui
             _backButton.Enabled = _state.CanGoBack;
             _forwardButton.Enabled = _state.CanGoForward;
             _upButton.Enabled = _state.CanGoUp;
+            UpdateSearchScopeEnabled();
         }
 
         // ---- 交互 -------------------------------------------------------------
@@ -722,6 +1068,17 @@ namespace 播放器.Ui
             _state.ShowAllFiles = value;
             RaiseStateChanged();
 
+            if (_searchActive || _searching)
+            {
+                if (_recursiveSearch.Checked && !string.IsNullOrWhiteSpace(_query))
+                {
+                    StartRecursiveSearch();
+                    return;
+                }
+
+                CancelSearch();
+            }
+
             if (_loadedOnce) StartLoad();
         }
 
@@ -730,9 +1087,18 @@ namespace 播放器.Ui
             _state.SortField = field;
             _state.SortDescending = descending;
 
-            if (_entries.Count > 0)
+            if (_searching)
             {
-                FileBrowserService.Sort(_entries, _state.SortField, _state.SortDescending);
+                UpdateSortHeaders();
+                RaiseStateChanged();
+                return;
+            }
+
+            var source = _searchActive ? _searchResults : _entries;
+
+            if (source.Count > 0)
+            {
+                FileBrowserService.Sort(source, _state.SortField, _state.SortDescending);
                 FillList();
             }
             else

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace 播放器.Core
 {
@@ -15,8 +16,9 @@ namespace 播放器.Core
     /// <summary>
     /// 文件页的搜索 / 类型过滤：纯逻辑，不碰磁盘。
     /// <para>
-    /// 搜索只匹配<b>当前已读到的条目名</b>（含扩展名），按空白切词、所有词都要命中；
-    /// 不做递归搜索，也不把完整路径算进去——否则输入当前文件夹名时每一项都会命中。
+    /// 匹配只针对<b>单条条目的名字</b>（含扩展名），按空白切词、所有词都要命中；
+    /// 不把完整路径算进去——否则输入当前文件夹名时每一项都会命中。
+    /// 递归遍历不在这里：<see cref="FileBrowserSearch"/> 负责走目录，本类只判断“这一条算不算命中”。
     /// </para>
     /// </summary>
     internal static class FileBrowserFilter
@@ -26,8 +28,16 @@ namespace 播放器.Core
             if (entry == null) return false;
             if (string.IsNullOrWhiteSpace(query)) return true;
 
-            var terms = Split(query);
-            if (terms.Length == 0) return true;
+            return Matches(entry, Split(query));
+        }
+
+        /// <summary>
+        /// 已经切好词的版本：递归搜索要对最多 200,000 条复用同一组词，不能每一条都重新 Split。
+        /// </summary>
+        internal static bool Matches(FileBrowserEntry entry, IReadOnlyList<string> terms)
+        {
+            if (entry == null) return false;
+            if (terms.Count == 0) return true;
 
             foreach (var term in terms)
             {

@@ -164,6 +164,55 @@ namespace 播放器.Core
         }
 
         /// <summary>
+        /// 文件 / 文件夹相对搜索根的位置：返回<b>它所在目录</b>相对 <paramref name="root"/> 的路径，
+        /// 根目录那一层返回空串。只用于展示，不碰磁盘；越界 / 坏路径回空串。
+        /// <para>
+        /// 文件夹取父目录而不是自己：搜索结果的「位置」列回答的是“在哪一层找到的”，
+        /// 不是重复一遍名字。
+        /// </para>
+        /// </summary>
+        internal static string RelativeFolder(string? root, string? path)
+        {
+            if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(path)) return string.Empty;
+
+            try
+            {
+                var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var folder = Path.GetDirectoryName(trimmed);
+                if (string.IsNullOrEmpty(folder)) return string.Empty;
+
+                // 不同盘符 / UNC 共享根之间没有“相对路径”：GetRelativePath 会直接回绝对路径。
+                var rootRoot = Path.GetPathRoot(root) ?? string.Empty;
+                var folderRoot = Path.GetPathRoot(folder) ?? string.Empty;
+
+                if (!string.Equals(rootRoot, folderRoot, StringComparison.OrdinalIgnoreCase))
+                    return string.Empty;
+
+                var relative = Path.GetRelativePath(root, folder);
+                if (Path.IsPathFullyQualified(relative)) return string.Empty;
+                if (string.Equals(relative, ".", StringComparison.Ordinal)) return string.Empty;
+                if (relative == ".." ||
+                    relative.StartsWith(@"..\", StringComparison.Ordinal) ||
+                    relative.StartsWith("../", StringComparison.Ordinal))
+                    return string.Empty;
+
+                return relative;
+            }
+            catch (ArgumentException)
+            {
+                return string.Empty;
+            }
+            catch (IOException)
+            {
+                return string.Empty;
+            }
+            catch (NotSupportedException)
+            {
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
         /// 菜单里的短标签：保留路径最后两段，最多 <paramref name="maxLength"/> 个字符。
         /// 完整路径仍然放在 tooltip 里，菜单不会被一段长路径撑爆。
         /// </summary>

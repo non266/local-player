@@ -11,14 +11,21 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 48,876 行 / **198 个文件** |
-| `Core/` | 17,981 行 / 91 个文件 |
-| `Ui/` | 15,698 行 / 63 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 49,775 行 / **202 个文件** |
+| `Core/` | 18,078 行 / 92 个文件 |
+| `Ui/` | 16,500 行 / 66 个文件 |
 | `MainForm*` 这一族 partial | 15,120 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 30,170 行 / 92 个文件 |
+| `tools/SmokeTest/` | 30,877 行 / 93 个文件 |
 
-> 数字最后一次量是在 **2026-11-19（1.26.0：文件页递归搜索）**。
-> 1.26.0 产品侧多出 `Core/FileBrowserSearch`（`Core` 90 → 91、主程序 197 → 198），
+> 数字最后一次量是在 **2026-11-20（1.27.0：文件页封面缩略图）**。
+> 1.27.0 产品侧多出 `Core/CoverArtLoader`（`Core` 91 → 92、主程序 198 → 202）、
+> `Ui/CoverThumbnails` / `Ui/ThumbnailQueue` / `Ui/FileBrowserView.Thumbnails`（`Ui` 63 → 66）；
+> 设置加 1 个字段（92 → 93 项）；按钮宽度改成现量文字；冒烟多出
+> `Program.FileBrowser.Thumbnails`（92 → 93 个文件），**仍是 28 个运行步骤 / 33 项检查**
+> （新断言都在第 33 项里，不新增编号），详情见 §36。
+>
+> 1.26.0 那一版的记录（2026-11-19：文件页递归搜索）：
+> 产品侧多出 `Core/FileBrowserSearch`（`Core` 90 → 91、主程序 197 → 198），
 > `FileBrowserService.CreateEntry` 改成 `internal` 供搜索复用，`FileBrowserPaths` 多一个
 > `RelativeFolder`；冒烟多出 `Program.FileBrowser.Search`（91 → 92 个文件），
 > **仍是 28 个运行步骤 / 33 项检查**（新断言都在第 33 项里，不新增编号），详情见 §35。
@@ -1820,3 +1827,73 @@ APE 的文本键（Title / Artist / Year / Track…）同样走这套键名归�
 - 不新增设置字段（仍 7 组 92 项）；范围是临时视图态，导航即清。
 - 缩略图、文件夹树、删除 / 改名 / 移动、SMB 自动发现仍不做。
 - 已知 Application Hang 本轮未修。
+---
+
+## 36. 文件页封面缩略图（1.27.0）
+
+### 36.1 形态：平铺是"另一次排版"，不是另一套数据
+
+- `View.Details` ↔ `View.LargeIcon` 只换列表形态；`_entries` / `_searchResults` / 排序 / 筛选 /
+  拖放 / 双击 / 右键 / 键盘全部沿用原来那几段代码（`ListViewItem.Tag` 仍是 `FileBrowserEntry`）。
+- 两套 ImageList 前 7 位的种类顺序相同（文件夹 / 磁盘 / 视频 / 音频 / 字幕 / 播放列表 / 其他），
+  所以 `ImageIndex` 在两个形态里指同一种图标；缩略图追加在大图标 ImageList 的第 7 位之后。
+- 切回详情必须把每行 `ImageIndex` 复位成小图标那一套：详情用的是 `SmallImageList`，
+  缩略图索引在那里是空的。这一步由 `ApplyThumbnailMode()` 做，`FillList` 重建时也会重新赋值。
+- 平铺下没有表头，`AdjustColumns` 直接返回；递归搜索结果（要显示「位置」列）强制回详情，
+  清空搜索后回到平铺——**平铺里看不见的位置信息不能被静默藏掉**。
+
+### 36.2 数据流
+
+```
+FillList → ApplyThumbnailMode（形态）→ RefreshThumbnails
+  ├─ 详情 / 搜索结果：CancelThumbnails（代际号 +1、清排队）
+  └─ 平铺：RequestThumbnails
+        遍历 _visibleEntries（视频 / 音频、非网络、前 MaxThumbnails 个）
+          ├─ 缓存命中 → 直接给行贴图
+          ├─ 负缓存命中 → 跳过（不再重试）
+          └─ 其余 → ThumbnailQueue.Request(key, path, edge, version)
+ThumbnailQueue（专用线程）
+  CoverArtLoader.Load（TagReader 内嵌图 → SidecarCover 外挂图）
+  CoverThumbnails.Decode（解码 + 等比缩放 + 上限）
+  Ready(result) → 视图 BeginInvoke → 校验代际号 → 加入 ImageList → 贴到行
+```
+
+- **缓存键 = 路径 + 大小 + 修改时间**：只看路径的话，换了封面 / 换了压制版本还会显示旧图。
+- **负缓存**：解不开的封面记下来，重进目录不再读一遍（一个坏文件不该反复拖慢整页）。
+- **上限**：每目录 300 个请求、队列 400、缓存 512 条；触到每目录上限在状态行写
+  「缩略图只做了前 N 个文件」——少做了要说。
+- 网络路径不做（离线共享上的读盘不可取消，与 §35 的递归搜索同一条理由）。
+
+### 36.3 线程与所有权
+
+- 读 + 解码都在 `ThumbnailQueue` 的**一条专用线程**上（不占线程池，与 1.19.0 标签队列同规矩）。
+- 位图所有权一条线：队列生产 → 随 `Ready` 交付；交付不成就由队列释放。
+  视图在丢弃（代际号不符 / 已释放 / 换形态）时释放临时位图。
+- 回 UI 用控件 `BeginInvoke`，不用 `Progress<T>`（1.26.0 的老坑：测试宿主里上下文为空，
+  回调会跑到线程池上与列表抢）。
+- 释放顺序：先摘 `LargeImageList`，再释放位图与大图标集；主题 / DPI 变化整份重建（索引都是旧的）。
+- `Dispose` 只置停止信号 + 最多等 200 ms：读盘线程可能卡在不可取消的 Read 上，
+  它是后台线程，进程退出时不会被它拖住。
+
+### 36.4 两个按钮的文字被切（同类教训）
+
+`LayoutToolbar` / `LayoutFilterBar` 原来把「位置」写死 `Scaled(42)`、「含子文件夹」写死 `Scaled(88)`。
+字号 / DPI / 字体替换任意一项偏一点，文字就比按钮宽、字被切掉一半（所有者 2026-11-20 截图：
+「位置」只剩「位」）。现在 `MeasureButtonWidth` 现量 `TextRenderer.MeasureText` 再加两侧留白；
+第 33 项断言"文字宽 ≤ 按钮内宽、按钮右边界 ≤ 文件页宽"。
+**写死的尺寸不要拿去赌字体宽度**——这是和 §26「对话框别用行数 × 行高估算」同一族的教训。
+
+### 36.5 测试
+
+- 第 33 项新增：平铺形态 / 尺寸、内嵌与 MP4 covr / 外挂封面的像素断言、无封面与坏封面回类型图标、
+  后台线程、正 / 负缓存、缓存键（换封面要重做）、迟到结果丢弃、队列上限、每目录预算与状态行、
+  网络规则、搜索结果强制详情、切回详情复位、220×200 渲染与平铺滚轮、按钮文字宽度。
+- 8 条变异，原文见 `docs/1.27.0计划.md` §5.4。
+- GATED 探针：`播放器_TEST_THUMBNAILPROBE`（100 张封面读取 + 解码）、
+  `播放器_TEST_LAYOUTPROBE`（文件页几何与按钮文字宽度），只量不判。
+
+### 36.6 边界
+
+- 只做封面，不截视频帧（第二条解码链是 F6 那一族）；不认图片文件；不落盘（退出即丢）。
+- 平铺没有大小 / 位置列；搜索结果强制回详情。
+- 已知 Application Hang（`0xCFFFFFFF`）本轮未修。

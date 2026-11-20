@@ -240,6 +240,9 @@ namespace 播放器.Core
         /// <summary>是否连不支持播放的文件与隐藏 / 系统项一起显示。</summary>
         public bool FileBrowserShowAllFiles { get; set; }
 
+        /// <summary>文件页是否用「平铺缩略图」显示音视频封面（1.27.0；默认关，不打开的人界面不变）。</summary>
+        public bool FileBrowserThumbnails { get; set; }
+
         /// <summary>上次浏览的目录；空串表示"此电脑"。</summary>
         public string FileBrowserLastPath { get; set; } = string.Empty;
 

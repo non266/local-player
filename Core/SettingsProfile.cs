@@ -77,7 +77,7 @@ namespace 播放器.Core
                 "SidebarFloating", "PlaylistFloating", "AlwaysOnTop", "MinimizeToTray",
                 "SortField", "SortDescending", "WindowMode", "MiniMode",
                 "FileBrowserFloating", "FileBrowserSort", "FileBrowserSortDescending",
-                "FileBrowserShowAllFiles"
+                "FileBrowserShowAllFiles", "FileBrowserThumbnails"
             },
             [SettingsSection.Windows] = new[]
             {

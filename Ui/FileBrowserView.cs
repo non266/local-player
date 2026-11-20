@@ -148,6 +148,9 @@ namespace 播放器.Ui
         /// <summary>测试钩子：搜索范围开关（真实控件，用来验焦点与空格键）。</summary>
         internal CheckBox ScopeToggleForTest => _recursiveSearch;
 
+        /// <summary>测试钩子：「位置」按钮（用来验文字宽度 / 右边界，别让它被裁掉）。</summary>
+        internal Button PositionButtonForTest => _positionButton;
+
         internal void SetSearchTextForTest(string value) => _search.Text = value;
 
         /// <summary>测试钩子：换掉目录读取（假的慢 I/O / 固定结果）。</summary>
@@ -226,6 +229,14 @@ namespace 播放器.Ui
             if (_list.Items.Count == 0 || delta == 0) return;
 
             var step = Math.Max(1, Math.Abs(delta) / 120) * 3;
+
+            // 平铺（大图标）没有详情那套 TopItem 语义，走 Bounds + EnsureVisible。
+            if (_list.View == View.LargeIcon)
+            {
+                ScrollTilesBy(delta > 0 ? -step : step);
+                return;
+            }
+
             var top = _list.TopItem?.Index ?? 0;
             var target = delta > 0 ? top - step : top + step;
 
@@ -250,6 +261,10 @@ namespace 播放器.Ui
             UpdateAddressText();
             UpdateSortHeaders();
             UpdateNavigationButtons();
+
+            // 设置方案里可能只换了「缩略图」这一项：形态与排队都要跟着摆回来。
+            ApplyThumbnailMode();
+            RefreshThumbnails();
 
             if ((pathChanged || filterChanged) && wasLoaded)
             {
@@ -353,7 +368,7 @@ namespace 播放器.Ui
             var gap = Scaled(4);
             var top = Scaled(4);
             var height = Scaled(22);
-            var scopeWidth = Scaled(88);
+            var scopeWidth = MeasureButtonWidth(_recursiveSearch, 88);
             var right = Width - pad;
 
             _recursiveSearch.SetBounds(
@@ -427,6 +442,20 @@ namespace 播放器.Ui
 
         private int Scaled(int value) => (int)Math.Round(value * DpiScale);
 
+        /// <summary>
+        /// 按钮宽度：取"设计值"与"文字宽度 + 两侧留白"里大的那个。
+        /// <para>
+        /// 以前这两个控件是写死的逻辑尺寸（位置 42 / 含子文件夹 88）：在 125% 与宽字形字体下
+        /// 「位置」只剩一个「位」、「含子文件夹」的「夹」被切掉（所有者 2026-11-20 截图）。
+        /// 文字宽度必须现量，不能拿一个常量去赌所有 DPI / 字体替换。
+        /// </para>
+        /// </summary>
+        private int MeasureButtonWidth(Control control, int minimum)
+        {
+            var text = TextRenderer.MeasureText(control.Text, control.Font);
+            return Math.Max(Scaled(minimum), text.Width + Scaled(18));
+        }
+
         private void LayoutToolbar()
         {
             var pad = Scaled(6);
@@ -444,7 +473,7 @@ namespace 播放器.Ui
                 x += side + gap;
             }
 
-            var positionWidth = Scaled(42);
+            var positionWidth = MeasureButtonWidth(_positionButton, 42);
             _positionButton.SetBounds(Width - pad - positionWidth, top, positionWidth, side);
 
             var addressLeft = x;
@@ -459,6 +488,9 @@ namespace 播放器.Ui
 
         private void AdjustColumns()
         {
+            // 平铺（大图标）没有表头，列宽不参与显示；切回详情时会再调一次。
+            if (_list.View == View.LargeIcon) return;
+
             var width = _list.ClientSize.Width;
             if (width <= 0) return;
 
@@ -474,11 +506,15 @@ namespace 播放器.Ui
         {
             // 先摘掉，再释放旧的一组：ListView 重绘时不能再摸已经 Dispose 的 ImageList。
             _list.SmallImageList = null;
+            _list.LargeImageList = null;
 
             _icons?.Dispose();
             _icons = new FileIconSet(_palette, Scaled(16));
 
             _list.SmallImageList = _icons.Images;
+
+            // 大图标与缩略图缓存的索引都是按旧的一套算的，跟着一起作废。
+            RebuildThumbnails();
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -527,6 +563,10 @@ namespace 播放器.Ui
             {
                 CancelLoad();
                 CancelSearch();
+
+                DisposeThumbnails();
+
+                _list.SmallImageList = null;
                 _icons?.Dispose();
                 _icons = null;
                 _contextMenu.Dispose();

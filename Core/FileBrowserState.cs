@@ -97,6 +97,9 @@ namespace 播放器.Core
 
         internal bool ShowAllFiles { get; set; }
 
+        /// <summary>用平铺缩略图显示音视频封面（1.27.0）。</summary>
+        internal bool ShowThumbnails { get; set; }
+
         /// <summary>进入一个目录（会记一条后退历史，并清空前进栈）。</summary>
         internal void Navigate(string? path)
         {
@@ -235,7 +238,8 @@ namespace 播放器.Core
                 LastSuccessfulPath = path,
                 SortField = FileSortFields.Parse(settings.FileBrowserSort),
                 SortDescending = settings.FileBrowserSortDescending,
-                ShowAllFiles = settings.FileBrowserShowAllFiles
+                ShowAllFiles = settings.FileBrowserShowAllFiles,
+                ShowThumbnails = settings.FileBrowserThumbnails
             };
 
             state.Favorites.AddRange(NormalizeList(settings.FileBrowserFavorites, FavoriteCapacity));
@@ -253,6 +257,7 @@ namespace 播放器.Core
             settings.FileBrowserSort = FileSortFields.NameOf(SortField);
             settings.FileBrowserSortDescending = SortDescending;
             settings.FileBrowserShowAllFiles = ShowAllFiles;
+            settings.FileBrowserThumbnails = ShowThumbnails;
         }
 
         /// <summary>把一份设置列表归一：只留能当目录的绝对路径、去重（不区分大小写）、截到上限。</summary>

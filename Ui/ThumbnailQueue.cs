@@ -1,0 +1,218 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Threading;
+using 播放器.Core;
+
+namespace 播放器.Ui
+{
+    /// <summary>后台队列交回来的一张缩略图；<see cref="Bitmap"/> 为 <c>null</c> 表示"这个文件没有可用的封面"。</summary>
+    internal readonly struct ThumbnailResult
+    {
+        internal ThumbnailResult(string key, string path, int version, Bitmap? bitmap)
+        {
+            Key = key;
+            Path = path;
+            Version = version;
+            Bitmap = bitmap;
+        }
+
+        /// <summary>缓存键（路径 + 大小 + 修改时间）；失败结果也用同一个键记负缓存。</summary>
+        internal string Key { get; }
+
+        internal string Path { get; }
+
+        /// <summary>发起请求时的代际号；取件方拿它对当前代际，不符就丢掉。</summary>
+        internal int Version { get; }
+
+        internal Bitmap? Bitmap { get; }
+    }
+
+    /// <summary>
+    /// 文件页缩略图的后台队列：<b>一条专用线程</b>、FIFO、有上限、可整批取消。
+    /// <para>
+    /// 为什么不用线程池：读盘会卡（离线共享上一次读能等几十秒），占住线程池的线程会连累
+    /// 别的后台任务（与 1.19.0 的标签读取队列、1.24.0 的目录读取同一个理由）。
+    /// 为什么不在界面线程上等：队列只负责"排进去"，界面线程立刻返回。
+    /// </para>
+    /// <para>
+    /// 所有权只有一条线：位图由本队列生产、<see cref="Ready"/> 交付；交付不成就由这里释放。
+    /// 取消只清队列（正在解码的那一张允许跑完，取件方按代际号丢掉），
+    /// 因为文件读取本身不可取消。
+    /// </para>
+    /// </summary>
+    internal sealed class ThumbnailQueue : IDisposable
+    {
+        /// <summary>排队上限。超了直接丢请求：视图按每目录预算已经截过，这里只防失控。</summary>
+        internal const int MaxPending = 400;
+
+        /// <summary>一条请求。</summary>
+        private sealed class Job
+        {
+            internal Job(string key, string path, int edge, int version)
+            {
+                Key = key;
+                Path = path;
+                Edge = edge;
+                Version = version;
+            }
+
+            internal string Key { get; }
+
+            internal string Path { get; }
+
+            internal int Edge { get; }
+
+            internal int Version { get; }
+        }
+
+        private readonly CoverArtLoader _loader;
+        private readonly object _gate = new object();
+        private readonly Queue<Job> _queue = new Queue<Job>();
+        private readonly ManualResetEventSlim _wake = new ManualResetEventSlim(false);
+        private readonly Thread _thread;
+
+        private bool _disposed;
+        private bool _busy;
+
+        internal ThumbnailQueue(CoverArtLoader loader)
+        {
+            _loader = loader ?? throw new ArgumentNullException(nameof(loader));
+
+            _thread = new Thread(Loop)
+            {
+                IsBackground = true,
+                Name = "文件页缩略图"
+            };
+
+            _thread.Start();
+        }
+
+        /// <summary>一张缩略图做完了（成功与失败都会通知）；在后台线程上触发。</summary>
+        internal event Action<ThumbnailResult>? Ready;
+
+        /// <summary>还在排队、没开始做的条数。</summary>
+        internal int Pending
+        {
+            get { lock (_gate) return _queue.Count; }
+        }
+
+        /// <summary>当前正在读 / 解码（0 或 1；队列只有一条线程）。</summary>
+        internal bool Busy
+        {
+            get { lock (_gate) return _busy; }
+        }
+
+        /// <summary>排一张缩略图；队列满了就丢掉这次请求（不抛、不阻塞）。</summary>
+        internal void Request(string key, string path, int edge, int version)
+        {
+            lock (_gate)
+            {
+                if (_disposed || _queue.Count >= MaxPending) return;
+
+                _queue.Enqueue(new Job(key, path, edge, version));
+            }
+
+            _wake.Set();
+        }
+
+        /// <summary>丢掉还没开始的请求；正在做的那一张会照常交回来（取件方按代际号丢弃）。</summary>
+        internal void CancelAll()
+        {
+            lock (_gate) _queue.Clear();
+        }
+
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                if (_disposed) return;
+
+                _disposed = true;
+                _queue.Clear();
+            }
+
+            _wake.Set();
+
+            // 线程可能在 FileStream.Read 里卡着；最多等 200 ms，剩下的交给进程退出
+            // （IsBackground = true）。这里也**不 Dispose** _wake：线程醒来时可能还要用它。
+            _thread.Join(200);
+        }
+
+        private void Loop()
+        {
+            while (true)
+            {
+                Job? request;
+
+                lock (_gate)
+                {
+                    if (_queue.Count > 0)
+                    {
+                        request = _queue.Dequeue();
+                        _busy = true;
+                    }
+                    else
+                    {
+                        request = null;
+                        _busy = false;
+                    }
+                }
+
+                if (request == null)
+                {
+                    lock (_gate)
+                    {
+                        if (_disposed) return;
+                    }
+
+                    _wake.Wait();
+                    _wake.Reset();
+                    continue;
+                }
+
+                Bitmap? bitmap = null;
+
+                try
+                {
+                    var art = _loader.Load(request.Path);
+                    bitmap = CoverThumbnails.Decode(art, request.Edge);
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Swallowed("文件页缩略图后台读取失败：" + request.Path, ex);
+                }
+
+                lock (_gate)
+                {
+                    _busy = false;
+
+                    if (_disposed)
+                    {
+                        bitmap?.Dispose();
+                        return;
+                    }
+                }
+
+                var handler = Ready;
+
+                if (handler == null)
+                {
+                    // 没人接（窗体已经走了）：位图归本队列释放。
+                    bitmap?.Dispose();
+                    continue;
+                }
+
+                try
+                {
+                    handler(new ThumbnailResult(request.Key, request.Path, request.Version, bitmap));
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Swallowed("文件页缩略图交付失败", ex);
+                    bitmap?.Dispose();
+                }
+            }
+        }
+    }
+}

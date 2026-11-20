@@ -21,11 +21,13 @@ namespace SmokeTest
                 if (!CheckFileBrowserRecursiveSearchCore(root)) return false;
                 if (!CheckMediaScannerBounded(root)) return false;
                 if (!CheckFileBrowserMainForm(root)) return false;
+                if (!CheckFileBrowserThumbnailProbe(root)) return false;
                 if (!CheckFileBrowserProbe(root)) return false;
 
                 Log(33, "文件浏览器正常：路径归一、历史 / 收藏 / 最近、当前层读取与过滤、有界递归、"
                         + "搜索 / 只看类型 / 拖到播放列表（有界）/ 定位当前文件、"
-                        + "递归搜索（有界 / 可取消 / 相对位置）、侧栏文件页与分离窗口都按预期工作");
+                        + "递归搜索（有界 / 可取消 / 相对位置）、封面缩略图（平铺 / 后台 / 有界 / 可缓存）、"
+                        + "侧栏文件页与分离窗口都按预期工作");
                 return true;
             }
             catch (Exception ex)
@@ -533,6 +535,7 @@ namespace SmokeTest
             settings.FileBrowserSort = "Name";
             settings.FileBrowserSortDescending = false;
             settings.FileBrowserShowAllFiles = false;
+            settings.FileBrowserThumbnails = false;
             settings.Save();
 
             string? savedFavorite = null;
@@ -576,6 +579,16 @@ namespace SmokeTest
                     return false;
                 }
 
+                if (!CheckFileBrowserLayoutProbe(form, view))
+                {
+                    return false;
+                }
+
+                if (!CheckFileBrowserChromeFits(view))
+                {
+                    return false;
+                }
+
                 if (!TryRender(view, view.Width, view.Height, out var renderError))
                 {
                     Log(33, "文件页检查：绘制失败：" + renderError);
@@ -608,6 +621,11 @@ namespace SmokeTest
                 }
 
                 if (!CheckFileBrowserRecursiveSearch(form, view, uiRoot))
+                {
+                    return false;
+                }
+
+                if (!CheckFileBrowserThumbnails(form, view, uiRoot))
                 {
                     return false;
                 }
@@ -860,6 +878,7 @@ namespace SmokeTest
                 savedFavorite = uiRoot;
                 view.State.AddFavorite(savedFavorite);
                 view.SetSort(FileSortField.Modified, descending: true);
+                view.SetThumbnailsForTest(true);
                 form.SyncFileBrowserSettings();
 
                 SetMenuChecked(floatItem, true);
@@ -892,6 +911,12 @@ namespace SmokeTest
             if (saved.FileBrowserSort != "Modified" || !saved.FileBrowserSortDescending)
             {
                 Log(33, "文件页检查：排序依据没有存进设置（" + saved.FileBrowserSort + "）");
+                return false;
+            }
+
+            if (!saved.FileBrowserThumbnails)
+            {
+                Log(33, "文件页检查：缩略图开关没有存进设置");
                 return false;
             }
 
@@ -1184,6 +1209,33 @@ namespace SmokeTest
 
         private static List<string> ListViewNames(ListView list) =>
             list.Items.Cast<ListViewItem>().Select(item => item.Text).ToList();
+
+        /// <summary>
+        /// 工具栏 / 搜索行右侧两个按钮：文字要完整落在按钮里，按钮要完整落在文件页里。
+        /// （所有者 2026-11-20 截图：「位置」只剩「位」、「含子文件夹」的「夹」被切掉。）
+        /// 文字宽度是现量的——写死一个逻辑尺寸去赌所有 DPI / 字体替换，就是这次踩的坑。
+        /// </summary>
+        private static bool CheckFileBrowserChromeFits(FileBrowserView view)
+        {
+            foreach (var control in new Control[] { view.PositionButtonForTest, view.ScopeToggleForTest })
+            {
+                var text = TextRenderer.MeasureText(control.Text, control.Font);
+
+                if (text.Width > control.ClientSize.Width)
+                {
+                    Log(33, $"文件页检查：「{control.Text}」的文字宽度 {text.Width} 超过按钮内宽 {control.ClientSize.Width}");
+                    return false;
+                }
+
+                if (control.Right > view.Width)
+                {
+                    Log(33, $"文件页检查：「{control.Text}」的右边界 {control.Right} 超出文件页宽度 {view.Width}");
+                    return false;
+                }
+            }
+
+            return true;
+        }
 
         // -----------------------------------------------------------------
         // GATED 探针

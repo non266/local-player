@@ -296,6 +296,8 @@ namespace 播放器.Ui
                 })
                 .ToList();
 
+            ApplyThumbnailMode();
+
             _list.BeginUpdate();
 
             try
@@ -323,6 +325,7 @@ namespace 播放器.Ui
 
             AdjustColumns();
             UpdateSortHeaders();
+            RefreshThumbnails();
         }
 
         private void UpdateStatusCount()
@@ -356,6 +359,10 @@ namespace 播放器.Ui
                 : $"{_entries.Count:N0} 项（{_entries.Count(entry => entry.IsDirectory):N0} 个文件夹）";
 
             if (_truncated) text += " · 已达显示上限，只列出了一部分";
+
+            // 缩略图是按每目录预算做的；少做了要在状态行说，不能看起来像"全都做了"。
+            if (_thumbnailSkipped > 0)
+                text += $" · 缩略图只做了前 {MaxThumbnails} 个文件";
 
             return text;
         }
@@ -1061,6 +1068,21 @@ namespace 播放器.Ui
 
         // ---- 排序 / 过滤 -------------------------------------------------------
 
+        /// <summary>
+        /// 打开 / 关闭平铺缩略图：只换列表形态，不重读目录（缓存里有的封面直接贴回去）。
+        /// 这个选择进 <see cref="FileBrowserState.ShowThumbnails"/>，退出 / 存方案时统一落盘。
+        /// </summary>
+        internal void SetThumbnails(bool value)
+        {
+            if (_state.ShowThumbnails == value) return;
+
+            _state.ShowThumbnails = value;
+            RaiseStateChanged();
+
+            FillList();
+            UpdateStatusCount();
+        }
+
         internal void SetShowAllFiles(bool value)
         {
             if (_state.ShowAllFiles == value) return;
@@ -1324,6 +1346,15 @@ namespace 播放器.Ui
             };
             showAll.Click += (s, e) => SetShowAllFiles(!_state.ShowAllFiles);
             _positionMenu.Items.Add(showAll);
+
+            var thumbnails = new ToolStripMenuItem("缩略图（平铺）(&K)")
+            {
+                Checked = _state.ShowThumbnails,
+                CheckOnClick = false,
+                ToolTipText = "用封面缩略图平铺显示音视频文件（网络位置只显示图标）"
+            };
+            thumbnails.Click += (s, e) => SetThumbnails(!_state.ShowThumbnails);
+            _positionMenu.Items.Add(thumbnails);
 
             var type = new ToolStripMenuItem("只看类型(&T)");
             type.DropDownItems.Add(CreateTypeItem("全部(&A)", FileBrowserTypeFilter.All));

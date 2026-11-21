@@ -236,7 +236,10 @@ namespace SmokeTest
             settings.FileBrowserFolderTree = false;
             settings.FileBrowserAutoRefresh = false;
             settings.FileBrowserThumbnails = false;
-            settings.FileBrowserShowAllFiles = false;
+
+            // 夹具可能落在隐藏目录下面（例如 %TEMP% 在 AppData 里）：树默认不列隐藏项，
+            // 那样"展开到当前目录"就永远到不了。打开「显示所有文件」，让这条断言与机器无关。
+            settings.FileBrowserShowAllFiles = true;
             settings.FileBrowserSort = "Name";
             settings.FileBrowserSortDescending = false;
             settings.Save();

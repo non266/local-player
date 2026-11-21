@@ -140,7 +140,8 @@ namespace 播放器.Ui
 
             foreach (ToolStripItem item in _positionMenu.Items)
             {
-                if (item is ToolStripMenuItem menu && menu.Text.StartsWith(prefix, StringComparison.Ordinal))
+                if (item is ToolStripMenuItem menu &&
+                    (menu.Text ?? string.Empty).StartsWith(prefix, StringComparison.Ordinal))
                     return menu;
             }
 

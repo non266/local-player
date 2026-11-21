@@ -28,8 +28,11 @@ namespace 播放器.Ui
         /// <summary>内存缓存上限（条）。满了整份丢掉重建：比维护 LRU 简单，代价可接受。</summary>
         private const int ThumbnailCapacity = 512;
 
-        /// <summary>每目录最多给多少个文件做缩略图（默认值）。</summary>
+        /// <summary>每目录最多给多少个文件做缩略图（默认值，实际取 <see cref="FileBrowserState.ThumbnailBudget"/>）。</summary>
         private const int ThumbnailRequestDefault = 300;
+
+        /// <summary>每目录最多截多少个视频首帧（1.28.0；不暴露设置：截帧比读封面贵两个数量级）。</summary>
+        internal const int FrameBudget = 60;
 
         private FileIconSet? _largeIcons;
 
@@ -48,8 +51,20 @@ namespace 播放器.Ui
         private CoverArtLoader _thumbnailSource = new CoverArtLoader();
         private int _thumbnailVersion;
 
+        /// <summary>磁盘缓存（1.28.0）：点开过的目录第二次进来不再读封面 / 截帧。</summary>
+        private readonly ThumbnailCache _thumbnailCache = new ThumbnailCache();
+
+        /// <summary>视频首帧来源；第一次真要截帧时才建（建 libvlc 实例不便宜）。</summary>
+        private IVideoFrameSource? _thumbnailFrames;
+
+        /// <summary>测试注入过假的帧来源（不再建真的）。</summary>
+        private bool _thumbnailFramesInjected;
+
         /// <summary>因为超过每目录预算而没做缩略图的文件数（状态行要说明）。</summary>
         private int _thumbnailSkipped;
+
+        /// <summary>因为超过每目录截帧预算而只显示类型图标的视频数（状态行要说明）。</summary>
+        private int _thumbnailFramesSkipped;
 
         /// <summary>测试钩子：换掉封面来源（假的慢 / 假的数据 / 卡住不放，都靠它注入）。</summary>
         [Browsable(false)]
@@ -126,6 +141,64 @@ namespace 播放器.Ui
             return images[index];
         }
 
+        // ---- 预算 / 缓存（1.28.0）---------------------------------------------
+
+        /// <summary>每目录缩略图预算：只认 300 / 600 / 1000，别的值落到最近一档。</summary>
+        internal void SetThumbnailBudget(int budget)
+        {
+            var normalized = FileBrowserThumbnailBudgets.Normalize(budget);
+
+            if (_state.ThumbnailBudget == normalized) return;
+
+            _state.ThumbnailBudget = normalized;
+            MaxThumbnails = normalized;
+            RaiseStateChanged();
+
+            FillList();
+            UpdateStatusCount();
+        }
+
+        internal void SetThumbnailBudgetForTest(int budget) => SetThumbnailBudget(budget);
+
+        internal int MaxThumbnailsForTest => MaxThumbnails;
+
+        internal int FramesSkippedForTest => _thumbnailFramesSkipped;
+
+        internal int ThumbnailsSkippedForTest => _thumbnailSkipped;
+
+        internal (int Count, long Bytes) ThumbnailCacheStatsForTest => _thumbnailCache.Stats();
+
+        internal string ThumbnailCacheFolderForTest => _thumbnailCache.Folder;
+
+        /// <summary>给测试用：某个文件对应的磁盘缓存文件（没有就 null）。</summary>
+        internal string? ThumbnailCacheFileForTest(string path)
+        {
+            var entry = _entries.FirstOrDefault(candidate =>
+                string.Equals(candidate.FullPath, path, StringComparison.OrdinalIgnoreCase));
+
+            if (entry == null) return null;
+
+            var key = ThumbnailCache.Key(entry.FullPath, entry.Size, entry.Modified.Ticks, ThumbnailEdge);
+            var file = _thumbnailCache.FullPathFor(key);
+
+            return System.IO.File.Exists(file) ? file : null;
+        }
+
+        /// <summary>只把内存里的正 / 负缓存与位图丢掉（磁盘缓存不动）：验"第二次进来只读盘"。</summary>
+        internal void ClearThumbnailMemoryForTest() => ResetThumbnails();
+
+        /// <summary>「位置 → 清空缩略图缓存」：删磁盘 + 清内存，状态行说明删了多少。</summary>
+        internal void ClearThumbnailCache()
+        {
+            var (count, bytes) = _thumbnailCache.Clear();
+
+            ResetThumbnails();
+
+            SetStatus($"已清空缩略图缓存（{count:N0} 个文件 / {FileBrowserService.FormatSize(bytes)}）", false);
+        }
+
+        internal void ClearThumbnailCacheForTest() => ClearThumbnailCache();
+
         // ---- 形态 -------------------------------------------------------------
 
         /// <summary>
@@ -174,8 +247,50 @@ namespace 播放器.Ui
         {
             if (_thumbnailQueue != null) return;
 
-            _thumbnailQueue = new ThumbnailQueue(_thumbnailSource);
+            _thumbnailQueue = new ThumbnailQueue(_thumbnailSource, _thumbnailCache, EnsureFrameSource());
+
             _thumbnailQueue.Ready += OnThumbnailReadyFromWorker;
+        }
+
+        /// <summary>
+        /// 第一次真要截帧时才建 <see cref="VideoFrameGrabber"/>（一个 libvlc 实例 + 一个播放器）。
+        /// 建不出来（例如这台机器上 libvlc 起不来）就返回 <c>null</c>：缩略图退回"封面 → 类型图标"。
+        /// </summary>
+        private IVideoFrameSource? EnsureFrameSource()
+        {
+            if (_thumbnailFrames != null) return _thumbnailFrames;
+            if (_thumbnailFramesInjected) return null;
+
+            try
+            {
+                _thumbnailFrames = new VideoFrameGrabber();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Swallowed("文件页缩略图：建不出抓帧器，视频只用封面", ex);
+                _thumbnailFrames = null;
+                _thumbnailFramesInjected = true;
+            }
+
+            return _thumbnailFrames;
+        }
+
+        /// <summary>测试钩子：换掉帧来源（<c>null</c> = 本视图永远不截帧）。</summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        internal void SetVideoFramesForTest(IVideoFrameSource? frames)
+        {
+            _thumbnailFrames = frames;
+            _thumbnailFramesInjected = true;
+
+            if (_thumbnailQueue == null) return;
+
+            var old = _thumbnailQueue;
+            old.Ready -= OnThumbnailReadyFromWorker;
+            old.Dispose();
+            _thumbnailQueue = null;
+
+            EnsureThumbnailQueue();
         }
 
         // ---- 排队 -------------------------------------------------------------
@@ -197,6 +312,7 @@ namespace 播放器.Ui
             _thumbnailVersion++;
             _thumbnailPending.Clear();
             _thumbnailSkipped = 0;
+            _thumbnailFramesSkipped = 0;
             _thumbnailQueue?.CancelAll();
 
             if (!WantsThumbnails) return;
@@ -206,6 +322,7 @@ namespace 播放器.Ui
             var edge = ThumbnailEdge;
             var budget = Math.Max(0, MaxThumbnails);
             var used = 0;
+            var framesUsed = 0;
             var version = _thumbnailVersion;
 
             foreach (var entry in _visibleEntries)
@@ -231,7 +348,15 @@ namespace 播放器.Ui
                 if (_thumbnailMisses.Contains(key)) continue;
                 if (!_thumbnailPending.Add(key)) continue;
 
-                _thumbnailQueue!.Request(key, entry.FullPath, edge, version);
+                // 视频才截帧，且每个目录只截前 FrameBudget 个（截帧比读封面贵得多）。
+                var isVideo = entry.Kind == FileBrowserKind.Video;
+                var wantFrame = isVideo && framesUsed < FrameBudget;
+
+                if (isVideo && !wantFrame) _thumbnailFramesSkipped++;
+                if (wantFrame) framesUsed++;
+
+                _thumbnailQueue!.Request(
+                    key, entry.FullPath, entry.Size, entry.Modified.Ticks, edge, version, wantFrame);
             }
         }
 
@@ -381,6 +506,21 @@ namespace 播放器.Ui
                 _thumbnailQueue.Dispose();
                 _thumbnailQueue = null;
             }
+
+            // 抓帧器（一个 libvlc 实例 + 播放器）也跟着一起放掉。
+            if (_thumbnailFrames is IDisposable disposable)
+            {
+                try
+                {
+                    disposable.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Swallowed("文件页缩略图：释放抓帧器失败", ex);
+                }
+            }
+
+            _thumbnailFrames = null;
 
             _list.LargeImageList = null;
             _largeIcons?.Dispose();

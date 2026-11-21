@@ -10,6 +10,9 @@ namespace SmokeTest
         {
             var uiThread = Environment.CurrentManagedThreadId;
 
+            // 1.27 那一段只验封面：帧来源换成"永远没有"，既不碰 libvlc，也让变异确定。
+            view.SetVideoFramesForTest(new NullFrameSource());
+
             var root = Path.Combine(uiRoot, "thumbs");
             var embedded = Path.Combine(root, "embedded");
             var sidecar = Path.Combine(root, "sidecar");

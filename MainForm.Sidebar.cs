@@ -91,7 +91,8 @@ namespace 播放器
             }
 
             _menuViewSidebarFloating = new ToolStripMenuItem("侧栏分离为悬浮窗") { CheckOnClick = true };
-            _menuViewSidebarFloating.Click += (s, e) => SetSidebarFloating(_menuViewSidebarFloating.Checked);
+            _menuViewSidebarFloating.Click += (s, e) =>
+                SetSidebarFloating(_menuViewSidebarFloating.Checked, reveal: true);
 
             var sidebarIndex = menuView.DropDownItems.IndexOf(_menuViewSidebar);
             if (sidebarIndex < 0)

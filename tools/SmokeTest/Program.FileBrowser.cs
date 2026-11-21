@@ -23,6 +23,7 @@ namespace SmokeTest
                 if (!CheckFileBrowserMainForm(root)) return false;
                 if (!CheckFileBrowserThumbnailProbe(root)) return false;
                 if (!CheckFileBrowserProbe(root)) return false;
+                if (!CheckVideoFrameProbe()) return false;
 
                 Log(33, "文件浏览器正常：路径归一、历史 / 收藏 / 最近、当前层读取与过滤、有界递归、"
                         + "搜索 / 只看类型 / 拖到播放列表（有界）/ 定位当前文件、"
@@ -626,6 +627,11 @@ namespace SmokeTest
                 }
 
                 if (!CheckFileBrowserThumbnails(form, view, uiRoot))
+                {
+                    return false;
+                }
+
+                if (!CheckFileBrowserThumbnailRoundTwo(form, view, uiRoot))
                 {
                     return false;
                 }

@@ -51,6 +51,7 @@ namespace 播放器.Ui
             var target = _state.CurrentPath;
 
             CancelLoad();
+            StopWatch();
 
             var cts = new CancellationTokenSource();
             _loadCts = cts;
@@ -161,6 +162,13 @@ namespace 播放器.Ui
             _state.NoteSuccessfulLoad(target);
             UpdateAddressText();
             UpdateNavigationButtons();
+
+            // 1.28.0：读成功之后盯住这个目录（网络位置 / 此电脑不盯）。
+            RestartWatch();
+
+            // 树跟着列表走（树只有在显示出来时才会真的去展开）。
+            SelectTreePath(target);
+
             RaiseStateChanged();
         }
 
@@ -169,6 +177,9 @@ namespace 播放器.Ui
             _entries = new List<FileBrowserEntry>();
             _truncated = false;
             _pendingSelectPath = null;
+
+            StopWatch();
+
             FillList();
             UpdateNavigationButtons();
             ReportStatus(message, true);
@@ -364,6 +375,9 @@ namespace 播放器.Ui
             if (_thumbnailSkipped > 0)
                 text += $" · 缩略图只做了前 {MaxThumbnails} 个文件";
 
+            if (_thumbnailFramesSkipped > 0)
+                text += $" · 视频画面只做了前 {FrameBudget} 个";
+
             return text;
         }
 
@@ -489,11 +503,19 @@ namespace 播放器.Ui
 
         internal void SetRecursiveSearchForTest(bool value) => _recursiveSearch.Checked = value;
 
-        internal bool IsRecursiveSearchForTest() => _recursiveSearch.Checked;
+        /// <summary>测试钩子：按当前查询与「含子文件夹」直接开始一次递归搜索（等价于按 Enter）。</summary>
+        internal void StartRecursiveSearchForTest()
+        {
+            if (!_recursiveSearch.Checked) SetRecursiveChecked(true);
+
+            StartRecursiveSearch();
+        }
 
         internal bool IsSearchingForTest() => _searching;
 
         internal bool IsSearchActiveForTest() => _searchActive;
+
+        internal bool IsRecursiveSearchForTest() => _recursiveSearch.Checked;
 
         internal bool ProcessSearchKeyForTest(Keys key) => HandleSearchKey(key);
 
@@ -1355,6 +1377,51 @@ namespace 播放器.Ui
             };
             thumbnails.Click += (s, e) => SetThumbnails(!_state.ShowThumbnails);
             _positionMenu.Items.Add(thumbnails);
+
+            var budget = new ToolStripMenuItem("缩略图数量(&N)");
+
+            var budgetKeys = new[] { "&A", "&B", "&C" };
+            var budgetIndex = 0;
+
+            foreach (var option in FileBrowserThumbnailBudgets.Options)
+            {
+                var key = budgetIndex < budgetKeys.Length ? budgetKeys[budgetIndex] : string.Empty;
+                budgetIndex++;
+
+                var item = new ToolStripMenuItem($"{option:N0} 个({key})") { Checked = MaxThumbnails == option };
+                var value = option;
+
+                item.Click += (s, e) => SetThumbnailBudget(value);
+                budget.DropDownItems.Add(item);
+            }
+
+            _positionMenu.Items.Add(budget);
+
+            var clearCache = new ToolStripMenuItem("清空缩略图缓存(&H)")
+            {
+                ToolTipText = "删掉磁盘上缓存下来的缩略图（会重新读封面 / 重新截帧）"
+            };
+            clearCache.Click += (s, e) => ClearThumbnailCache();
+            _positionMenu.Items.Add(clearCache);
+
+            var autoRefresh = new ToolStripMenuItem("自动刷新(&R)")
+            {
+                Checked = _state.AutoRefresh,
+                CheckOnClick = false,
+                ToolTipText = "盯着当前文件夹：本地文件有增删改就静默刷新（网络位置不盯）"
+            };
+            autoRefresh.Click += (s, e) => SetAutoRefresh(!_state.AutoRefresh);
+            _positionMenu.Items.Add(autoRefresh);
+
+            var folderTree = new ToolStripMenuItem("文件夹树(&T)")
+            {
+                Checked = _state.ShowFolderTree,
+                CheckOnClick = false,
+                Enabled = CanShowFolderTree || _state.ShowFolderTree,
+                ToolTipText = "左边显示文件夹树（窗口太窄时置灰，拖宽或分离成独立窗口再用）"
+            };
+            folderTree.Click += (s, e) => SetFolderTree(!_state.ShowFolderTree);
+            _positionMenu.Items.Add(folderTree);
 
             var type = new ToolStripMenuItem("只看类型(&T)");
             type.DropDownItems.Add(CreateTypeItem("全部(&A)", FileBrowserTypeFilter.All));

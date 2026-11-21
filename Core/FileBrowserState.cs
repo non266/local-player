@@ -56,6 +56,37 @@ namespace 播放器.Core
     }
 
     /// <summary>
+    /// 每目录缩略图预算（1.28.0）。只给三个档位，设置文件里手改出来的别的数字会落到最近的一档，
+    /// 0 / 负数回默认——不让"缩略图预算"变成一个能填出离谱值的自由输入。
+    /// </summary>
+    internal static class FileBrowserThumbnailBudgets
+    {
+        internal const int Default = 300;
+
+        internal static readonly int[] Options = { 300, 600, 1000 };
+
+        internal static int Normalize(int value)
+        {
+            if (value <= 0) return Default;
+
+            var best = Options[0];
+            var distance = Math.Abs(value - best);
+
+            foreach (var option in Options)
+            {
+                var current = Math.Abs(value - option);
+
+                if (current >= distance) continue;
+
+                best = option;
+                distance = current;
+            }
+
+            return best;
+        }
+    }
+
+    /// <summary>
     /// 文件浏览器的导航状态：当前目录、返回 / 前进栈、收藏、最近浏览、排序与过滤开关。
     /// <para>
     /// 纯对象，不碰磁盘、不碰控件。界面只调这里的方法；主窗体只在退出 / 设置方案时
@@ -99,6 +130,15 @@ namespace 播放器.Core
 
         /// <summary>用平铺缩略图显示音视频封面（1.27.0）。</summary>
         internal bool ShowThumbnails { get; set; }
+
+        /// <summary>左边显示文件夹树（1.28.0；默认关）。</summary>
+        internal bool ShowFolderTree { get; set; }
+
+        /// <summary>盯着当前目录自动刷新（1.28.0；默认开）。</summary>
+        internal bool AutoRefresh { get; set; } = true;
+
+        /// <summary>每目录缩略图预算（300 / 600 / 1000）。</summary>
+        internal int ThumbnailBudget { get; set; } = FileBrowserThumbnailBudgets.Default;
 
         /// <summary>进入一个目录（会记一条后退历史，并清空前进栈）。</summary>
         internal void Navigate(string? path)
@@ -239,7 +279,10 @@ namespace 播放器.Core
                 SortField = FileSortFields.Parse(settings.FileBrowserSort),
                 SortDescending = settings.FileBrowserSortDescending,
                 ShowAllFiles = settings.FileBrowserShowAllFiles,
-                ShowThumbnails = settings.FileBrowserThumbnails
+                ShowThumbnails = settings.FileBrowserThumbnails,
+                ShowFolderTree = settings.FileBrowserFolderTree,
+                AutoRefresh = settings.FileBrowserAutoRefresh,
+                ThumbnailBudget = FileBrowserThumbnailBudgets.Normalize(settings.FileBrowserThumbnailBudget)
             };
 
             state.Favorites.AddRange(NormalizeList(settings.FileBrowserFavorites, FavoriteCapacity));
@@ -258,6 +301,9 @@ namespace 播放器.Core
             settings.FileBrowserSortDescending = SortDescending;
             settings.FileBrowserShowAllFiles = ShowAllFiles;
             settings.FileBrowserThumbnails = ShowThumbnails;
+            settings.FileBrowserFolderTree = ShowFolderTree;
+            settings.FileBrowserAutoRefresh = AutoRefresh;
+            settings.FileBrowserThumbnailBudget = FileBrowserThumbnailBudgets.Normalize(ThumbnailBudget);
         }
 
         /// <summary>把一份设置列表归一：只留能当目录的绝对路径、去重（不区分大小写）、截到上限。</summary>

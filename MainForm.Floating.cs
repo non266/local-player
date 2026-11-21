@@ -84,9 +84,21 @@ namespace 播放器
         // =====================================================================
 
         /// <summary>分离 / 归位侧栏。</summary>
-        private void SetSidebarFloating(bool floating)
+        /// <param name="floating">要分离还是归位。</param>
+        /// <param name="reveal">
+        /// 用户从菜单分离时置真：把「显示侧栏」一起打开，免得"点了分离却什么也看不见"。
+        /// 启动恢复（<see cref="RestoreFloatingWindows"/>）不置，尊重上次收起的设置。
+        /// </param>
+        private void SetSidebarFloating(bool floating, bool reveal = false)
         {
             _settings.SidebarFloating = floating;
+
+            if (reveal && floating)
+            {
+                _settings.ShowSidebar = true;
+
+                if (_menuViewSidebar != null && !_menuViewSidebar.Checked) _menuViewSidebar.Checked = true;
+            }
 
             if (_menuViewSidebarFloating != null && _menuViewSidebarFloating.Checked != floating)
                 _menuViewSidebarFloating.Checked = floating;
@@ -96,7 +108,18 @@ namespace 播放器
 
             // 分离之后"显示侧栏"控制的是那个窗口
             ApplySidebarVisibility(_settings.ShowSidebar);
-            SetStatus(floating ? "侧栏已分离为悬浮窗" : "侧栏已归位");
+
+            SetStatus(floating ? "侧栏已分离为悬浮窗" : DescribeDockedSidebarStatus());
+
+            UpdateWindowModeGating();
+        }
+
+        private string DescribeDockedSidebarStatus()
+        {
+            if (IsAudioWindow || IsMiniWindow)
+                return "侧栏已归位（音频 / 迷你窗口里保持收起）";
+
+            return _settings.ShowSidebar ? "侧栏已归位" : "侧栏已归位（当前是收起的）";
         }
 
         private void DetachSidebar()
@@ -160,7 +183,9 @@ namespace 播放器
             window.Dispose();
 
             splitVideo.Panel2.Controls.Add(sidebarPanel);
-            splitVideo.Panel2Collapsed = !_settings.ShowSidebar;
+
+            // 音频 / 迷你窗口里侧栏保持收起：归位不等于"把简化窗口撑成小一号视频窗口"。
+            splitVideo.Panel2Collapsed = !_settings.ShowSidebar || IsAudioWindow || IsMiniWindow;
 
             ApplyPanelLayout();
         }

@@ -11,14 +11,22 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 49,775 行 / **202 个文件** |
-| `Core/` | 18,078 行 / 92 个文件 |
-| `Ui/` | 16,500 行 / 66 个文件 |
-| `MainForm*` 这一族 partial | 15,120 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 30,877 行 / 93 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 52,408 行 / **209 个文件** |
+| `Core/` | 18,546 行 / 94 个文件 |
+| `Ui/` | 18,580 行 / 71 个文件 |
+| `MainForm*` 这一族 partial | 15,205 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 32,267 行 / 95 个文件 |
 
-> 数字最后一次量是在 **2026-11-20（1.27.0：文件页封面缩略图）**。
-> 1.27.0 产品侧多出 `Core/CoverArtLoader`（`Core` 91 → 92、主程序 198 → 202）、
+> 数字最后一次量是在 **2026-11-21（1.28.0：文件夹树 / 自动刷新 / 缩略图二轮 / 音频窗口分离侧栏）**。
+> 1.28.0 产品侧多出 `Core/FolderTreeModel`、`Core/FolderWatch`、`Ui/FolderTree`、
+> `Ui/ThumbnailCache`、`Ui/VideoFrameGrabber`、`Ui/FileBrowserView.Tree`、
+> `Ui/FileBrowserView.Watch`（`Core` 92 → 94、`Ui` 66 → 71、主程序 202 → 209）；
+> 设置加 3 个字段（93 → 96 项）；冒烟多出 `Program.FileBrowser.Frames` 与
+> `Program.FileBrowser.Navigation`（93 → 95 个文件），**29 个运行步骤 / 34 项检查**
+> （新步骤「文件页导航与自动刷新」= 第 34 项），详情见 §37~§39。
+>
+> 1.27.0 那一版的记录（2026-11-20：文件页封面缩略图）：
+> 产品侧多出 `Core/CoverArtLoader`（`Core` 91 → 92、主程序 198 → 202）、
 > `Ui/CoverThumbnails` / `Ui/ThumbnailQueue` / `Ui/FileBrowserView.Thumbnails`（`Ui` 63 → 66）；
 > 设置加 1 个字段（92 → 93 项）；按钮宽度改成现量文字；冒烟多出
 > `Program.FileBrowser.Thumbnails`（92 → 93 个文件），**仍是 28 个运行步骤 / 33 项检查**
@@ -755,11 +763,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 28 个运行步骤 / 33 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 29 个运行步骤 / 34 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（28 个运行步骤 / 33 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（29 个运行步骤 / 34 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -796,7 +804,7 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 | 文件 | 干什么 |
 | --- | --- |
 | `Core/SavedName.cs` | 从 `PlaylistLibrary` 抽出来的名字规则（非法字符指名道姓、Windows 保留名、结尾点号、自然排序）。**歌单库与方案库共用一套**——否则会出现"歌单叫 CON 会被挡、方案叫 CON 却存下去了" |
-| `Core/SettingsProfile.cs` | 7 组共 60 项的清单 + **按组用 JSON 合并**（不是 60 个属性逐个赋值：那样漏一个没人发现）+ 覆盖率自检（`UncoveredProperties` / `UnknownProperties`） |
+| `Core/SettingsProfile.cs` | 7 组共 96 项的清单 + **按组用 JSON 合并**（不是 96 个属性逐个赋值：那样漏一个没人发现）+ 覆盖率自检（`UncoveredProperties` / `UnknownProperties`） |
 | `Core/SettingsLibrary.cs` | 方案库：存 / 列 / 读 / 改名 / 删 / 导入 / 导出；坏文件挡住并如实标出来 |
 | `Ui/SettingsLoadDialog.cs` | 载入时挑分组：每行写明这一组和当前**有几项不一样** |
 | `MainForm.SettingsProfiles.cs` | 菜单、当前方案、自动写回、把合并后的设置装到界面上 |
@@ -1897,3 +1905,55 @@ ThumbnailQueue（专用线程）
 - 只做封面，不截视频帧（第二条解码链是 F6 那一族）；不认图片文件；不落盘（退出即丢）。
 - 平铺没有大小 / 位置列；搜索结果强制回详情。
 - 已知 Application Hang（`0xCFFFFFFF`）本轮未修。
+
+---
+
+## 37. 文件页导航（文件夹树）与自动刷新（1.28.0）
+
+### 37.1 文件夹树
+
+- `Core/FolderTreeModel`：`ChainOf` 给出祖先链（本地盘根 / UNC 共享根都收得住），
+  `ChildFolders` 只列子目录并标出 `ReparsePoint`；上限 2,000，隐藏项跟随「显示所有文件」。
+- `Ui/FolderTree` 只是外观（主题 / 行高 / 无障碍）；懒加载、代际号、选中同步全在
+  `Ui/FileBrowserView.Tree`：每个节点带一个占位子节点，`BeforeExpand` 时才 `Task.Run` 枚举，
+  结果 `BeginInvoke` 回来（不用 `await`：测试宿主里没有同步上下文，`await` 会回到线程池碰控件）。
+- 树与列表是**双向**同步：`AfterSelect` → `NavigateTo`；`ApplyLoad` → `SelectTreePath`（逐层展开，异步续跑）。
+  回环用 `_syncingTree` 挡；连续导航用 `_revealTarget` 覆盖。
+- 默认关且宽度 < 360 逻辑像素时置灰：默认侧栏 300 宽，塞 160 的树之后列表只剩一点点；
+  "拖宽或分离"比"挤成两列都看不见"诚实。
+
+### 37.2 自动刷新
+
+- `Core/FolderWatch`：`FileSystemWatcher` + 尾部去抖 500 ms + 最短间隔 1 秒 + 64 KB 缓冲 +
+  溢出计数；网络位置 / 此电脑不可盯（与缩略图、递归搜索同一条离线共享理由）。
+- `Ui/FileBrowserView.Watch`：静默刷新**不复用 `StartLoad`**（那会清空列表、设 `_loading`、
+  写「正在读取…」）。它单独读目录、比"路径 + 大小 + 修改时间"签名，只有变了才 `FillList`，
+  再按路径恢复选中 / 焦点 / 顶部项；搜索页直接跳过。
+- 边界：只盯一层（递归 watcher 在解压 / 下载时就是事件风暴）；目录没了停 watcher 走普通 `Reload`；
+  溢出 3 次停用并说明，不在后台无限重建。
+
+## 38. 缩略图二轮：视频首帧 / 落盘缓存 / 预算（1.28.0）
+
+- **抓帧**（`Ui/VideoFrameGrabber`）：一个复用的 `MediaPlayer` + `vmem` 回调（不建窗口、不出声）。
+  三个实测坑写进了类注释：`SetVideoCallbacks` 不给 opaque（只能静态单实例）；
+  `pitches` / `lines` 必须写（不写 VLC 不往我们的缓冲写，整帧几乎全黑）；
+  缓冲只增不减（播放中按尺寸 Free 旧缓冲 → 全黑，甚至 `STATUS_HEAP_CORRUPTION`）。
+  只收"有亮度或有层次"的帧（起播空白帧 / 片头黑场跳过），单文件 6 秒预算，连续 3 个失败停用。
+- **缓存**（`Ui/ThumbnailCache`）：`%AppData%\播放器\thumbnails`，SHA-256 键含路径 + 大小 +
+  修改时间 + 边长；PNG 原子写；128 MB 上限按最旧删到 75%（最多每 5 分钟算一次）；
+  坏文件删掉重做；失败结果不落盘（"没有封面"是内存里的负缓存）。
+- **队列**（`Ui/ThumbnailQueue`）：两条 FIFO（封面 / 帧）、一条专用线程；封面先做——
+  一个视频的 6 秒超时不能挡住后面歌曲的封面。每目录 60 帧上限在视图侧计数并写进状态行。
+- **两个入口一份状态**：主菜单「视图 → 文件浏览器缩略图（平铺）」与文件页「位置」里的同一项
+  都只调 `SetThumbnails`，勾选由 `UpdateFileBrowserMenuState` 从 `State.ShowThumbnails` 反推。
+
+## 39. 音频窗口里的侧栏分离（1.28.0）
+
+- 1.9.0 的结论不变：音频窗口**不保留停靠的侧栏 / 播放列表**（那会变成小一号的视频窗口）；
+  本轮只放开"侧栏可以分离成悬浮窗"。
+- `UpdateWindowModeGating`：音频里「侧栏分离为悬浮窗」可用；「显示侧栏」只在已分离时可用；
+  迷你里不给新分离，但已分离的可以归位（否则出不来）。
+- `SetSidebarFloating(reveal: true)`（菜单路径）顺手打开「显示侧栏」，避免"分离了却看不见"；
+  启动恢复走默认 `reveal: false`，尊重上次的收起状态。
+- `DockSidebar` 归位时按形态保持收起：`Panel2Collapsed = !ShowSidebar || IsAudioWindow || IsMiniWindow`。
+- 文件页在音频窗口里的可用条件加 `SidebarFloating`：`ShowFileBrowser` 会亮出侧栏窗口并切到文件页。

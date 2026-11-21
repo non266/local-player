@@ -98,6 +98,8 @@ namespace SmokeTest
                 // 注意别拿 defaults 来改：那是"验完要还原"的快照，改它等于把还原值也改了。
                 var setup = AppSettings.Load();
                 setup.WindowMode = WindowModes.Auto;
+                setup.SidebarFloating = false;
+                setup.ShowSidebar = true;
                 setup.Save();
 
                 var videoWidth = defaults.WindowWidth;
@@ -198,6 +200,95 @@ namespace SmokeTest
                     if (showPlaylist.Enabled || fullscreen.Enabled)
                     {
                         Log(11, "音频窗口：播放列表 / 全屏那两项还是能点的（该置灰并说明切回去才能用）");
+                        return false;
+                    }
+
+                    // ---- 1.28.0：音频窗口里侧栏可以分离成悬浮窗；归位后仍保持收起 ----
+                    var floatSidebar = FindViewMenuItem(form, "侧栏分离为悬浮窗");
+                    var showSidebar = FindViewMenuItem(form, "显示侧栏");
+
+                    if (floatSidebar == null || showSidebar == null)
+                    {
+                        Log(11, "音频窗口：「视图」菜单里找不到「侧栏分离为悬浮窗」或「显示侧栏」");
+                        return false;
+                    }
+
+                    if (!floatSidebar.Enabled)
+                    {
+                        Log(11, "音频窗口里「侧栏分离为悬浮窗」是灰的（1.28.0 起这里该能点）");
+                        return false;
+                    }
+
+                    if (showSidebar.Enabled)
+                    {
+                        Log(11, "音频窗口：没分离时「显示侧栏」也能点（点了不会有反应）");
+                        return false;
+                    }
+
+                    if (form.MenuViewFileBrowser is { Enabled: true })
+                    {
+                        Log(11, "音频窗口：侧栏没分离时「文件浏览器」也能点");
+                        return false;
+                    }
+
+                    var sidebarControl = Find(form, "sidebarPanel");
+
+                    SetMenuChecked(floatSidebar, true);
+                    PumpMessages(400);
+
+                    if (form.SidebarWindow == null || !form.SidebarWindow.Visible ||
+                        sidebarControl == null || !ReferenceEquals(sidebarControl.FindForm(), form.SidebarWindow))
+                    {
+                        Log(11, "音频窗口：勾了分离之后侧栏没有搬进悬浮窗");
+                        return false;
+                    }
+
+                    if (!splitVideo.Panel2Collapsed)
+                    {
+                        Log(11, "音频窗口：侧栏分离之后原来的面板没有收起来");
+                        return false;
+                    }
+
+                    if (form.MenuViewFileBrowser is not { Enabled: true })
+                    {
+                        Log(11, "音频窗口：侧栏分离之后「文件浏览器」还是灰的（文件页应当能用）");
+                        return false;
+                    }
+
+                    SetMenuChecked(form.MenuViewFileBrowser!, true);
+                    PumpMessages(400);
+
+                    if (sidebarControl is not SidebarPanel sidebarPanel ||
+                        sidebarPanel.ActiveTab != SidebarTab.Files)
+                    {
+                        Log(11, "音频窗口：点了「文件浏览器」之后侧栏没有切到文件页");
+                        return false;
+                    }
+
+                    SetMenuChecked(floatSidebar, false);
+                    PumpMessages(400);
+
+                    if (form.SidebarWindow != null)
+                    {
+                        Log(11, "音频窗口：取消分离之后悬浮窗还在");
+                        return false;
+                    }
+
+                    if (!ReferenceEquals(sidebarControl.Parent, splitVideo.Panel2))
+                    {
+                        Log(11, "音频窗口：取消分离之后侧栏没有归位到分隔条");
+                        return false;
+                    }
+
+                    if (!splitVideo.Panel2Collapsed)
+                    {
+                        Log(11, "音频窗口：归位之后侧栏被展开了（音频窗口里该保持收起）");
+                        return false;
+                    }
+
+                    if (!form.StatusText.Contains("保持收起", StringComparison.Ordinal))
+                    {
+                        Log(11, "音频窗口：归位之后状态栏没有说明保持收起（" + form.StatusText + "）");
                         return false;
                     }
 

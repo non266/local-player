@@ -107,9 +107,15 @@ namespace 播放器
             var simplified = IsAudioWindow || IsMiniWindow;
 
             menuViewPlaylist.Enabled = !simplified;
-            if (_menuViewSidebar != null) _menuViewSidebar.Enabled = !simplified;
             if (_menuViewPlaylistFloating != null) _menuViewPlaylistFloating.Enabled = !simplified;
-            if (_menuViewSidebarFloating != null) _menuViewSidebarFloating.Enabled = !simplified;
+
+            // 1.28.0：音频窗口里侧栏可以分离成悬浮窗（文件页也就跟着能用）；
+            // 迷你模式仍不给"新"分离，但已分离的必须能归位，否则退不出来。
+            if (_menuViewSidebarFloating != null)
+                _menuViewSidebarFloating.Enabled = !IsMiniWindow || _settings.SidebarFloating;
+
+            if (_menuViewSidebar != null)
+                _menuViewSidebar.Enabled = !simplified || _settings.SidebarFloating;
 
             menuViewFullscreen.Enabled = !simplified;
             tsbTogglePlaylist.Enabled = !simplified;

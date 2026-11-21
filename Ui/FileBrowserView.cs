@@ -95,11 +95,14 @@ namespace 播放器.Ui
             BuildFilterBar();
             BuildList();
             BuildStatus();
+            BuildTree();
 
             // 先加 Fill 再加 Top / Bottom：WinForms 的停靠顺序是反的，
             // 这样列表占剩下的区域，工具栏 / 搜索行与状态行不会被它盖住。
             // 搜索行放在工具栏之前加：后加的工具栏先占顶部，搜索行落在它下面。
+            // 树加在列表之后、搜索行之前：它落在两行工具栏下面（像资源管理器）。
             Controls.Add(_list);
+            Controls.Add(_tree);
             Controls.Add(_filterBar);
             Controls.Add(_toolbar);
             Controls.Add(_status);
@@ -189,6 +192,8 @@ namespace 播放器.Ui
             _list.BackColor = palette.ListBack;
             _list.ForeColor = palette.ListFore;
 
+            _tree.ApplyPalette(palette, palette.IsDark);
+
             foreach (var button in new[] { _backButton, _forwardButton, _upButton, _refreshButton, _positionButton })
             {
                 button.FlatStyle = FlatStyle.Flat;
@@ -257,6 +262,7 @@ namespace 播放器.Ui
             ResetFilter();
             _pendingSelectPath = null;
             _state = state;
+            MaxThumbnails = FileBrowserThumbnailBudgets.Normalize(state.ThumbnailBudget);
 
             UpdateAddressText();
             UpdateSortHeaders();
@@ -265,6 +271,8 @@ namespace 播放器.Ui
             // 设置方案里可能只换了「缩略图」这一项：形态与排队都要跟着摆回来。
             ApplyThumbnailMode();
             RefreshThumbnails();
+
+            UpdateTreeAvailability();
 
             if ((pathChanged || filterChanged) && wasLoaded)
             {
@@ -513,6 +521,8 @@ namespace 播放器.Ui
 
             _list.SmallImageList = _icons.Images;
 
+            RefreshTreeIcons();
+
             // 大图标与缩略图缓存的索引都是按旧的一套算的，跟着一起作废。
             RebuildThumbnails();
         }
@@ -527,6 +537,7 @@ namespace 播放器.Ui
             RebuildIcons();
             ApplyNativeTheme(_nativeDark);
             UpdateSearchScopeEnabled();
+            UpdateTreeAvailability();
 
             if (Visible) EnsureLoaded();
         }
@@ -539,6 +550,7 @@ namespace 播放器.Ui
             LayoutFilterBar();
             AdjustColumns();
             RebuildIcons();
+            LayoutTree();
         }
 
         protected override void OnResize(EventArgs e)
@@ -548,6 +560,7 @@ namespace 播放器.Ui
             LayoutToolbar();
             LayoutFilterBar();
             AdjustColumns();
+            UpdateTreeAvailability();
         }
 
         protected override void OnVisibleChanged(EventArgs e)
@@ -563,6 +576,7 @@ namespace 播放器.Ui
             {
                 CancelLoad();
                 CancelSearch();
+                StopWatch();
 
                 DisposeThumbnails();
 

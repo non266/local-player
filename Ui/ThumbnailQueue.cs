@@ -49,35 +49,54 @@ namespace 播放器.Ui
         /// <summary>一条请求。</summary>
         private sealed class Job
         {
-            internal Job(string key, string path, int edge, int version)
+            internal Job(string key, string path, long size, long modifiedTicks, int edge, int version, bool isVideo)
             {
                 Key = key;
                 Path = path;
+                Size = size;
+                ModifiedTicks = modifiedTicks;
                 Edge = edge;
                 Version = version;
+                IsVideo = isVideo;
             }
 
             internal string Key { get; }
 
             internal string Path { get; }
 
+            /// <summary>文件大小与修改时间：磁盘缓存键要它们（换了内容就必须重做）。</summary>
+            internal long Size { get; }
+
+            internal long ModifiedTicks { get; }
+
             internal int Edge { get; }
 
             internal int Version { get; }
+
+            /// <summary>没有封面时允不允许去截视频首帧（1.28.0）。</summary>
+            internal bool IsVideo { get; }
         }
 
         private readonly CoverArtLoader _loader;
+        private readonly ThumbnailCache? _cache;
+        private readonly IVideoFrameSource? _frameSource;
         private readonly object _gate = new object();
-        private readonly Queue<Job> _queue = new Queue<Job>();
+
+        /// <summary>两条队列：封面先做、帧后做——一个视频的 6 秒超时不能挡住后面歌曲的封面。</summary>
+        private readonly Queue<Job> _coverQueue = new Queue<Job>();
+        private readonly Queue<Job> _frameQueue = new Queue<Job>();
+
         private readonly ManualResetEventSlim _wake = new ManualResetEventSlim(false);
         private readonly Thread _thread;
 
         private bool _disposed;
         private bool _busy;
 
-        internal ThumbnailQueue(CoverArtLoader loader)
+        internal ThumbnailQueue(CoverArtLoader loader, ThumbnailCache? cache = null, IVideoFrameSource? frames = null)
         {
             _loader = loader ?? throw new ArgumentNullException(nameof(loader));
+            _cache = cache;
+            _frameSource = frames;
 
             _thread = new Thread(Loop)
             {
@@ -94,7 +113,7 @@ namespace 播放器.Ui
         /// <summary>还在排队、没开始做的条数。</summary>
         internal int Pending
         {
-            get { lock (_gate) return _queue.Count; }
+            get { lock (_gate) return _coverQueue.Count + _frameQueue.Count; }
         }
 
         /// <summary>当前正在读 / 解码（0 或 1；队列只有一条线程）。</summary>
@@ -104,13 +123,16 @@ namespace 播放器.Ui
         }
 
         /// <summary>排一张缩略图；队列满了就丢掉这次请求（不抛、不阻塞）。</summary>
-        internal void Request(string key, string path, int edge, int version)
+        internal void Request(
+            string key, string path, long size, long modifiedTicks, int edge, int version, bool isVideo)
         {
             lock (_gate)
             {
-                if (_disposed || _queue.Count >= MaxPending) return;
+                if (_disposed) return;
+                if (_coverQueue.Count + _frameQueue.Count >= MaxPending) return;
 
-                _queue.Enqueue(new Job(key, path, edge, version));
+                (isVideo ? _frameQueue : _coverQueue)
+                    .Enqueue(new Job(key, path, size, modifiedTicks, edge, version, isVideo));
             }
 
             _wake.Set();
@@ -119,7 +141,11 @@ namespace 播放器.Ui
         /// <summary>丢掉还没开始的请求；正在做的那一张会照常交回来（取件方按代际号丢弃）。</summary>
         internal void CancelAll()
         {
-            lock (_gate) _queue.Clear();
+            lock (_gate)
+            {
+                _coverQueue.Clear();
+                _frameQueue.Clear();
+            }
         }
 
         public void Dispose()
@@ -129,7 +155,8 @@ namespace 播放器.Ui
                 if (_disposed) return;
 
                 _disposed = true;
-                _queue.Clear();
+                _coverQueue.Clear();
+                _frameQueue.Clear();
             }
 
             _wake.Set();
@@ -147,16 +174,12 @@ namespace 播放器.Ui
 
                 lock (_gate)
                 {
-                    if (_queue.Count > 0)
-                    {
-                        request = _queue.Dequeue();
-                        _busy = true;
-                    }
-                    else
-                    {
-                        request = null;
-                        _busy = false;
-                    }
+                    request = null;
+
+                    if (_coverQueue.Count > 0) request = _coverQueue.Dequeue();
+                    else if (_frameQueue.Count > 0) request = _frameQueue.Dequeue();
+
+                    _busy = request != null;
                 }
 
                 if (request == null)
@@ -175,8 +198,20 @@ namespace 播放器.Ui
 
                 try
                 {
-                    var art = _loader.Load(request.Path);
-                    bitmap = CoverThumbnails.Decode(art, request.Edge);
+                    var cacheKey = ThumbnailCache.Key(request.Path, request.Size, request.ModifiedTicks, request.Edge);
+
+                    bitmap = _cache?.TryLoad(cacheKey, request.Edge);
+
+                    if (bitmap == null)
+                    {
+                        var art = _loader.Load(request.Path);
+                        bitmap = CoverThumbnails.Decode(art, request.Edge);
+
+                        if (bitmap == null && request.IsVideo && _frameSource != null)
+                            bitmap = _frameSource.Grab(request.Path, request.Edge);
+
+                        if (bitmap != null) _cache?.Save(cacheKey, bitmap);
+                    }
                 }
                 catch (Exception ex)
                 {

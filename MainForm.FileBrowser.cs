@@ -22,6 +22,7 @@ namespace 播放器
     {
         private ToolStripMenuItem? _menuViewFileBrowser;
         private ToolStripMenuItem? _menuViewFileBrowserFloating;
+        private ToolStripMenuItem? _menuViewFileBrowserThumbnails;
 
         /// <summary>只读入口：文件页（给冒烟测试用）。</summary>
         internal FileBrowserView FileBrowser => sidebarPanel.FileBrowser;
@@ -30,6 +31,9 @@ namespace 播放器
 
         internal ToolStripMenuItem? MenuViewFileBrowserFloating => _menuViewFileBrowserFloating;
 
+        /// <summary>「视图 → 文件浏览器缩略图（平铺）」（1.28.0；给冒烟测试用）。</summary>
+        internal ToolStripMenuItem? MenuViewFileBrowserThumbnails => _menuViewFileBrowserThumbnails;
+
         /// <summary>把设置里的文件页状态装到视图上，并接上播放 / 添加 / 下一首三个动作。</summary>
         internal void InitializeFileBrowser()
         {
@@ -37,12 +41,21 @@ namespace 播放器
 
             view.RestoreState(FileBrowserState.FromSettings(_settings));
 
+            // 恢复之后菜单里的勾选要跟上（视图菜单可能比状态先建出来）。
+            UpdateFileBrowserMenuState();
+
             view.PlayRequested += (s, paths) => PlayFileBrowserPaths(paths);
             view.AddRequested += (s, paths) => AddFileBrowserPaths(paths);
             view.QueueRequested += (s, paths) => QueueFileBrowserPaths(paths);
             view.PlayFolderRequested += (s, folder) => PlayFileBrowserFolder(folder);
             view.StatusRequested += (s, text) => SetStatus(text);
-            view.StateChanged += (s, e) => SyncFileBrowserSettings();
+            view.StateChanged += (s, e) =>
+            {
+                SyncFileBrowserSettings();
+
+                // 文件页里改了缩略图开关，主菜单那项的勾选要同一拍跟上（两个入口、同一份状态）。
+                UpdateFileBrowserMenuState();
+            };
             view.RecentCleared += (s, e) => SaveFileBrowserSettingsNow();
             view.LocateRequested += (s, e) => LocateCurrentFileInBrowser();
 
@@ -64,6 +77,16 @@ namespace 播放器
             _menuViewFileBrowserFloating.Click += (s, e) =>
                 SetFileBrowserFloating(_menuViewFileBrowserFloating.Checked);
 
+            // 1.28.0：平铺缩略图的开关放到主菜单里——不打开文件页也能切。
+            // 「位置」菜单里那项保留，两处都只调 SetThumbnails，勾选统一从 State 反推。
+            _menuViewFileBrowserThumbnails = new ToolStripMenuItem("文件浏览器缩略图（平铺）(&K)")
+            {
+                CheckOnClick = false,
+                ToolTipText = "文件页用封面 / 视频首帧平铺显示（网络位置只显示图标）"
+            };
+            _menuViewFileBrowserThumbnails.Click += (s, e) =>
+                sidebarPanel.FileBrowser.SetThumbnails(!sidebarPanel.FileBrowser.State.ShowThumbnails);
+
             var index = _menuViewSidebarFloating == null
                 ? -1
                 : menuView.DropDownItems.IndexOf(_menuViewSidebarFloating);
@@ -72,11 +95,19 @@ namespace 播放器
             {
                 menuView.DropDownItems.Add(_menuViewFileBrowser);
                 menuView.DropDownItems.Add(_menuViewFileBrowserFloating);
-                return;
+            }
+            else
+            {
+                menuView.DropDownItems.Insert(index + 1, _menuViewFileBrowser);
+                menuView.DropDownItems.Insert(index + 2, _menuViewFileBrowserFloating);
             }
 
-            menuView.DropDownItems.Insert(index + 1, _menuViewFileBrowser);
-            menuView.DropDownItems.Insert(index + 2, _menuViewFileBrowserFloating);
+            var floatingIndex = menuView.DropDownItems.IndexOf(_menuViewFileBrowserFloating);
+
+            if (floatingIndex < 0) menuView.DropDownItems.Add(_menuViewFileBrowserThumbnails);
+            else menuView.DropDownItems.Insert(floatingIndex + 1, _menuViewFileBrowserThumbnails);
+
+            UpdateFileBrowserMenuState();
         }
 
         /// <summary>「文件浏览器」菜单：有独立窗口就亮出来，否则打开侧栏并切到文件页。</summary>
@@ -92,9 +123,24 @@ namespace 播放器
                 return;
             }
 
+            // 1.28.0：侧栏已经分离成悬浮窗（音频窗口里也能做到）时，文件页跟着那个窗口走。
+            if (_settings.SidebarFloating)
+            {
+                if (_sidebarWindow == null) return;
+
+                if (!_sidebarWindow.Visible) _sidebarWindow.Show();
+
+                sidebarPanel.ActiveTab = SidebarTab.Files;
+                sidebarPanel.FileBrowser.EnsureLoaded();
+                _sidebarWindow.Activate();
+                return;
+            }
+
             if (IsAudioWindow || IsMiniWindow)
             {
-                SetStatus("音频窗口 / 迷你模式里没有侧栏；按 Ctrl+Alt+M 或 Ctrl+Alt+N 回视频窗口");
+                SetStatus(IsMiniWindow
+                    ? "迷你模式里没有侧栏；按 Ctrl+Alt+N 回视频窗口"
+                    : "音频窗口里没有停靠的侧栏；先在「视图」里把侧栏分离成悬浮窗");
                 return;
             }
 
@@ -130,8 +176,8 @@ namespace 播放器
                 return;
             }
 
-            // 音频 / 迷你窗口里没有停靠的侧栏；文件页若已分离则仍可用。
-            if ((IsAudioWindow || IsMiniWindow) && !_settings.FileBrowserFloating)
+            // 音频 / 迷你窗口里没有停靠的侧栏；文件页若已分离（自己分离，或侧栏分离）则仍可用。
+            if ((IsAudioWindow || IsMiniWindow) && !_settings.FileBrowserFloating && !_settings.SidebarFloating)
             {
                 ShowFileBrowser();
                 return;
@@ -285,7 +331,8 @@ namespace 播放器
         internal void UpdateFileBrowserMenuState()
         {
             var simplified = IsAudioWindow || IsMiniWindow;
-            var available = !simplified || _settings.FileBrowserFloating;
+
+            var available = !simplified || _settings.FileBrowserFloating || _settings.SidebarFloating;
 
             if (_menuViewFileBrowser != null) _menuViewFileBrowser.Enabled = available;
 
@@ -293,6 +340,12 @@ namespace 播放器
             {
                 _menuViewFileBrowserFloating.Enabled = available;
                 _menuViewFileBrowserFloating.Checked = _settings.FileBrowserFloating;
+            }
+
+            if (_menuViewFileBrowserThumbnails != null)
+            {
+                _menuViewFileBrowserThumbnails.Enabled = available;
+                _menuViewFileBrowserThumbnails.Checked = sidebarPanel.FileBrowser.State.ShowThumbnails;
             }
         }
 

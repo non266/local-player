@@ -243,6 +243,21 @@ namespace 播放器.Core
         /// <summary>文件页是否用「平铺缩略图」显示音视频封面（1.27.0；默认关，不打开的人界面不变）。</summary>
         public bool FileBrowserThumbnails { get; set; }
 
+        /// <summary>文件页左边是否显示文件夹树（1.28.0；默认关——窄侧栏里放不下）。</summary>
+        public bool FileBrowserFolderTree { get; set; }
+
+        /// <summary>文件页是否盯着当前本地目录自动刷新（1.28.0；默认开）。</summary>
+        public bool FileBrowserAutoRefresh { get; set; } = true;
+
+        /// <summary>每目录最多给多少个文件做缩略图（1.28.0；只认 300 / 600 / 1000，坏值回 300）。</summary>
+        public int FileBrowserThumbnailBudget
+        {
+            get => _fileBrowserThumbnailBudget;
+            set => _fileBrowserThumbnailBudget = FileBrowserThumbnailBudgets.Normalize(value);
+        }
+
+        private int _fileBrowserThumbnailBudget = FileBrowserThumbnailBudgets.Default;
+
         /// <summary>上次浏览的目录；空串表示"此电脑"。</summary>
         public string FileBrowserLastPath { get; set; } = string.Empty;
 

@@ -58,6 +58,38 @@ namespace 播放器.Core
         }
 
         /// <summary>
+        /// 原子写二进制文件（1.28.0：缩略图缓存用）。与 <see cref="WriteAllText"/> 同一套
+        /// "临时文件 → 写入 → 改名覆盖"，失败时不留半截文件。
+        /// </summary>
+        public static void WriteAllBytes(string filePath, byte[] contents)
+        {
+            var full = Path.GetFullPath(filePath);
+            var folder = Path.GetDirectoryName(full);
+            if (!string.IsNullOrEmpty(folder)) Directory.CreateDirectory(folder);
+
+            var temp = full + "." + Guid.NewGuid().ToString("N") + TempSuffix;
+
+            lock (WriteGate)
+            {
+                try
+                {
+                    using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    {
+                        stream.Write(contents, 0, contents.Length);
+                        stream.Flush(true);
+                    }
+
+                    File.Move(temp, full, overwrite: true);
+                }
+                catch (Exception)
+                {
+                    TryDelete(temp);
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
         /// 把读不出来的文件改名成 <c>xxx.corrupt</c> 留档，返回备份路径；失败返回 <c>null</c>。
         /// <para>目的是不再"静默把用户的数据丢掉"——坏文件留着，至少还能人工找回一部分。</para>
         /// </summary>

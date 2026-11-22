@@ -535,32 +535,5 @@ namespace 播放器.Ui
         {
             ResetThumbnails();
         }
-
-        /// <summary>
-        /// 平铺模式的滚轮：按"当前第一项可见项"的 <see cref="ListViewItem.Bounds"/> 算目标行再
-        /// <c>EnsureVisible</c>。图标视图里没有详情那套 <c>TopItem</c> 语义，不能照抄。
-        /// </summary>
-        private void ScrollTilesBy(int offset)
-        {
-            if (_list.Items.Count == 0) return;
-
-            var items = _list.Items;
-            var first = 0;
-            var bestTop = int.MaxValue;
-
-            for (var i = 0; i < items.Count; i++)
-            {
-                var bounds = items[i].Bounds;
-
-                if (bounds.Bottom <= 0) continue;
-                if (bounds.Top >= bestTop) continue;
-
-                bestTop = bounds.Top;
-                first = i;
-            }
-
-            var target = Math.Clamp(first + offset, 0, items.Count - 1);
-            items[target].EnsureVisible();
-        }
     }
 }

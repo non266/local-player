@@ -678,6 +678,11 @@ namespace SmokeTest
                     return false;
                 }
 
+                if (!CheckFileBrowserWheelScrolling(view, root, uiRoot))
+                {
+                    return false;
+                }
+
                 // 「显示所有文件」：.bin 与隐藏文件要出现，再关掉。
                 view.SetShowAllFiles(true);
 
@@ -1215,6 +1220,169 @@ namespace SmokeTest
 
         private static List<string> ListViewNames(ListView list) =>
             list.Items.Cast<ListViewItem>().Select(item => item.Text).ToList();
+
+        /// <summary>
+        /// 滚轮（1.29.0 修的 bug，所有者报「文件浏览器无法用鼠标滚轮向下翻动」）。
+        /// <para>
+        /// 根因在**平铺**那一支：原来找"当前第一项 + 3 个"再 <c>EnsureVisible</c>——大图标一行能放
+        /// 5～6 个，+3 还在同一行、本来就在视野里，<c>EnsureVisible</c> 遇到已经可见的目标什么都不做，
+        /// 于是从顶部第一次向下滚就滚不动。现在改成按像素 <c>LVM_SCROLL</c>，两种视图都要验"真的滚了"。
+        /// 详情那一支顺带留一条回归断言（它以前是好的，别在改滚轮时弄坏）。
+        /// 另外验：焦点在地址栏 / 搜索框时，视图自己的过滤器把"落在列表上的滚轮"转给列表；
+        /// 焦点在列表上时不抢（否则会滚两遍）。
+        /// </para>
+        /// </summary>
+        private static bool CheckFileBrowserWheelScrolling(
+            FileBrowserView view, string root, string uiRoot)
+        {
+            var folder = Path.Combine(root, "wheel");
+            TryDeleteDirectory(folder);
+            Directory.CreateDirectory(folder);
+
+            for (var i = 0; i < 60; i++)
+                File.WriteAllText(Path.Combine(folder, "w" + i.ToString("D2") + ".mp3"), "x");
+
+            try
+            {
+                view.SetThumbnailsForTest(false);
+                view.NavigateForTest(folder);
+
+                if (!PumpUntil(() => !view.IsLoading && view.List.Items.Count >= 60, 8000))
+                {
+                    Log(33, "文件页检查：滚轮测试目录没有读出来（状态：" + view.StatusText + "）");
+                    return false;
+                }
+
+                var list = view.List;
+
+                if (list.View != View.Details)
+                {
+                    Log(33, "文件页检查：滚轮测试开始时不是详情视图（" + list.View + "）");
+                    return false;
+                }
+
+                if (!ScrollFileBrowserToTop(view)) return false;
+
+                var before = view.FirstVisibleIndexForTest;
+
+                view.ScrollByForTest(-120);   // 向下滚
+                PumpMessages(120);
+
+                var down = view.FirstVisibleIndexForTest;
+
+                if (down <= before)
+                {
+                    Log(33, $"文件页检查：滚轮向下没有滚动列表（第一项 {before} → {down}）");
+                    return false;
+                }
+
+                view.ScrollByForTest(120);    // 向上滚
+                PumpMessages(120);
+
+                var up = view.FirstVisibleIndexForTest;
+
+                if (up >= down)
+                {
+                    Log(33, $"文件页检查：滚轮向上没有滚回去（第一项 {down} → {up}）");
+                    return false;
+                }
+
+                // 平铺（大图标）也要滚得动，不能只是"不抛异常"。
+                view.SetThumbnailsForTest(true);
+                PumpMessages(200);
+
+                if (!ScrollFileBrowserToTop(view)) return false;
+
+                var tileBefore = view.FirstVisibleIndexForTest;
+
+                view.ScrollByForTest(-120);
+                PumpMessages(200);
+
+                var tileDown = view.FirstVisibleIndexForTest;
+
+                if (tileDown <= tileBefore)
+                {
+                    Log(33, $"文件页检查：平铺下滚轮向下没有滚动（第一项 {tileBefore} → {tileDown}）");
+                    return false;
+                }
+
+                view.SetThumbnailsForTest(false);
+                PumpMessages(150);
+
+                var listScreen = list.RectangleToScreen(list.ClientRectangle);
+                var onList = new Point(
+                    listScreen.Left + Math.Min(30, Math.Max(1, listScreen.Width - 2)),
+                    listScreen.Top + Math.Min(30, Math.Max(1, listScreen.Height - 2)));
+                var offList = new Point(listScreen.Left - 40, listScreen.Top - 40);
+
+                if (view.TryHandleWheelForTest(-120, onList, list.Handle))
+                {
+                    Log(33, "文件页检查：焦点在列表上时视图又接管了一次滚轮（会滚两遍）");
+                    return false;
+                }
+
+                if (view.TryHandleWheelForTest(-120, offList, view.Handle))
+                {
+                    Log(33, "文件页检查：指针不在列表上，视图却接管了滚轮");
+                    return false;
+                }
+
+                if (!ScrollFileBrowserToTop(view)) return false;
+
+                var filterBefore = view.FirstVisibleIndexForTest;
+
+                if (!view.TryHandleWheelForTest(-120, onList, view.Handle))
+                {
+                    Log(33, "文件页检查：焦点不在列表上时（地址栏 / 搜索框），视图没有把滚轮转给列表");
+                    return false;
+                }
+
+                PumpMessages(120);
+
+                var filterAfter = view.FirstVisibleIndexForTest;
+
+                if (filterAfter <= filterBefore)
+                {
+                    Log(33, $"文件页检查：视图接管了滚轮但列表没动（第一项 {filterBefore} → {filterAfter}）");
+                    return false;
+                }
+            }
+            finally
+            {
+                TryDeleteDirectory(folder);
+            }
+
+            view.NavigateForTest(uiRoot);
+
+            if (!PumpUntil(() => !view.IsLoading && view.List.Items.Count > 0, 8000))
+            {
+                Log(33, "文件页检查：滚轮测试之后没有回到原目录");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>把列表滚回顶部（平铺没有 TopItem，用一大段向上滚）。</summary>
+        private static bool ScrollFileBrowserToTop(FileBrowserView view)
+        {
+            var list = view.List;
+
+            if (list.Items.Count == 0) return true;
+
+            if (list.View == View.LargeIcon) view.ScrollByForTest(120 * 20);
+            else list.TopItem = list.Items[0];
+
+            PumpMessages(150);
+
+            if (view.FirstVisibleIndexForTest > 1)
+            {
+                Log(33, $"文件页检查：没能滚回列表顶部（第一项 {view.FirstVisibleIndexForTest}）");
+                return false;
+            }
+
+            return true;
+        }
 
         /// <summary>
         /// 工具栏 / 搜索行右侧两个按钮：文字要完整落在按钮里，按钮要完整落在文件页里。

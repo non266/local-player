@@ -80,6 +80,8 @@ namespace 播放器.Ui
         private ThemePalette _palette = Themes.Light;
         private bool _nativeDark;
 
+        private readonly WheelForwardFilter _wheelFilter;
+
         internal FileBrowserView()
         {
             Font = UiFonts.Sidebar;
@@ -109,6 +111,12 @@ namespace 播放器.Ui
 
             BuildContextMenu();
             BuildPositionMenu();
+
+            // 1.29.0：分离成独立窗口之后，焦点可能在地址栏 / 搜索框上（那两个控件不吃滚轮），
+            // 于是"鼠标在列表上滚"什么都不会发生。侧栏那条路由 SidebarPanel 的消息过滤器转发，
+            // 这里补的是视图自己的那条路（悬浮窗 / 以后别处直接用这个视图）。
+            _wheelFilter = new WheelForwardFilter(this);
+            Application.AddMessageFilter(_wheelFilter);
 
             AccessibleName = "文件浏览器";
             AccessibleDescription = "浏览磁盘与文件夹，双击播放，右键可加入播放列表";
@@ -228,25 +236,105 @@ namespace 播放器.Ui
             _list.Invalidate();
         }
 
-        /// <summary>侧栏的滚轮转发到这里：按行滚动列表（ListView 没焦点时收不到滚轮）。</summary>
+        /// <summary>
+        /// 侧栏 / 悬浮窗的滚轮转发到这里：把列表按行滚动。
+        /// <para>
+        /// 1.29.0 修（所有者报「文件浏览器无法用鼠标滚轮向下翻动」）：平铺（大图标）那一支原来是
+        /// "找当前第一项 + 3 个、再 <c>EnsureVisible</c>"。大图标一行能放 5～6 个，+3 还在**同一行**、
+        /// 本来就在视野里 —— <c>EnsureVisible</c> 遇到"已经可见"的目标什么都不做，于是
+        /// **从顶部第一次向下滚就滚不动**，用户看到的是"滚轮完全不能往下翻"。
+        /// 现在统一按像素发 <c>LVM_SCROLL</c>（3 行 × 行高），两种视图一致，也不依赖"目标是否已可见"。
+        /// </para>
+        /// </summary>
         internal void ScrollBy(int delta)
         {
             if (_list.Items.Count == 0 || delta == 0) return;
+            if (!_list.IsHandleCreated) return;
 
             var step = Math.Max(1, Math.Abs(delta) / 120) * 3;
+            var itemHeight = Math.Max(1, _list.GetItemRect(0).Height);
+            var pixels = step * itemHeight;
 
-            // 平铺（大图标）没有详情那套 TopItem 语义，走 Bounds + EnsureVisible。
-            if (_list.View == View.LargeIcon)
+            // 滚轮向上（delta > 0）滚回前面，向下滚后面；LVM_SCROLL 的 dy 正数向下。
+            SendMessage(_list.Handle, LvmScroll, IntPtr.Zero, (IntPtr)(delta > 0 ? -pixels : pixels));
+        }
+
+        /// <summary>测试用：当前第一项可见项的下标（详情用 TopItem；平铺按 Bounds 扫）。</summary>
+        internal int FirstVisibleIndexForTest
+        {
+            get
             {
-                ScrollTilesBy(delta > 0 ? -step : step);
-                return;
+                if (_list.Items.Count == 0) return -1;
+
+                if (_list.View != View.LargeIcon) return _list.TopItem?.Index ?? 0;
+
+                var first = 0;
+                var bestTop = int.MaxValue;
+
+                for (var i = 0; i < _list.Items.Count; i++)
+                {
+                    var bounds = _list.Items[i].Bounds;
+
+                    if (bounds.Bottom <= 0) continue;
+                    if (bounds.Top >= bestTop) continue;
+
+                    bestTop = bounds.Top;
+                    first = i;
+                }
+
+                return first;
             }
+        }
 
-            var top = _list.TopItem?.Index ?? 0;
-            var target = delta > 0 ? top - step : top + step;
+        private const int LvmScroll = 0x1014;
 
-            target = Math.Clamp(target, 0, _list.Items.Count - 1);
-            _list.TopItem = _list.Items[target];
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        /// <summary>
+        /// 视图自己的滚轮转发（1.29.0）：鼠标落在列表上、但焦点在地址栏 / 搜索框 / 按钮上时，
+        /// 把滚轮转给 <see cref="ScrollBy"/>。
+        /// <para>
+        /// 两条不接管的例外：目标本来就是列表（原生滚动更顺手）、指针不在列表范围里（别抢工具栏的滚轮）。
+        /// </para>
+        /// </summary>
+        internal bool TryHandleWheelForTest(int delta, Point screenPoint, IntPtr targetHandle) =>
+            TryForwardWheel(delta, screenPoint, targetHandle);
+
+        private bool TryForwardWheel(int delta, Point screenPoint, IntPtr targetHandle)
+        {
+            if (delta == 0 || !IsHandleCreated || !Visible) return false;
+            if (_list.Items.Count == 0 || !_list.IsHandleCreated || !_list.Visible) return false;
+
+            // 目标是列表本身：交给 WinForms / ListView 原生滚（人手感一致，也不会滚两遍）。
+            var target = targetHandle == IntPtr.Zero ? null : Control.FromHandle(targetHandle);
+            if (ReferenceEquals(target, _list)) return false;
+
+            if (!_list.RectangleToScreen(_list.ClientRectangle).Contains(screenPoint)) return false;
+
+            ScrollBy(delta);
+            return true;
+        }
+
+        /// <summary>只处理滚轮的过滤器；判断逻辑在 <see cref="TryForwardWheel"/>（可以单独断言）。</summary>
+        private sealed class WheelForwardFilter : IMessageFilter
+        {
+            private const int WmMouseWheel = 0x020A;
+
+            private readonly FileBrowserView _owner;
+
+            public WheelForwardFilter(FileBrowserView owner) => _owner = owner;
+
+            public bool PreFilterMessage(ref Message m)
+            {
+                if (m.Msg != WmMouseWheel) return false;
+
+                var value = (long)m.LParam;
+                var screen = new Point((short)(value & 0xFFFF), (short)((value >> 16) & 0xFFFF));
+                var delta = (short)(((long)m.WParam >> 16) & 0xFFFF);
+
+                return _owner.TryForwardWheel(delta, screen, m.HWnd);
+            }
         }
 
         /// <summary>恢复一份状态（启动 / 载入设置方案）。已经加载过且目录变了才重新读。</summary>
@@ -574,6 +662,8 @@ namespace 播放器.Ui
         {
             if (disposing)
             {
+                Application.RemoveMessageFilter(_wheelFilter);
+
                 CancelLoad();
                 CancelSearch();
                 StopWatch();

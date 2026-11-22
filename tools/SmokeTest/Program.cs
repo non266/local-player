@@ -18,7 +18,7 @@ namespace SmokeTest
     /// </summary>
     internal static partial class Program
     {
-        private const int StepCount = 34;
+        private const int StepCount = 37;
 
         /// <summary>一步检查：名字用于筛选，<c>Needs</c> 声明它依赖的前置检查。</summary>
         private sealed class SmokeStep
@@ -128,7 +128,10 @@ namespace SmokeTest
                 new SmokeStep("切歌时的等待", CheckMetadataPending),
                 new SmokeStep("在线歌词缓存", CheckOnlineCache),
                 new SmokeStep("文件浏览器", TestFileBrowser),
-                new SmokeStep("文件页导航与自动刷新", TestFileBrowserNavigation)
+                new SmokeStep("文件页导航与自动刷新", TestFileBrowserNavigation),
+                new SmokeStep("关窗收尾", TestCloseTeardown),
+                new SmokeStep("快捷键设置", TestShortcutSettings),
+                new SmokeStep("数据目录与便携模式", TestDataDirectory)
             };
 
             var selected = SelectSteps(steps, filter);
@@ -160,6 +163,20 @@ namespace SmokeTest
                 Log(1, "Core.Initialize 失败: " + ex);
                 StopWatchdog();
                 return 1;
+            }
+
+            // 关窗压测（GATED，1.29.0）：`播放器_TEST_TEARDOWN=N` 时先连做 N 轮，再跑选中的步骤。
+            // 1.18.0 起了这个名字却一直没接线（当时的调用点后来被整段替换掉了）——1.29.0 补上，
+            // 免得"文档里写着的探针"其实从来没跑过。
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("播放器_TEST_TEARDOWN")))
+            {
+                SetWatchdogStep("关窗压测（GATED）");
+
+                if (!RunTeardownStress())
+                {
+                    StopWatchdog();
+                    return 1;
+                }
             }
 
             var timings = new List<(string Name, long Milliseconds)>();

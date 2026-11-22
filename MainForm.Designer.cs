@@ -100,6 +100,7 @@ namespace 播放器
             this.menuViewTopMost = new System.Windows.Forms.ToolStripMenuItem();
             this.menuHelp = new System.Windows.Forms.ToolStripMenuItem();
             this.menuHelpShortcuts = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuHelpShortcutSettings = new System.Windows.Forms.ToolStripMenuItem();
             this.menuAbout = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMain = new System.Windows.Forms.ToolStrip();
             this.tsbOpen = new System.Windows.Forms.ToolStripButton();
@@ -615,11 +616,16 @@ namespace 播放器
             // menuHelp
             // 
             this.menuHelp.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+                this.menuHelpShortcutSettings,
                 this.menuHelpShortcuts,
                 this.menuAbout});
             this.menuHelp.Name = "menuHelp";
             this.menuHelp.Size = new System.Drawing.Size(62, 20);
             this.menuHelp.Text = "帮助(&H)";
+
+            this.menuHelpShortcutSettings.Name = "menuHelpShortcutSettings";
+            this.menuHelpShortcutSettings.Size = new System.Drawing.Size(180, 22);
+            this.menuHelpShortcutSettings.Text = "快捷键设置(&S)…";
 
             this.menuHelpShortcuts.Name = "menuHelpShortcuts";
             this.menuHelpShortcuts.ShortcutKeyDisplayString = "F1";
@@ -1298,6 +1304,7 @@ namespace 播放器
         private System.Windows.Forms.ToolStripMenuItem menuViewTopMost;
         private System.Windows.Forms.ToolStripMenuItem menuHelp;
         private System.Windows.Forms.ToolStripMenuItem menuHelpShortcuts;
+        private System.Windows.Forms.ToolStripMenuItem menuHelpShortcutSettings;
         private System.Windows.Forms.ToolStripMenuItem menuAbout;
         private System.Windows.Forms.ToolStrip toolStripMain;
         private System.Windows.Forms.ToolStripButton tsbOpen;

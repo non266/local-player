@@ -16,14 +16,39 @@ namespace 播放器
     internal sealed class CommandBinding
     {
         public CommandBinding(ToolStripItem item, PlayerCommandId id)
+            : this(item, id, CaptureTooltip(item))
+        {
+        }
+
+        private CommandBinding(ToolStripItem item, PlayerCommandId id, string? tooltipBase)
         {
             Item = item;
             Id = id;
+            TooltipBase = tooltipBase;
         }
 
         public ToolStripItem Item { get; }
 
         public PlayerCommandId Id { get; }
+
+        /// <summary>
+        /// 绑定那一刻的提示文字（去掉末尾「(键)」那一段）。1.29.0 改了键之后，
+        /// 提示要能重新拼成「名称 (新键)」——不记下原文就只能显示旧键。
+        /// </summary>
+        public string? TooltipBase { get; }
+
+        private static string? CaptureTooltip(ToolStripItem item)
+        {
+            var text = item.ToolTipText;
+
+            if (string.IsNullOrEmpty(text)) return null;
+
+            var index = text.LastIndexOf(" (", StringComparison.Ordinal);
+
+            return index > 0 && text.EndsWith(")", StringComparison.Ordinal)
+                ? text[..index]
+                : text;
+        }
     }
 
     /// <summary>
@@ -123,7 +148,75 @@ namespace 播放器
             BindCommand(tsbForward, PlayerCommandId.SeekForward);
             BindCommand(tsbSnapshot, PlayerCommandId.Snapshot);
             BindCommand(tsbTogglePlaylist, PlayerCommandId.TogglePlaylist);
+
+            // 工具栏提示里的「(键)」也要跟用户改过的键一致（1.29.0）。
+            RefreshCommandShortcutDisplays();
         }
+
+        // ---- 快捷键覆盖（1.29.0）---------------------------------------------
+
+        private string? _shortcutWarning;
+
+        /// <summary>启动时"有快捷键条目认不识"的说明（并进 ReportLoadWarnings 显示一次）。</summary>
+        internal string? ShortcutWarning => _shortcutWarning;
+
+        /// <summary>
+        /// 把设置里的快捷键覆盖套到命令目录上。启动、载入设置方案、保存对话框之后都要调。
+        /// <para>
+        /// 认不识的条目不会让程序起不来：目录退回默认键，这里留一句话给状态栏。
+        /// </para>
+        /// </summary>
+        private void ApplyShortcutOverrides()
+        {
+            var overrides = ShortcutBinding.Resolve(_settings.ShortcutOverrides, out var warnings);
+            PlayerCommandCatalog.Configure(overrides);
+
+            _shortcutWarning = warnings.Count == 0
+                ? null
+                : "快捷键有 " + warnings.Count + " 条认不识（已按默认键）：" + string.Join("；", warnings);
+        }
+
+        /// <summary>
+        /// 覆盖变了之后，把菜单上的键串与工具栏提示刷一遍。F1 说明每次现生成（<c>BuildShortcutsText</c>），
+        /// 不用刷。
+        /// </summary>
+        internal void RefreshCommandShortcutDisplays()
+        {
+            foreach (var binding in _commandBindings)
+            {
+                var display = PlayerCommandCatalog.Get(binding.Id).MenuDisplay;
+
+                if (binding.Item is ToolStripMenuItem item)
+                    item.ShortcutKeyDisplayString = display;
+
+                if (binding.TooltipBase != null)
+                {
+                    binding.Item.ToolTipText = display == null
+                        ? binding.TooltipBase
+                        : binding.TooltipBase + " (" + display + ")";
+                }
+            }
+        }
+
+        /// <summary>「帮助 → 快捷键设置…」：改完立刻生效并落盘。</summary>
+        private void ShowShortcutSettings()
+        {
+            if (!ShortcutDialog.Show(this, _palette, out var entries)) return;
+
+            _settings.ShortcutOverrides = entries;
+            _settings.Save();
+
+            ApplyShortcutOverrides();
+            RefreshCommandShortcutDisplays();
+
+            SetStatus(entries.Count == 0
+                ? "快捷键已全部恢复默认"
+                : $"快捷键已保存（{entries.Count} 条与默认不同）");
+        }
+
+        /// <summary>一条命令现在按哪个键（状态栏提示里用；改了键之后不会再写着旧键）。</summary>
+        private static string KeyOf(PlayerCommandId id) =>
+            PlayerCommandCatalog.Get(id).MenuDisplay ?? "（没有键）";
 
         /// <summary>绑定一个菜单项 / 工具条项（登记起来供状态刷新与测试核对）。</summary>
         private void BindCommand(ToolStripItem item, PlayerCommandId id)
@@ -245,19 +338,20 @@ namespace 播放器
             switch (id)
             {
                 case PlayerCommandId.TogglePlaylist when IsAudioWindow:
-                    SetStatus("音频窗口没有播放列表；按 Ctrl+Alt+M 切回视频窗口");
+                    SetStatus($"音频窗口没有播放列表；按 {KeyOf(PlayerCommandId.ToggleWindowMode)} 切回视频窗口");
                     break;
 
                 case PlayerCommandId.TogglePlaylist when IsMiniWindow:
-                    SetStatus("迷你模式没有播放列表；按 Ctrl+Alt+N 还原窗口");
+                    SetStatus($"迷你模式没有播放列表；按 {KeyOf(PlayerCommandId.ToggleMiniMode)} 还原窗口");
                     break;
 
                 case PlayerCommandId.ToggleFullscreen when IsAudioWindow:
-                    SetStatus("音频窗口没有全屏；按 Ctrl+Alt+M 切回视频窗口再按 F11");
+                    SetStatus($"音频窗口没有全屏；按 {KeyOf(PlayerCommandId.ToggleWindowMode)} 切回视频窗口再按 "
+                              + KeyOf(PlayerCommandId.ToggleFullscreen));
                     break;
 
                 case PlayerCommandId.ToggleFullscreen when IsMiniWindow:
-                    SetStatus("迷你模式没有全屏；按 Ctrl+Alt+N 还原窗口");
+                    SetStatus($"迷你模式没有全屏；按 {KeyOf(PlayerCommandId.ToggleMiniMode)} 还原窗口");
                     break;
 
                 case PlayerCommandId.ToggleWindowMode when IsFullscreen:

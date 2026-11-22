@@ -78,7 +78,8 @@ namespace 播放器.Core
                 "SortField", "SortDescending", "WindowMode", "MiniMode",
                 "FileBrowserFloating", "FileBrowserSort", "FileBrowserSortDescending",
                 "FileBrowserShowAllFiles", "FileBrowserThumbnails",
-                "FileBrowserFolderTree", "FileBrowserAutoRefresh", "FileBrowserThumbnailBudget"
+                "FileBrowserFolderTree", "FileBrowserAutoRefresh", "FileBrowserThumbnailBudget",
+                "ShortcutOverrides"
             },
             [SettingsSection.Windows] = new[]
             {

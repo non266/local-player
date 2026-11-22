@@ -402,10 +402,15 @@ namespace 播放器
             // 换掉之后所有读取点自然拿到新值，也就不会漏掉某一项。
             _settings = merged;
 
+            // 1.29.0：方案里也可能带着快捷键覆盖——先套上目录，再摆界面（菜单上的键串跟着变）。
+            ApplyShortcutOverrides();
+
             ApplyTheme(_settings.Theme);
 
             // 现在可能正放着一首歌，不需要因为换了一套设置就把侧栏清成空状态
             ApplySettings(resetTrackPanel: false);
+
+            RefreshCommandShortcutDisplays();
 
             _surfaces.RestorePlacement();
             ClampToWorkingArea();

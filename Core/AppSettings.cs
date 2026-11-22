@@ -267,6 +267,16 @@ namespace 播放器.Core
         /// <summary>最近浏览的目录（最多 10 条，最新在前）。死链保留，点开时如实报错。</summary>
         public List<string> FileBrowserRecent { get; set; } = new List<string>();
 
+        /// <summary>
+        /// 用户改过的快捷键（1.29.0）。每条是 <c>"命令Id=键"</c>，例如 <c>"Stop=Ctrl+Shift+S"</c>；
+        /// 同一命令可以有两行（主键 / 次键），<c>"Id="</c> 表示这条命令没有键。
+        /// <para>
+        /// 只存<b>与出厂默认不同</b>的项：没动过的命令跟着以后版本的默认键走。
+        /// 认不识的条目不会让程序起不来——<see cref="Ui.ShortcutBinding"/> 会忽略并在启动时提示一次。
+        /// </para>
+        /// </summary>
+        public List<string> ShortcutOverrides { get; set; } = new List<string>();
+
         /// <summary>关闭窗口时是缩到系统托盘，还是直接退出。</summary>
         public bool MinimizeToTray { get; set; }
 
@@ -507,23 +517,13 @@ namespace 播放器.Core
         /// <summary>
         /// 数据目录（设置与播放历史都放这里）。
         /// <para>
-        /// 默认是 <c>%AppData%\播放器</c>；如果设置了环境变量 <c>播放器_DATA_DIR</c>，
-        /// 则改用它——便携安装可以用这个把数据放在程序目录旁边，
-        /// 自动化测试也用它在临时目录里跑，避免碰到使用者的真实配置。
+        /// 判定顺序（1.29.0 起在 <see cref="DataDirectory"/> 里）：环境变量 <c>播放器_DATA_DIR</c>
+        /// → 程序旁边的 <c>portable.ini</c>（数据放 <c>&lt;程序目录&gt;\data</c>）
+        /// → <c>%AppData%\播放器</c>。环境变量仍然最优先——自动化测试用它把数据目录指到临时位置，
+        /// 避免碰到使用者的真实配置。
         /// </para>
         /// </summary>
-        public static string SettingsDirectory
-        {
-            get
-            {
-                var custom = Environment.GetEnvironmentVariable("播放器_DATA_DIR");
-                if (!string.IsNullOrWhiteSpace(custom))
-                    return custom;
-
-                return Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "播放器");
-            }
-        }
+        public static string SettingsDirectory => DataDirectory.Current.Directory;
 
         /// <summary>设置文件的完整路径。</summary>
         public static string SettingsFilePath => Path.Combine(SettingsDirectory, "settings.json");

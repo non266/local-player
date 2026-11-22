@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -364,6 +365,11 @@ namespace 播放器
             if (_shutdown) return;
             _shutdown = true;
 
+            // 1.29.0：每做一段记一行。挂死时看门狗把这份"走到哪一步"写进 smoke-journal.txt，
+            // 下一轮就不用再猜是卡在放引擎、还是卡在放系统媒体控件。
+            ShutdownTrace.Begin();
+
+            ShutdownTrace.Step("刷新历史");
             FlushHistory();
 
             // 1.20.0：留一个"这次是正常退出"的记号。下次启动拿它和崩溃转储比时间，
@@ -372,6 +378,7 @@ namespace 播放器
 
             _disposed = true;
 
+            ShutdownTrace.Step("停计时器");
             _uiTimer.Stop();
             _uiTimer.Dispose();
             _skipTimer.Stop();
@@ -379,33 +386,40 @@ namespace 播放器
             DisposeVideoMenu();
 
             // 音频卡片与全屏进度条都是模块自己的窗口 / 计时器，一起收。
+            ShutdownTrace.Step("放窗口模块");
             _surfaces?.Dispose();
 
+            ShutdownTrace.Step("放扫描器");
             _scanner.DurationFound -= OnDurationFound;
             _scanner.Dispose();
 
             // 标签读取队列：只关掉（不再起新的、待读丢掉），**不等待**在飞的那条——
             // 离线共享上一次读能卡几十秒，关窗不该陪着等。线程是后台线程，进程照常退。
+            ShutdownTrace.Step("关标签队列");
             _metadata.Dispose();
             _metadataPendingTimer.Stop();
             _metadataPendingTimer.Dispose();
 
+            ShutdownTrace.Step("撤媒体键");
             if (_registeredMediaKeys.Count > 0)
             {
                 MediaKeys.Unregister(Handle);
                 _registeredMediaKeys = Array.Empty<int>();
             }
 
+            ShutdownTrace.Step("撤桌面歌词热键");
             if (_desktopLyricsHotKeyRegistered)
             {
                 AppHotKeys.Unregister(Handle);
                 _desktopLyricsHotKeyRegistered = false;
             }
 
+            ShutdownTrace.Step("放任务栏按钮");
             _taskbarButtons?.Dispose();
             _taskbarButtons = null;
 
             // 系统媒体控件：关掉 IsEnabled 再放接口（音量弹窗里立刻不再挂着这一首）
+            ShutdownTrace.Step("放系统媒体控件");
             _smtc?.Dispose();
             _smtc = null;
 
@@ -414,24 +428,80 @@ namespace 播放器
             // 时序下会卡在 MediaPlayer.Stop 里——Windows 记成 Application Hang、进程被关掉
             // （退出码 0xCFFFFFFF，事件日志里是 Application Hang 而不是访问违例）。
             // 摘下来之后 libvlc 不再持有我们的窗口句柄，引擎可以照常停、照常放。
+            ShutdownTrace.Step("摘画面输出");
             videoView.MediaPlayer = null;
+            VideoOutputDetachedBeforeTeardown = videoView.MediaPlayer == null;
 
-            _engine.Dispose();
+            // 1.29.0：释放本身还是同一个顺序，但挪到后台并给界面 2 秒上界。
+            // 常态下与以前完全一样（同步放完再往下走）；只有真的卡住时才放弃等待——
+            // 用户按下关闭之后，界面不该陪着原生线程一起被 Windows 判成"无响应"。
+            ShutdownTrace.Step("放引擎（有界 2 秒）");
+
+            var engine = _engine;
+            var slowMilliseconds = BoundedTeardown.SlowTeardownMilliseconds;
+            var completed = BoundedTeardown.Run(
+                () =>
+                {
+                    // 只给冒烟用：验证"上界到了就放弃等待"
+                    if (slowMilliseconds > 0) System.Threading.Thread.Sleep(slowMilliseconds);
+                    engine.Dispose();
+                },
+                ShutdownEngineLimit,
+                elapsed =>
+                {
+                    LastShutdownTimedOut = true;
+                    ShutdownTrace.Step($"收尾超时（{elapsed.TotalMilliseconds:0} ms 仍未放完）");
+                    AppLog.Warn($"收尾超时：引擎 {elapsed.TotalMilliseconds:0} ms 还没放完，"
+                                + "不再等它（后台线程继续放，进程退出时由系统回收）");
+                });
+
+            if (completed) ShutdownTrace.Step("引擎已放");
+
+            ShutdownTrace.Step("放主题资源");
             DisposeThemeResources();
 
             // 列表加粗行用的字体是本类自己 new 的，设计器的 Dispose 只管 components，
             // 不管它。
+            ShutdownTrace.Step("放字体");
             _playingItemFont.Dispose();
 
+            ShutdownTrace.Step("放视频资源");
             DisposeVideoResources();
+
+            ShutdownTrace.Step("放托盘");
             DisposeTray();
+
+            ShutdownTrace.Step("放单实例");
             DisposeSingleInstance();
+
+            ShutdownTrace.Step("放桌面歌词窗口");
             DisposeDesktopLyricsWindow();
 
             // 歌词页的右键菜单是手动挂到控件上的，Control.Dispose 不会管它
+            ShutdownTrace.Step("放歌词菜单");
             _lyricsContextMenu?.Dispose();
             _lyricsContextMenu = null;
+
+            ShutdownTrace.Step("收尾完成");
         }
+
+        /// <summary>引擎收尾的等待上界（1.29.0）。</summary>
+        private static readonly TimeSpan ShutdownEngineLimit = TimeSpan.FromSeconds(2);
+
+        /// <summary>测试用：最近一次收尾是不是"超时后放弃等待"。</summary>
+        internal bool LastShutdownTimedOut { get; private set; }
+
+        /// <summary>
+        /// 测试用：放引擎之前，画面输出到底摘掉了没有（1.18.0 那条坑的硬证据）。
+        /// <para>
+        /// 光看追踪里有没有「摘画面输出」这一行守不住——把那一行挪到放引擎后面，顺序照样"对"。
+        /// 所以这里记的是<b>事实</b>：赋值之后 <c>videoView.MediaPlayer</c> 是不是真的空了。
+        /// </para>
+        /// </summary>
+        internal bool VideoOutputDetachedBeforeTeardown { get; private set; }
+
+        /// <summary>测试用：最近一次收尾走过的步骤（顺序即执行顺序）。</summary>
+        internal IReadOnlyList<string> CloseTrace => ShutdownTrace.LastSteps;
 
         private void SaveSession()
         {

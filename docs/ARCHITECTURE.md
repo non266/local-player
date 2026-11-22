@@ -11,14 +11,22 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 52,409 行 / **209 个文件** |
-| `Core/` | 18,546 行 / 94 个文件 |
-| `Ui/` | 18,580 行 / 71 个文件 |
-| `MainForm*` 这一族 partial | 15,205 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 32,270 行 / 95 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 53,784 行 / **215 个文件** |
+| `Core/` | 18,701 行 / 95 个文件 |
+| `Ui/` | 19,613 行 / 76 个文件 |
+| `MainForm*` 这一族 partial | 15,393 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 33,249 行 / 97 个文件 |
 
-> 数字最后一次量是在 **2026-11-21（1.28.0：文件夹树 / 自动刷新 / 缩略图二轮 / 音频窗口分离侧栏）**。
-> 1.28.0 产品侧多出 `Core/FolderTreeModel`、`Core/FolderWatch`、`Ui/FolderTree`、
+> 数字最后一次量是在 **2026-11-22（1.29.0：关窗挂死收口 / 快捷键自定义 / 便携模式）**。
+> 1.29.0 产品侧多出 `Core/DataDirectory`、`Ui/ShutdownTrace`、`Ui/BoundedTeardown`、
+> `Ui/ShortcutKeyText`、`Ui/ShortcutBinding`、`Ui/ShortcutDialog`（`Core` 94 → 95、`Ui` 71 → 76、
+> 主程序 209 → 215）；设置加 1 个字段（96 → 97 项）；冒烟多出
+> `Program.Shortcuts` 与 `Program.DataDirectory`（95 → 97 个文件），
+> **32 个运行步骤 / 37 项检查**（新步骤「关窗收尾」= 第 35 项、「快捷键设置」= 第 36 项、
+> 「数据目录与便携模式」= 第 37 项），详情见 §40~§42。
+>
+> 1.28.0 那一版的记录（2026-11-21：文件夹树 / 自动刷新 / 缩略图二轮 / 音频窗口分离侧栏）：
+> 产品侧多出 `Core/FolderTreeModel`、`Core/FolderWatch`、`Ui/FolderTree`、
 > `Ui/ThumbnailCache`、`Ui/VideoFrameGrabber`、`Ui/FileBrowserView.Tree`、
 > `Ui/FileBrowserView.Watch`（`Core` 92 → 94、`Ui` 66 → 71、主程序 202 → 209）；
 > 设置加 3 个字段（93 → 96 项）；冒烟多出 `Program.FileBrowser.Frames` 与
@@ -763,11 +771,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 29 个运行步骤 / 34 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 32 个运行步骤 / 37 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（29 个运行步骤 / 34 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（32 个运行步骤 / 37 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -804,7 +812,7 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 | 文件 | 干什么 |
 | --- | --- |
 | `Core/SavedName.cs` | 从 `PlaylistLibrary` 抽出来的名字规则（非法字符指名道姓、Windows 保留名、结尾点号、自然排序）。**歌单库与方案库共用一套**——否则会出现"歌单叫 CON 会被挡、方案叫 CON 却存下去了" |
-| `Core/SettingsProfile.cs` | 7 组共 96 项的清单 + **按组用 JSON 合并**（不是 96 个属性逐个赋值：那样漏一个没人发现）+ 覆盖率自检（`UncoveredProperties` / `UnknownProperties`） |
+| `Core/SettingsProfile.cs` | 7 组共 97 项的清单 + **按组用 JSON 合并**（不是 97 个属性逐个赋值：那样漏一个没人发现）+ 覆盖率自检（`UncoveredProperties` / `UnknownProperties`） |
 | `Core/SettingsLibrary.cs` | 方案库：存 / 列 / 读 / 改名 / 删 / 导入 / 导出；坏文件挡住并如实标出来 |
 | `Ui/SettingsLoadDialog.cs` | 载入时挑分组：每行写明这一组和当前**有几项不一样** |
 | `MainForm.SettingsProfiles.cs` | 菜单、当前方案、自动写回、把合并后的设置装到界面上 |
@@ -1957,3 +1965,59 @@ ThumbnailQueue（专用线程）
   启动恢复走默认 `reveal: false`，尊重上次的收起状态。
 - `DockSidebar` 归位时按形态保持收起：`Panel2Collapsed = !ShowSidebar || IsAudioWindow || IsMiniWindow`。
 - 文件页在音频窗口里的可用条件加 `SidebarFloating`：`ShowFileBrowser` 会亮出侧栏窗口并切到文件页。
+
+## 40. 关窗收尾有界与分步追踪（1.29.0）
+
+- **问题**：音频窗口关闭那一处从 1.18.0 起偶发 **Application Hang**（退出码 `0xCFFFFFFF`，Windows
+  约 50 秒后把进程关掉）。现场只有"最后一条成功日志"，而它之后收尾还有十几段——没有分步记录，
+  下一轮还是只能猜是卡在"放引擎"还是"放系统媒体控件"。
+- **追踪**（`Ui/ShutdownTrace`）：环形容量 48，`Begin()` / `Step("摘画面输出")` / `Dump()`；
+  只记名字与相对毫秒，不碰窗口、不碰引擎、不写磁盘（它夹在收尾每一步之间，自己不能再引入阻塞）。
+  看门狗判挂死时把 `Dump()` 一起写进 `smoke-journal.txt`。
+- **有界**（`Ui/BoundedTeardown`）：`_engine.Dispose()` 交给后台线程，界面最多等 **2 秒**；
+  完成就照旧往下走，超时记一行「收尾超时」并继续关窗（后台线程是 background，进程退出时回收）。
+  释放顺序**不变**：先 `videoView.MediaPlayer = null`，再放引擎（1.18.0 的规矩）。
+- ⚠ **两个坑（实测）**：
+  ① 第一版是"一边等一边 `DoEvents`，界面照样响应"，冒烟当场原生崩（`0xC0000005`，崩在
+     `libvlc_audio_get_delay`）——后台在拆引擎，泵进来的消息里却有引擎刚投递的状态回调，
+    正要去读一个已经在拆的 libvlc 对象。**等待期间一律不泵消息**：2 秒静默比拿消息泵和释放赛跑安全。
+  ② 光断言"追踪里有「摘画面输出」"守不住（把那一行挪到放引擎后面，顺序照样"对"）；所以还记
+     `VideoOutputDetachedBeforeTeardown`（赋值之后 `videoView.MediaPlayer` 是不是真的空了），
+     两条一起才守得住 1.18.0 那条坑。
+- **验证**：第 30 个运行步骤 / 第 35 项检查（6 轮真实关窗 ≤ 2500 ms、顺序、资源增量、4 秒慢收尾
+  在 2 秒上界处放弃）；GATED `播放器_TEST_TEARDOWN=N` 连跑 N 轮（门槛：单轮 ≤ 2500 ms、
+  关窗那一段线程 +≤ 5 / 句柄 +≤ 30）。**根因未定**，这一版修的是"不让它把界面挂住"。
+
+## 41. 快捷键覆盖层（1.29.0）
+
+- **唯一来源不变**：1.12.0 的命令目录仍是唯一清单；1.29.0 只把"默认键"与"生效键"拆开——
+  `PlayerCommandCatalog.Defaults` 是出厂表，`All` 是"默认 + 覆盖"，`Configure(overrides)` / `Reset()`。
+  菜单键串、工具栏提示、F1 说明、快捷键映射全部从 `All` 现取，所以改一处四张脸一起变。
+- **文本形态**（`Ui/ShortcutKeyText`）：`Format` ↔ `TryParse` 成对，字面量与 1.11.0 起菜单上的一致
+  （`Space` / `←→↑↓` / `PgUp` / `PgDn` / `Enter` / `Esc` / `Delete` / `[` `]` / 字母数字 / `F1`～`F24`）。
+  只有"画得出来、读不回来"的错才会在重启之后才暴露，所以两半放在同一个类里、测试做往返。
+- **落盘**（`Core/AppSettings.ShortcutOverrides`）：`"命令Id=键"`，同一命令可两行（主键 / 次键），
+  `"Id="` 表示这条命令没有键；**只写与默认不同的项**（没动过的跟着以后版本的默认键走）。
+  认不识的条目忽略并提示一次，不会让程序起不来。
+- **校验**（`Ui/ShortcutBinding.Validate`）：撞车（一个键给两条命令）与保留键都挡在保存前；
+  保留键表带原因（`F1` / `Delete` / `Esc` / `Enter` / `Tab` / `Backspace` / `F5` / `Ctrl+F` /
+  `Alt+←→` / `E` / `Shift+E` / `G·H·J·K` / `Ctrl+[ ]` / `Ctrl+Alt+D`）。
+- **边界**：只覆盖目录里的 24 条；逐帧 / 音画延迟 / 歌词偏移 / 文件页与 DVD 菜单那些键仍是固定的
+  （要改是"把它们搬进目录"，另一轮）；全局热键与多媒体键不参与。
+- **验证**：第 31 个运行步骤 / 第 36 项检查（文本往返、只存差异、撞车与保留键、真窗体新键执行 /
+  旧键不执行、菜单 / 工具栏 / F1 同步、对话框 24 行与 DPI 不越界）。
+
+## 42. 数据目录判定：便携模式（1.29.0）
+
+- **顺序**（`Core/DataDirectory.Resolve`）：环境变量 `播放器_DATA_DIR` → 程序旁边有
+  `portable.ini`（数据放 `<程序目录>\data`）→ `%AppData%\播放器`。
+  环境变量仍最优先（冒烟整套靠它把数据指到临时目录）。
+- **判定即建目录**：选便携之后真的 `CreateDirectory` 一次；建不出来（只读介质 / 权限）就
+  **退回** `%AppData%\播放器`，并在状态栏说一句（"便携模式：程序目录写不进去，数据退回 …"）。
+  便携模式生效时也说一句（否则用户不知道数据搬了地方）。
+- **不预置 marker**：便携 zip 里刻意不放 `portable.ini`——老用户解压覆盖时数据仍留在 `%AppData%`，
+  不会"凭空搬家"；想要便携就自己放一个（README / 参考手册写了怎么放）。
+- **进程内只判定一次**（`DataDirectory.Current` 惰性缓存）：同一进程里数据目录必须稳定，
+  否则"设置存在一半、历史存到另一半"。
+- **验证**：第 32 个运行步骤 / 第 37 项检查（纯判定矩阵：环境变量优先 / marker 生效 /
+  不可写退回 / 同名目录不算 marker；冒烟自己的数据目录仍是临时目录；「关于」里写的是同一处）。

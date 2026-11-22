@@ -101,16 +101,22 @@ namespace SmokeTest
                 var step = _watchdogStep;
                 var seconds = (long)(elapsed / 1000);
 
+                // 1.29.0：如果卡在关窗收尾里，产品那侧的"走到哪一步"就直接写进日志——
+                // 以前只有"最后一条成功日志"，之后还有十几段，等于只能猜。
+                var trace = 播放器.Ui.ShutdownTrace.Dump();
+
                 // 先把标记写进日志（写日志很快），再写转储：即使写转储失败/很慢，
                 // "卡在哪一步"这条信息也已经落到磁盘上了。
                 Journal("疑似挂死：第「" + step + "」步，最后一条日志之后已 " + seconds
                         + " 秒没有心跳（阈值 " + (_watchdogThresholdMilliseconds / 1000) + " 秒）"
+                        + (trace.Length > 0 ? "；收尾追踪：" + trace : string.Empty)
                         + "；正在写转储……");
 
                 var dump = TryWriteHangDump();
 
                 var message = "疑似挂死：第「" + step + "」步，最后一条日志之后已 " + seconds
                               + " 秒没有心跳（阈值 " + (_watchdogThresholdMilliseconds / 1000) + " 秒）"
+                              + (trace.Length > 0 ? "；收尾追踪：" + trace : string.Empty)
                               + (dump == null
                                   ? "；写转储失败"
                                   : "；转储：" + dump + "（" + new FileInfo(dump).Length + " 字节）");

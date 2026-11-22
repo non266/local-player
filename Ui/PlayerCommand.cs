@@ -64,6 +64,7 @@ namespace 播放器.Ui
     /// <summary>一条命令的说明：帮助里那句话、归哪一组、有没有勾选态、默认快捷键。</summary>
     internal sealed class PlayerCommandDefinition
     {
+        private readonly Keys[] _defaultShortcuts;
         private readonly Keys[] _shortcuts;
 
         public PlayerCommandDefinition(
@@ -72,12 +73,24 @@ namespace 播放器.Ui
             string category,
             bool checkable,
             params Keys[] shortcuts)
+            : this(id, helpText, category, checkable, shortcuts, shortcuts)
+        {
+        }
+
+        private PlayerCommandDefinition(
+            PlayerCommandId id,
+            string helpText,
+            string category,
+            bool checkable,
+            Keys[] defaults,
+            Keys[] effective)
         {
             Id = id;
             HelpText = helpText;
             Category = category;
             Checkable = checkable;
-            _shortcuts = shortcuts ?? Array.Empty<Keys>();
+            _defaultShortcuts = defaults ?? Array.Empty<Keys>();
+            _shortcuts = effective ?? Array.Empty<Keys>();
         }
 
         public PlayerCommandId Id { get; }
@@ -91,6 +104,17 @@ namespace 播放器.Ui
         /// <summary>菜单项上要不要画勾（播放列表、全屏、桌面歌词、静音这些）。</summary>
         public bool Checkable { get; }
 
+        /// <summary>出厂快捷键（1.29.0 起可以改，但"恢复默认"要拿得到原值）。</summary>
+        public IReadOnlyList<Keys> DefaultShortcuts => Array.AsReadOnly(_defaultShortcuts);
+
+        /// <summary>
+        /// 复制一份、只换生效的快捷键（1.29.0 的覆盖层）。说明 / 分组 / 勾选态都不变——
+        /// 覆盖层只该动"按哪个键"，不该动"这条命令叫什么、归哪组"。
+        /// </summary>
+        internal PlayerCommandDefinition WithShortcuts(IReadOnlyList<Keys> shortcuts) =>
+            new PlayerCommandDefinition(
+                Id, HelpText, Category, Checkable, _defaultShortcuts, shortcuts.ToArray());
+
         /// <summary>有快捷键才进 F1 帮助：没有键的命令（播放 / 暂停这种）写进帮助只会占地方。</summary>
         public bool ShowInHelp => _shortcuts.Length > 0;
 
@@ -98,11 +122,11 @@ namespace 播放器.Ui
         internal IReadOnlyList<Keys> AllShortcuts => _shortcuts;
 
         /// <summary>全部快捷键的显示串，帮助里用（例如 <c>PgUp / Ctrl+←</c>）。</summary>
-        public string Display => string.Join(" / ", _shortcuts.Select(PlayerCommandCatalog.FormatKeys));
+        public string Display => string.Join(" / ", _shortcuts.Select(ShortcutKeyText.Format));
 
         /// <summary>菜单项只显示第一个键（与 1.11.0 的菜单保持一致，避免"菜单上突然多出一截"）。</summary>
         public string? MenuDisplay =>
-            _shortcuts.Length == 0 ? null : PlayerCommandCatalog.FormatKeys(_shortcuts[0]);
+            _shortcuts.Length == 0 ? null : ShortcutKeyText.Format(_shortcuts[0]);
 
         /// <summary>按下这个键该执行哪条命令（无映射时返回 false）。</summary>
         public bool Matches(Keys keyData) => _shortcuts.Any(shortcut => shortcut == keyData);
@@ -129,8 +153,8 @@ namespace 播放器.Ui
             "播放控制", "声音", "文件与字幕", "界面"
         };
 
-        /// <summary>全部命令。顺序即帮助里的顺序；没有快捷键的条目不会出现在帮助里。</summary>
-        public static IReadOnlyList<PlayerCommandDefinition> All { get; } = new[]
+        /// <summary>出厂命令表（顺序即帮助里的顺序；没有快捷键的条目不会出现在帮助里）。</summary>
+        internal static IReadOnlyList<PlayerCommandDefinition> Defaults { get; } = new[]
         {
             // ---- 播放控制 ----
             new PlayerCommandDefinition(PlayerCommandId.PlayPause, "播放 / 暂停", "播放控制", false, Keys.Space),
@@ -191,6 +215,47 @@ namespace 播放器.Ui
             new PlayerCommandDefinition(
                 PlayerCommandId.ToggleFullscreen, "进入 / 退出全屏", "界面", false, Keys.F11, Keys.F)
         };
+
+        private static IReadOnlyList<PlayerCommandDefinition>? _effective;
+
+        /// <summary>
+        /// 当前生效的命令表（出厂表 + 用户改过的快捷键）。没改过就是 <see cref="Defaults"/> 本身。
+        /// <para>
+        /// 只换"按哪个键"，不换说明 / 分组 / 勾选态：这样 F1 帮助、菜单提示、快捷键映射三处
+        /// 永远出自同一张表（1.12.0 起的老规矩，1.29.0 只是让表能被覆盖）。
+        /// </para>
+        /// </summary>
+        public static IReadOnlyList<PlayerCommandDefinition> All => _effective ?? Defaults;
+
+        /// <summary>套用一层快捷键覆盖（1.29.0）。传空 = 恢复出厂。</summary>
+        public static void Configure(IReadOnlyDictionary<PlayerCommandId, Keys[]>? overrides)
+        {
+            if (overrides == null || overrides.Count == 0)
+            {
+                _effective = null;
+                return;
+            }
+
+            var list = new PlayerCommandDefinition[Defaults.Count];
+
+            for (var i = 0; i < Defaults.Count; i++)
+            {
+                var definition = Defaults[i];
+                var keys = overrides.TryGetValue(definition.Id, out var custom)
+                    ? custom
+                    : definition.DefaultShortcuts.ToArray();
+
+                list[i] = definition.WithShortcuts(keys);
+            }
+
+            _effective = list;
+        }
+
+        /// <summary>恢复出厂快捷键（"全部恢复默认"与测试收尾用）。</summary>
+        public static void Reset() => _effective = null;
+
+        /// <summary>测试用：当前有没有生效的覆盖。</summary>
+        internal static bool HasOverrides => _effective != null;
 
         /// <summary>按 id 取定义；目录里没有就是编程错误，直接抛（早红比静默空转好）。</summary>
         public static PlayerCommandDefinition Get(PlayerCommandId id)
@@ -283,34 +348,6 @@ namespace 播放器.Ui
         }
 
         /// <summary>把一个 <see cref="Keys"/> 画成菜单 / 帮助里的样子（与 1.11.0 的字面量逐字一致）。</summary>
-        public static string FormatKeys(Keys keys)
-        {
-            var parts = new List<string>();
-
-            if ((keys & Keys.Control) != 0) parts.Add("Ctrl");
-            if ((keys & Keys.Alt) != 0) parts.Add("Alt");
-            if ((keys & Keys.Shift) != 0) parts.Add("Shift");
-
-            var code = keys & Keys.KeyCode;
-
-            parts.Add(code switch
-            {
-                Keys.Space => "Space",
-                Keys.Left => "←",
-                Keys.Right => "→",
-                Keys.Up => "↑",
-                Keys.Down => "↓",
-                Keys.PageUp => "PgUp",
-                Keys.PageDown => "PgDn",
-                Keys.Enter => "Enter",
-                Keys.Escape => "Esc",
-                Keys.Delete => "Delete",
-                Keys.OemCloseBrackets => "]",
-                Keys.OemOpenBrackets => "[",
-                _ => code.ToString()
-            });
-
-            return string.Join("+", parts);
-        }
+        public static string FormatKeys(Keys keys) => ShortcutKeyText.Format(keys);
     }
 }

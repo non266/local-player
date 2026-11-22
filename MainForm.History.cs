@@ -82,6 +82,13 @@ namespace 播放器
             // 媒体键只注册上一部分时也要说一句：哪个键按了没反应，用户看不出来是被人占了
             if (!string.IsNullOrEmpty(_mediaKeyWarning)) warnings.Add(_mediaKeyWarning!);
 
+            // 1.29.0：快捷键条目认不识时也不静默——否则用户只会觉得"我改的键没生效"
+            if (!string.IsNullOrEmpty(ShortcutWarning)) warnings.Add(ShortcutWarning!);
+
+            // 1.29.0：便携模式 / 便携目录写不进去时要说一次——数据搬了地方，用户得知道
+            var dataNotice = DataDirectory.Current.Notice;
+            if (!string.IsNullOrEmpty(dataNotice)) warnings.Add(dataNotice);
+
             if (warnings.Count == 0) return;
 
             SetStatus(string.Join(" ", warnings));

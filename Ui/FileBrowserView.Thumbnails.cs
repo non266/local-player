@@ -124,6 +124,7 @@ namespace 播放器.Ui
         private int _thumbnailApplied;
         private int _thumbnailBatches;
         private int _thumbnailLookups;
+        private int _thumbnailViewUpdates;
 
         /// <summary>测试钩子：换掉封面来源（假的慢 / 假的数据 / 卡住不放，都靠它注入）。</summary>
         [Browsable(false)]
@@ -193,6 +194,12 @@ namespace 播放器.Ui
         internal int ThumbnailApplyBatchCountForTest => _thumbnailBatches;
 
         internal int ThumbnailLookupCountForTest => _thumbnailLookups;
+
+        /// <summary>
+        /// 真正包过一次 BeginUpdate/EndUpdate 的次数。空闲时它必须不再增长——
+        /// 否则就是"每 50 ms 空转一次重绘"，表现正是缩略图一直闪。
+        /// </summary>
+        internal int ThumbnailViewUpdateCountForTest => _thumbnailViewUpdates;
 
         internal (int First, int Last) ThumbnailRangeForTest
         {
@@ -508,8 +515,13 @@ namespace 播放器.Ui
 
                         // 预算外的项即使内存里还留着图，也回到类型图标：
                         // "最多做 N 个"是用户看得见的承诺，不能因为缓存命中就变成 N+。
+                        // 只在真的不一样时赋值：每 200 ms 给同一项重设一次 ImageIndex 也会闪。
                         if (_itemsByPath.TryGetValue(entry.FullPath, out var item) && _icons != null)
-                            item.ImageIndex = _icons.IndexOf(entry.Kind);
+                        {
+                            var typeIndex = _icons.IndexOf(entry.Kind);
+
+                            if (item.ImageIndex != typeIndex) item.ImageIndex = typeIndex;
+                        }
 
                         continue;
                     }
@@ -686,31 +698,35 @@ namespace 播放器.Ui
 
         private void DrainThumbnailResults(bool disposeOnly)
         {
+            if (disposeOnly)
+            {
+                while (_thumbnailApply.TryDequeue(out var discarded)) discarded.Bitmap?.Dispose();
+
+                return;
+            }
+
+            // 空闲时不要碰 ListView：每 50 ms 空包一次 Begin/EndUpdate 就是持续重绘（缩略图一直闪）。
+            if (_thumbnailApply.IsEmpty) return;
+
             var applied = 0;
 
-            if (!disposeOnly) _list.BeginUpdate();
+            _list.BeginUpdate();
+            _thumbnailViewUpdates++;
 
             try
             {
-                while ((disposeOnly || applied < ApplyBatchSize) && _thumbnailApply.TryDequeue(out var result))
+                while (applied < ApplyBatchSize && _thumbnailApply.TryDequeue(out var result))
                 {
                     applied++;
-
-                    if (disposeOnly)
-                    {
-                        result.Bitmap?.Dispose();
-                        continue;
-                    }
-
                     ApplyThumbnail(result);
                 }
             }
             finally
             {
-                if (!disposeOnly) _list.EndUpdate();
+                _list.EndUpdate();
             }
 
-            if (!disposeOnly && applied > 0) _thumbnailBatches++;
+            if (applied > 0) _thumbnailBatches++;
         }
 
         private void ApplyThumbnail(ThumbnailResult result)
@@ -779,7 +795,8 @@ namespace 播放器.Ui
         {
             _thumbnailLookups++;
 
-            if (_itemsByPath.TryGetValue(path, out var item)) item.ImageIndex = index;
+            if (_itemsByPath.TryGetValue(path, out var item) && item.ImageIndex != index)
+                item.ImageIndex = index;
         }
 
         private void ResetItemImages()

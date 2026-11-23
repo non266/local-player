@@ -131,7 +131,15 @@ namespace SmokeTest
                 // 稳定之后不能再有新请求：这是"没有复位环"的直接证据。
                 var requestSnapshot = openRequests;
                 var appliedSnapshot = openApplied;
+                var viewUpdatesSnapshot = view.ThumbnailViewUpdateCountForTest;
                 PumpMessages(1000);
+
+                if (view.ThumbnailViewUpdateCountForTest != viewUpdatesSnapshot)
+                {
+                    Log(38, $"缩略图性能：空闲时还在重绘（Begin/EndUpdate {viewUpdatesSnapshot} → "
+                            + $"{view.ThumbnailViewUpdateCountForTest}）——这会让缩略图一直闪");
+                    return false;
+                }
 
                 if (view.ThumbnailRequestCountForTest != requestSnapshot
                     || view.ThumbnailAppliedCountForTest != appliedSnapshot)

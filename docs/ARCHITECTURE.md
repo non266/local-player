@@ -11,19 +11,19 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 53,847 行 / **215 个文件** |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 54,375 行 / **215 个文件** |
 | `Core/` | 18,701 行 / 95 个文件 |
-| `Ui/` | 19,676 行 / 76 个文件 |
-| `MainForm*` 这一族 partial | 15,393 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 33,417 行 / 97 个文件 |
+| `Ui/` | 20,184 行 / 76 个文件 |
+| `MainForm*` 这一族 partial | 15,413 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 34,087 行 / 98 个文件 |
 
-> 数字最后一次量是在 **2026-11-22（1.29.0：关窗挂死收口 / 快捷键自定义 / 便携模式）**。
-> 1.29.0 产品侧多出 `Core/DataDirectory`、`Ui/ShutdownTrace`、`Ui/BoundedTeardown`、
-> `Ui/ShortcutKeyText`、`Ui/ShortcutBinding`、`Ui/ShortcutDialog`（`Core` 94 → 95、`Ui` 71 → 76、
-> 主程序 209 → 215）；设置加 1 个字段（96 → 97 项）；冒烟多出
-> `Program.Shortcuts` 与 `Program.DataDirectory`（95 → 97 个文件），
-> **32 个运行步骤 / 37 项检查**（新步骤「关窗收尾」= 第 35 项、「快捷键设置」= 第 36 项、
-> 「数据目录与便携模式」= 第 37 项），详情见 §40~§42。
+> 数字最后一次量是在 **2026-11-23（1.30.0：文件页缩略图性能 + 快捷键扩到 33 条）**。
+> 1.30.0 没有新增产品文件（仍是 215），只改 `Ui/ThumbnailQueue` / `VideoFrameGrabber` /
+> `FileBrowserView*` 与 `PlayerCommand` / `MainForm.*`；冒烟新增 `Program.FileBrowser.ThumbnailPerf`
+> （97 → 98 个文件），**33 个运行步骤 / 38 项检查**（新步骤「文件页缩略图性能」= 第 38 项），
+> 详情见 §43~§44。
+>
+> 1.29.0 那一版的记录（2026-11-22：关窗挂死收口 / 快捷键自定义 / 便携模式）：
 >
 > 1.28.0 那一版的记录（2026-11-21：文件夹树 / 自动刷新 / 缩略图二轮 / 音频窗口分离侧栏）：
 > 产品侧多出 `Core/FolderTreeModel`、`Core/FolderWatch`、`Ui/FolderTree`、
@@ -771,11 +771,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 32 个运行步骤 / 37 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 33 个运行步骤 / 38 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（32 个运行步骤 / 37 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（33 个运行步骤 / 38 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -975,7 +975,7 @@ F4 在 `Program.MainForm.Duplicates.cs`——没让 `Program.MainForm.Playlist.c
 | | `PlaylistWorkspace` | 列表模型、插播队列、排序依据、筛选词；`Matches` 保留 OrdinalIgnoreCase（土耳其语区规则） |
 | | `MediaSession`（原 `TrackLyricsSession`） | 当前曲目的路径 / 标签 / 歌词 / 封面 / 歌词偏移 / 标签版本号 |
 | | `HistoryService` | `PlaybackHistory` + `PerFileAdjustments` + 每 100 拍后台落盘；关掉"记住位置"仍 `MarkPlayed` |
-| `Ui`（WinForms 零件 + 界面模块） | `PlayerCommand` / `CommandBinder` | 25 条命令、26 个快捷键、F1 帮助正文、菜单 / 工具条绑定 |
+| `Ui`（WinForms 零件 + 界面模块） | `PlayerCommand` / `CommandBinder` | 33 条命令、34 个快捷键、F1 帮助正文、菜单 / 工具条绑定 |
 | | `WindowSurfaceController` | 视频 / 音频 / 迷你三种形态互斥切换、各自的几何、全屏入口、形态变化通知 |
 | | `VideoWindowModule` / `AudioWindowModule` / `FullscreenModule` | 三种形态各自的外壳、卡片、全屏进度条生命周期 |
 | | `MiniPlayerView` / `NowPlayingView` / `FullscreenProgressBar` / `PlaybackControls` | 看得见的零件 |
@@ -2001,11 +2001,12 @@ ThumbnailQueue（专用线程）
   认不识的条目忽略并提示一次，不会让程序起不来。
 - **校验**（`Ui/ShortcutBinding.Validate`）：撞车（一个键给两条命令）与保留键都挡在保存前；
   保留键表带原因（`F1` / `Delete` / `Esc` / `Enter` / `Tab` / `Backspace` / `F5` / `Ctrl+F` /
-  `Alt+←→` / `E` / `Shift+E` / `G·H·J·K` / `Ctrl+[ ]` / `Ctrl+Alt+D`）。
-- **边界**：只覆盖目录里的 24 条；逐帧 / 音画延迟 / 歌词偏移 / 文件页与 DVD 菜单那些键仍是固定的
-  （要改是"把它们搬进目录"，另一轮）；全局热键与多媒体键不参与。
+  `Alt+←→` / `Ctrl+Alt+D`）。1.30.0 起逐帧 / 延迟 / 歌词偏移已进目录，不再列为保留键。
+- **边界**：覆盖目录里的 33 条（1.30.0 从 25 条扩到 33 条）；文件页与 DVD 菜单、Esc / Enter 等
+  上下文键、全局热键与多媒体键仍固定（要改是"把上下文重新设计"，不是搬一张表）。
 - **验证**：第 31 个运行步骤 / 第 36 项检查（文本往返、只存差异、撞车与保留键、真窗体新键执行 /
-  旧键不执行、菜单 / 工具栏 / F1 同步、对话框 24 行与 DPI 不越界）。
+  旧键不执行、菜单 / 工具栏 / F1 同步、对话框行数与 DPI 不越界）；1.30.0 起再加 8 条命令的
+  默认映射、菜单键串与旧键不执行。
 
 ## 42. 数据目录判定：便携模式（1.29.0）
 
@@ -2021,3 +2022,38 @@ ThumbnailQueue（专用线程）
   否则"设置存在一半、历史存到另一半"。
 - **验证**：第 32 个运行步骤 / 第 37 项检查（纯判定矩阵：环境变量优先 / marker 生效 /
   不可写退回 / 同名目录不算 marker；冒烟自己的数据目录仍是临时目录；「关于」里写的是同一处）。
+
+## 43. 文件页缩略图的可见优先与批量贴图（1.30.0）
+
+- **为什么改**：1.28 的管线是"一进目录把整个目录（预算 300/600/1000）排进队列 + 每张结果
+  BeginInvoke + 每张遍历整个列表 + 缓存满了 `ResetThumbnails()` 里全量重排"。实测 600 项目录
+  打开要 **4.76 s**、只做出 401 张（队列上限 400 把剩下的丢了），滚动到底末项没有图；
+  跨目录累计到 512 条时还会整份复位重来。所有者报的"打开缩略图后浏览太卡顿"就是这一串。
+- **可见优先**：`RequestVisibleThumbnails` 只排当前视口 + 前后各一屏；`ScrollBy` 后立刻补，
+  原生滚动 / 键盘由 200 ms 轮询补；视频帧再等滚动停下 300 ms，避免边滚边让 libvlc 解码。
+- **批量贴图**：worker 只把结果放进 `ConcurrentQueue`；UI 每 50 ms 取最多 16 张，
+  一次 `BeginUpdate/EndUpdate`；`FillList` 建"路径 → 行"字典，贴图 O(1)。
+- **复位**：缓存满 512 条时只清内存 + 重建 ImageList，并按"首个可见项 + Bounds.Top"恢复滚动，
+  再只请求可见范围；预算集合保留，不重复扣。
+- **帧取消**：`ThumbnailQueue._frameEpoch` + `IVideoFrameSource.Grab(..., isCancelled)`，
+  取消的 `null` 带 `Aborted`，不记负缓存；单 worker 不变，封面优先。
+- **实测**（合成 600 项、2 ms 假封面）：打开 **0.72～1.18 s**、初始请求 **24～60**（随视口宽度）、
+  UI 最大停顿 **62～114 ms**；滚到底末项有图，复位 **1** 次，封面来源调用 **600**；
+  预算 300 时已选 **300**、跳过 200+ 并写状态行；截帧在飞时导航首图 **174～269 ms**、取消生效。
+- **验证**：第 33 个运行步骤 / 第 38 项检查（可见项全出图、初始请求 ≤300、批量 / 查找比、
+  滚到底 / 复位锚点 / 预算截断 / 隐藏即停 / 截帧取消）；A 部分 10 条变异。
+
+## 44. 快捷键覆盖扩到 33 条（1.30.0）
+
+- 逐帧 / 上一帧、音画与字幕延迟、歌词偏移 8 条从 `MainForm.Shortcuts` 的固定 switch 搬进
+  `PlayerCommandCatalog`（新分组「画面与同步」）；默认键不变（`E` / `Shift+E` / `G` / `H` / `J` /
+  `K` / `Ctrl+]` / `Ctrl+[`），行为不变，只是可改。
+- 执行入口仍是 `ExecuteCommand`；`CanExecute` 对这 8 条为 true，具体动作在
+  `StepFrame` / `StepDelay` / `AdjustLyricsOffset` 里按媒体 / 歌词状态给原因。
+- 音画同步 / 逐帧菜单改成 `BindCommand`，键串随 `RefreshCommandShortcutDisplays` 走；
+  歌词偏移有 4 份宿主（视图 / 歌词右键 / 桌面歌词 / 托盘），由 `RefreshLyricsOffsetItem`
+  在每次刷新时从目录现取键串。
+- 保留键表删掉这 8 个；F1 / Delete / Esc / Enter / Tab / Backspace / F5 / Ctrl+F / Alt+←→ /
+  Ctrl+Alt+D / 多媒体键仍固定，`ShortcutDialog` 与 F1 帮助同步。
+- **验证**：第 31 个运行步骤 / 第 36 项检查新增默认映射、保留表、真窗体改键 / 菜单键串 /
+  旧键不执行；B 部分 6 条变异。

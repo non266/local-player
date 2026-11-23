@@ -183,11 +183,11 @@ namespace 播放器
         {
             _menuSync = new ToolStripMenuItem("音画同步");
 
-            AddMenuItem(_menuSync, "音频延迟 −50 ms", "G", () => StepDelay(audio: true, direction: -1));
-            AddMenuItem(_menuSync, "音频延迟 +50 ms", "H", () => StepDelay(audio: true, direction: 1));
+            AddCommandMenuItem(_menuSync, "音频延迟 −50 ms", PlayerCommandId.AudioDelayDown);
+            AddCommandMenuItem(_menuSync, "音频延迟 +50 ms", PlayerCommandId.AudioDelayUp);
             _menuSync.DropDownItems.Add(new ToolStripSeparator());
-            AddMenuItem(_menuSync, "字幕延迟 −250 ms", "J", () => StepDelay(audio: false, direction: -1));
-            AddMenuItem(_menuSync, "字幕延迟 +250 ms", "K", () => StepDelay(audio: false, direction: 1));
+            AddCommandMenuItem(_menuSync, "字幕延迟 −250 ms", PlayerCommandId.SubtitleDelayDown);
+            AddCommandMenuItem(_menuSync, "字幕延迟 +250 ms", PlayerCommandId.SubtitleDelayUp);
             _menuSync.DropDownItems.Add(new ToolStripSeparator());
             AddMenuItem(_menuSync, "延迟归零", string.Empty, ResetDelays);
 
@@ -198,12 +198,27 @@ namespace 播放器
         {
             _menuFrameStep = new ToolStripMenuItem("逐帧");
 
-            AddMenuItem(_menuFrameStep, "下一帧", "E", () => StepFrame(true));
-            AddMenuItem(_menuFrameStep, "上一帧", "Shift+E", () => StepFrame(false));
+            AddCommandMenuItem(_menuFrameStep, "下一帧", PlayerCommandId.FrameStepForward);
+            AddCommandMenuItem(_menuFrameStep, "上一帧", PlayerCommandId.FrameStepBackward);
             _menuFrameStep.DropDownItems.Add(new ToolStripSeparator());
             AddMenuItem(_menuFrameStep, "跳转到时间码…", string.Empty, JumpToTimeCode);
 
             menuPlayback.DropDownItems.Add(_menuFrameStep);
+        }
+
+        /// <summary>
+        /// 菜单项绑到命令目录（1.30.0）：键串、点击、改键后的刷新都走同一条路。
+        /// 菜单文字保持不变——测试与用户都按文字找项。
+        /// </summary>
+        private ToolStripMenuItem AddCommandMenuItem(
+            ToolStripMenuItem parent, string text, PlayerCommandId id)
+        {
+            var item = new ToolStripMenuItem(text);
+
+            parent.DropDownItems.Add(item);
+            BindCommand(item, id);
+
+            return item;
         }
 
         /// <summary>

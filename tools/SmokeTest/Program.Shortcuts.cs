@@ -56,7 +56,9 @@ namespace SmokeTest
                 (Keys.Control | Keys.Alt | Keys.M, "Ctrl+Alt+M"),
                 (Keys.M, "M"),
                 (Keys.D5, "5"),
-                (Keys.Control | Keys.OemCloseBrackets, "Ctrl+]")
+                (Keys.Control | Keys.OemCloseBrackets, "Ctrl+]"),
+                (Keys.Control | Keys.Shift | Keys.OemCloseBrackets, "Ctrl+Shift+]"),
+                (Keys.Shift | Keys.E, "Shift+E")
             };
 
             foreach (var (key, text) in cases)
@@ -179,6 +181,53 @@ namespace SmokeTest
                 return false;
             }
 
+            // 1.30.0：逐帧 / 延迟 / 歌词偏移不再是"保留键"。
+            foreach (var key in new[]
+                     {
+                         Keys.E, Keys.Shift | Keys.E, Keys.G, Keys.H, Keys.J, Keys.K,
+                         Keys.Control | Keys.OemCloseBrackets, Keys.Control | Keys.OemOpenBrackets
+                     })
+            {
+                if (ShortcutBinding.Reserved.Any(item => item.Key == key))
+                {
+                    Log(36, $"快捷键校验：{ShortcutKeyText.Format(key)} 还在保留键表里");
+                    return false;
+                }
+
+                if (!PlayerCommandCatalog.TryMap(key, out _))
+                {
+                    Log(36, $"快捷键校验：默认键 {ShortcutKeyText.Format(key)} 没有映射到任何命令");
+                    return false;
+                }
+            }
+
+            if (!PlayerCommandCatalog.TryMap(Keys.E, out var frameCommand)
+                || frameCommand != PlayerCommandId.FrameStepForward)
+            {
+                Log(36, "快捷键校验：E 没有映射到「下一帧」");
+                return false;
+            }
+
+            if (!PlayerCommandCatalog.TryMap(Keys.Control | Keys.OemCloseBrackets, out var earlierCommand)
+                || earlierCommand != PlayerCommandId.LyricsOffsetEarlier)
+            {
+                Log(36, "快捷键校验：Ctrl+] 没有映射到「歌词提前」");
+                return false;
+            }
+
+            // 把逐帧挪走之后，E 应该可以被别的命令使用（不再被保留表挡住）。
+            var freed = new Dictionary<PlayerCommandId, Keys[]>
+            {
+                [PlayerCommandId.FrameStepForward] = new[] { Keys.Control | Keys.Shift | Keys.E },
+                [PlayerCommandId.Stop] = new[] { Keys.E }
+            };
+
+            if (ShortcutBinding.Validate(freed).Count != 0)
+            {
+                Log(36, "快捷键校验：逐帧挪走之后 E 仍不给别的命令用（保留表没清干净）");
+                return false;
+            }
+
             // 目录覆盖层：Configure / TryMap / MenuDisplay / Reset
             if (PlayerCommandCatalog.HasOverrides)
             {
@@ -269,7 +318,10 @@ namespace SmokeTest
                 setup.ShortcutOverrides = new List<string>
                 {
                     "PlayPause=Ctrl+Shift+Space",
-                    "Stop=Ctrl+Shift+S"
+                    "Stop=Ctrl+Shift+S",
+                    "AudioDelayUp=Ctrl+Shift+H",
+                    "FrameStepForward=Ctrl+Shift+E",
+                    "LyricsOffsetEarlier=Ctrl+Shift+]"
                 };
                 setup.Save();
 
@@ -310,6 +362,83 @@ namespace SmokeTest
                 if (!text.Contains("Ctrl+Shift+Space", StringComparison.Ordinal))
                 {
                     Log(36, "快捷键窗体：F1 说明里没有新的 Ctrl+Shift+Space");
+                    return false;
+                }
+
+                var syncItem = form.CommandBindings
+                    .FirstOrDefault(item => item.Id == PlayerCommandId.AudioDelayUp)?.Item as ToolStripMenuItem;
+
+                if (syncItem == null || syncItem.ShortcutKeyDisplayString != "Ctrl+Shift+H")
+                {
+                    Log(36, "快捷键窗体：「音频延迟 +50 ms」菜单键串没有跟着改（现在是「"
+                            + (syncItem?.ShortcutKeyDisplayString ?? "（没有绑定）") + "」）");
+                    return false;
+                }
+
+                var frameItem = form.CommandBindings
+                    .FirstOrDefault(item => item.Id == PlayerCommandId.FrameStepForward)?.Item as ToolStripMenuItem;
+
+                if (frameItem == null || frameItem.ShortcutKeyDisplayString != "Ctrl+Shift+E")
+                {
+                    Log(36, "快捷键窗体：「下一帧」菜单键串没有跟着改（现在是「"
+                            + (frameItem?.ShortcutKeyDisplayString ?? "（没有绑定）") + "」）");
+                    return false;
+                }
+
+                form.RefreshLyricsOffsetMenu();
+
+                var lyricsMenu = FindViewMenuItem(form, "歌词偏移");
+                var earlierItem = lyricsMenu == null
+                    ? null
+                    : FindMenuItem(lyricsMenu.DropDownItems, "歌词提前 0.5 秒");
+
+                if (earlierItem == null || earlierItem.ShortcutKeyDisplayString != "Ctrl+Shift+]")
+                {
+                    Log(36, "快捷键窗体：「歌词提前 0.5 秒」的键串没有跟着改（现在是「"
+                            + (earlierItem?.ShortcutKeyDisplayString ?? "（没有找到）") + "」）");
+                    return false;
+                }
+
+                if (!text.Contains("Ctrl+Shift+H", StringComparison.Ordinal)
+                    || !text.Contains("下一帧", StringComparison.Ordinal))
+                {
+                    Log(36, "快捷键窗体：F1 说明里没有新的逐帧 / 延迟命令");
+                    return false;
+                }
+
+                if (text.Contains("歌词与视频（高级）", StringComparison.Ordinal)
+                    || text.Contains("逐帧前进 / 后退", StringComparison.Ordinal))
+                {
+                    Log(36, "快捷键窗体：F1 说明里还留着「这些键是固定的」旧段落");
+                    return false;
+                }
+
+                if (!form.ProcessShortcut(Keys.Control | Keys.Shift | Keys.H)
+                    || form.LastCommand != PlayerCommandId.AudioDelayUp)
+                {
+                    Log(36, "快捷键窗体：按新键 Ctrl+Shift+H 没有执行「音频延迟 +50 ms」（"
+                            + (form.LastCommand?.ToString() ?? "没有命令") + "）");
+                    return false;
+                }
+
+                var afterDelay = form.LastCommand;
+                form.ProcessShortcut(Keys.H);
+
+                if (form.LastCommand != afterDelay)
+                {
+                    Log(36, "快捷键窗体：旧键 H 还在执行「音频延迟 +50 ms」");
+                    return false;
+                }
+
+                // 用"焦点在文件列表里"的入口按旧 E：空 Message 走 FocusedControl 时可能还停在
+                // 搜索框上，会被当成打字而测不到 switch 里那条旧路径。
+                var statusBeforeOldE = form.StatusText;
+                form.ProcessFileBrowserShortcutForTest(Keys.E);
+
+                if (form.StatusText != statusBeforeOldE)
+                {
+                    Log(36, "快捷键窗体：逐帧改到 Ctrl+Shift+E 之后，旧键 E 还在走逐帧（状态「"
+                            + form.StatusText + "」）");
                     return false;
                 }
 

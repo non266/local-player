@@ -82,34 +82,6 @@ namespace 播放器
                         return true;
                     }
                     break;
-
-                // ---- 视频：逐帧与音画同步（与 VLC 的按键习惯保持一致）----
-                case Keys.E:
-                    StepFrame(true);
-                    return true;
-                case Keys.Shift | Keys.E:
-                    StepFrame(false);
-                    return true;
-                case Keys.G:
-                    StepDelay(audio: true, direction: -1);
-                    return true;
-                case Keys.H:
-                    StepDelay(audio: true, direction: 1);
-                    return true;
-                case Keys.J:
-                    StepDelay(audio: false, direction: -1);
-                    return true;
-                case Keys.K:
-                    StepDelay(audio: false, direction: 1);
-                    return true;
-
-                // ---- 歌词偏移：Ctrl+] 提前、Ctrl+[ 延后（正负号与 LRC 的 [offset:] 一致）----
-                case Keys.Control | Keys.OemCloseBrackets:
-                    AdjustLyricsOffset(1);
-                    return true;
-                case Keys.Control | Keys.OemOpenBrackets:
-                    AdjustLyricsOffset(-1);
-                    return true;
             }
 
             return base.ProcessCmdKey(ref msg, keyData);

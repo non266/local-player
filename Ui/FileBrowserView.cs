@@ -257,6 +257,11 @@ namespace 播放器.Ui
 
             // 滚轮向上（delta > 0）滚回前面，向下滚后面；LVM_SCROLL 的 dy 正数向下。
             SendMessage(_list.Handle, LvmScroll, IntPtr.Zero, (IntPtr)(delta > 0 ? -pixels : pixels));
+
+            // 1.30.0：滚动之后按新的视口补缩略图；视频帧先取消，等停稳再排。
+            _lastScrollTicks = Environment.TickCount64;
+            CancelFrameRequests();
+            RequestVisibleThumbnails();
         }
 
         /// <summary>测试用：当前第一项可见项的下标（详情用 TopItem；平铺按 Bounds 扫）。</summary>
@@ -655,7 +660,22 @@ namespace 播放器.Ui
         {
             base.OnVisibleChanged(e);
 
-            if (Visible && IsHandleCreated) EnsureLoaded();
+            if (Visible)
+            {
+                if (WantsThumbnails)
+                {
+                    EnsureThumbnailTimer();
+                    if (ThumbnailsActive) _thumbnailTimer!.Start();
+                    RequestVisibleThumbnails();
+                }
+
+                if (IsHandleCreated) EnsureLoaded();
+            }
+            else
+            {
+                // 切到歌词 / 封面页或收起侧栏：别在看不见的时候继续读盘 / 截帧。
+                CancelThumbnails();
+            }
         }
 
         protected override void Dispose(bool disposing)

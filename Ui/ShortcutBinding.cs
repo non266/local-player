@@ -34,8 +34,9 @@ namespace 播放器.Ui
         }
 
         /// <summary>
-        /// 保留键表：这些键由别处处理（文件页、视频逐帧、音画延迟、歌词偏移、对话框、系统热键），
+        /// 保留键表：这些键由别处处理（文件页、对话框、系统热键），
         /// 绑到命令上会被那一处先吃掉，所以一律挡在保存之前。
+        /// 1.30.0 起逐帧 / 音画字幕延迟 / 歌词偏移已经进命令目录，不再列在这里。
         /// </summary>
         public static IReadOnlyList<ReservedShortcut> Reserved { get; } = new[]
         {
@@ -49,14 +50,6 @@ namespace 播放器.Ui
             new ReservedShortcut(Keys.Control | Keys.F, "文件页搜索"),
             new ReservedShortcut(Keys.Alt | Keys.Left, "文件页后退"),
             new ReservedShortcut(Keys.Alt | Keys.Right, "文件页前进"),
-            new ReservedShortcut(Keys.E, "视频逐帧前进"),
-            new ReservedShortcut(Keys.Shift | Keys.E, "视频逐帧后退"),
-            new ReservedShortcut(Keys.G, "音画延迟 −50 ms"),
-            new ReservedShortcut(Keys.H, "音画延迟 +50 ms"),
-            new ReservedShortcut(Keys.J, "字幕延迟 −50 ms"),
-            new ReservedShortcut(Keys.K, "字幕延迟 +50 ms"),
-            new ReservedShortcut(Keys.Control | Keys.OemCloseBrackets, "歌词提前 0.5 秒"),
-            new ReservedShortcut(Keys.Control | Keys.OemOpenBrackets, "歌词延后 0.5 秒"),
             new ReservedShortcut(Keys.Control | Keys.Alt | Keys.D, "桌面歌词全局锁定（系统级热键）")
         };
 

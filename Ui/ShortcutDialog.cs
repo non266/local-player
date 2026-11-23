@@ -14,9 +14,9 @@ namespace 播放器.Ui
     /// （<see cref="ShortcutBinding"/>），这个对话框就是那层覆盖的编辑界面。
     /// </para>
     /// <para>
-    /// 边界（界面上也会写一句）：只覆盖命令目录里的 24 条；<c>F1</c> / <c>Delete</c> / <c>Esc</c> /
-    /// <c>Enter</c> / 视频逐帧 / 音画延迟 / 歌词偏移 / 文件页与 DVD 菜单的键仍是固定的，
-    /// 绑上去会被那一处先吃掉，所以直接挡住（见 <see cref="ShortcutBinding.Reserved"/>）。
+    /// 边界：只覆盖命令目录里的条目；<c>F1</c> / <c>Delete</c> / <c>Esc</c> /
+    /// <c>Enter</c> / 文件页与 DVD 菜单那些固定键不能改（见 <see cref="ShortcutBinding.Reserved"/>）。
+    /// 逐帧 / 音画字幕延迟 / 歌词偏移从 1.30.0 起已进命令目录。
     /// </para>
     /// </summary>
     internal sealed class ShortcutDialog : Form
@@ -401,8 +401,8 @@ namespace 播放器.Ui
                 ? $"「{definition.HelpText}」现在没有键。"
                 : $"「{definition.HelpText}」= {string.Join(" / ", keys.Select(ShortcutKeyText.Format))}。";
 
-            hint += "固定键不能改：F1 / Delete / Esc / Enter / 逐帧 E / 延迟 G·H·J·K / "
-                    + "歌词偏移 Ctrl+[ · Ctrl+] / 文件页与光盘菜单那些键。";
+            hint += "固定键不能改：F1 / Delete / Esc / Enter / Tab / 文件页与光盘菜单那些键；"
+                    + "逐帧 / 延迟 / 歌词偏移已经可以改。";
 
             _hint.Text = hint;
         }

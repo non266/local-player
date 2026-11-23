@@ -58,7 +58,17 @@ namespace 播放器.Ui
         OpenUrl,
         LoadPlaylistFile,
         SaveAsPlaylist,
-        ExportPlaylist
+        ExportPlaylist,
+
+        // 1.30.0：原来写死在 MainForm.Shortcuts 的 switch 里，现在进目录、可以改键。
+        FrameStepForward,
+        FrameStepBackward,
+        AudioDelayDown,
+        AudioDelayUp,
+        SubtitleDelayDown,
+        SubtitleDelayUp,
+        LyricsOffsetEarlier,
+        LyricsOffsetLater
     }
 
     /// <summary>一条命令的说明：帮助里那句话、归哪一组、有没有勾选态、默认快捷键。</summary>
@@ -150,7 +160,7 @@ namespace 播放器.Ui
         /// <summary>帮助里分组的顺序（按用户找东西的顺序排，不按内部枚举）。</summary>
         private static readonly string[] CategoryOrder =
         {
-            "播放控制", "声音", "文件与字幕", "界面"
+            "播放控制", "声音", "文件与字幕", "画面与同步", "界面"
         };
 
         /// <summary>出厂命令表（顺序即帮助里的顺序；没有快捷键的条目不会出现在帮助里）。</summary>
@@ -196,6 +206,26 @@ namespace 播放器.Ui
             new PlayerCommandDefinition(
                 PlayerCommandId.ToggleSubtitles, "关闭 / 打开字幕", "文件与字幕", false, Keys.V),
             new PlayerCommandDefinition(PlayerCommandId.Snapshot, "截取当前画面", "文件与字幕", false, Keys.Control | Keys.P),
+
+            // ---- 画面与同步（1.30.0：这些键以前写死在 ProcessCmdKey 的 switch 里）----
+            new PlayerCommandDefinition(
+                PlayerCommandId.FrameStepForward, "下一帧", "画面与同步", false, Keys.E),
+            new PlayerCommandDefinition(
+                PlayerCommandId.FrameStepBackward, "上一帧", "画面与同步", false, Keys.Shift | Keys.E),
+            new PlayerCommandDefinition(
+                PlayerCommandId.AudioDelayDown, "音频延迟 −50 ms", "画面与同步", false, Keys.G),
+            new PlayerCommandDefinition(
+                PlayerCommandId.AudioDelayUp, "音频延迟 +50 ms", "画面与同步", false, Keys.H),
+            new PlayerCommandDefinition(
+                PlayerCommandId.SubtitleDelayDown, "字幕延迟 −250 ms", "画面与同步", false, Keys.J),
+            new PlayerCommandDefinition(
+                PlayerCommandId.SubtitleDelayUp, "字幕延迟 +250 ms", "画面与同步", false, Keys.K),
+            new PlayerCommandDefinition(
+                PlayerCommandId.LyricsOffsetEarlier, "歌词提前 0.5 秒", "画面与同步", false,
+                Keys.Control | Keys.OemCloseBrackets),
+            new PlayerCommandDefinition(
+                PlayerCommandId.LyricsOffsetLater, "歌词延后 0.5 秒", "画面与同步", false,
+                Keys.Control | Keys.OemOpenBrackets),
 
             // ---- 界面 ----
             new PlayerCommandDefinition(PlayerCommandId.TogglePlaylist, "显示 / 隐藏播放列表", "界面", true, Keys.F9),
@@ -318,6 +348,14 @@ namespace 播放器.Ui
             PlayerCommandId.LoadPlaylistFile => true,
             PlayerCommandId.SaveAsPlaylist => availability.HasPlaylistItems,
             PlayerCommandId.ExportPlaylist => availability.HasPlaylistItems,
+            PlayerCommandId.FrameStepForward => true,
+            PlayerCommandId.FrameStepBackward => true,
+            PlayerCommandId.AudioDelayDown => true,
+            PlayerCommandId.AudioDelayUp => true,
+            PlayerCommandId.SubtitleDelayDown => true,
+            PlayerCommandId.SubtitleDelayUp => true,
+            PlayerCommandId.LyricsOffsetEarlier => true,
+            PlayerCommandId.LyricsOffsetLater => true,
             _ => false
         };
 

@@ -208,6 +208,7 @@ namespace 播放器
 
             ApplyShortcutOverrides();
             RefreshCommandShortcutDisplays();
+            RefreshLyricsOffsetMenu();
 
             SetStatus(entries.Count == 0
                 ? "快捷键已全部恢复默认"
@@ -284,6 +285,30 @@ namespace 播放器
                     break;
                 case PlayerCommandId.Snapshot:
                     TakeSnapshot();
+                    break;
+                case PlayerCommandId.FrameStepForward:
+                    StepFrame(true);
+                    break;
+                case PlayerCommandId.FrameStepBackward:
+                    StepFrame(false);
+                    break;
+                case PlayerCommandId.AudioDelayDown:
+                    StepDelay(audio: true, direction: -1);
+                    break;
+                case PlayerCommandId.AudioDelayUp:
+                    StepDelay(audio: true, direction: 1);
+                    break;
+                case PlayerCommandId.SubtitleDelayDown:
+                    StepDelay(audio: false, direction: -1);
+                    break;
+                case PlayerCommandId.SubtitleDelayUp:
+                    StepDelay(audio: false, direction: 1);
+                    break;
+                case PlayerCommandId.LyricsOffsetEarlier:
+                    AdjustLyricsOffset(1);
+                    break;
+                case PlayerCommandId.LyricsOffsetLater:
+                    AdjustLyricsOffset(-1);
                     break;
                 case PlayerCommandId.ToggleSubtitles:
                     ToggleSubtitles();

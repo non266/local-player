@@ -45,6 +45,9 @@ namespace 播放器
             // 快捷键映射都从目录现取，晚了就会先按默认键显示一遍（改过的键看起来没生效）。
             ApplyShortcutOverrides();
 
+            // 歌词偏移那几份菜单的键串也来自目录；它们没走 CommandBinding（置灰规则不同）。
+            RefreshLyricsOffsetMenu();
+
             // 菜单 / 工具栏里"命令"那一类先统一接到命令层（文件、播放、字幕、视图、工具栏）。
             // 主题 / 倍速 / 画面比例 / 循环模式这些单选设置仍由下面各自的处理器管。
             ConfigureCommandBindings();

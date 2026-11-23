@@ -309,6 +309,11 @@ namespace 播放器.Ui
 
             ApplyThumbnailMode();
 
+            _itemsByPath.Clear();
+
+            var thumbnails = _thumbnailIndices;
+            var rows = new List<ListViewItem>(_visibleEntries.Count);
+
             _list.BeginUpdate();
 
             try
@@ -324,10 +329,21 @@ namespace 播放器.Ui
                         ToolTipText = entry.ToolTip
                     };
 
+                    // 已缓存的缩略图直接贴上：别等到滚动轮询再来一次。
+                    if (thumbnails.Count > 0 && !entry.IsDirectory
+                        && thumbnails.TryGetValue(ThumbnailKey(entry), out var thumbIndex))
+                    {
+                        item.ImageIndex = thumbIndex;
+                    }
+
                     item.SubItems.Add(entry.SizeText);
                     item.SubItems.Add(FileBrowserPaths.RelativeFolder(_state.CurrentPath, entry.FullPath));
-                    _list.Items.Add(item);
+
+                    _itemsByPath[entry.FullPath] = item;
+                    rows.Add(item);
                 }
+
+                _list.Items.AddRange(rows.ToArray());
             }
             finally
             {
@@ -373,7 +389,7 @@ namespace 播放器.Ui
 
             // 缩略图是按每目录预算做的；少做了要在状态行说，不能看起来像"全都做了"。
             if (_thumbnailSkipped > 0)
-                text += $" · 缩略图只做了前 {MaxThumbnails} 个文件";
+                text += $" · 缩略图只做了前 {MaxThumbnails} 个文件（看得到的才做）";
 
             if (_thumbnailFramesSkipped > 0)
                 text += $" · 视频画面只做了前 {FrameBudget} 个";

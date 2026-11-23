@@ -98,7 +98,9 @@ namespace SmokeTest
             view.SetThumbnailsForTest(true);
 
             if (!PumpUntil(
-                    () => view.ThumbnailCountForTest >= 2 && view.PendingThumbnailCountForTest == 0, 8000))
+                    () => view.ThumbnailCountForTest >= 2
+                          && view.ImageIndexForTest("clip.mp4") >= view.TypeIconCountForTest
+                          && view.PendingThumbnailCountForTest == 0, 8000))
             {
                 Log(33, $"文件页检查：帧缩略图没有做出来（{view.ThumbnailCountForTest} 张、"
                         + $"排队 {view.PendingThumbnailCountForTest}、帧调用 {fake.Calls}）");
@@ -271,7 +273,10 @@ namespace SmokeTest
 
             if (view.ThumbnailsSkippedForTest != 1)
             {
-                Log(33, $"文件页检查：预算 2 却没有截掉多余的（跳过 {view.ThumbnailsSkippedForTest} 个）");
+                Log(33, $"文件页检查：预算 2 却没有截掉多余的（跳过 {view.ThumbnailsSkippedForTest} 个；"
+                        + $"最大预算 {view.MaxThumbnailsForTest}、已选 {view.ThumbnailChosenCountForTest}、"
+                        + $"可见 {view.List.Items.Count}、缩略图 {view.ThumbnailCountForTest}、"
+                        + $"状态「{view.StatusText}」）");
                 return false;
             }
 
@@ -303,12 +308,47 @@ namespace SmokeTest
             // ---- 每目录 60 帧的上限 ---------------------------------------------
             view.NavigateForTest(many);
 
+            if (!PumpUntil(() => !view.IsLoading && view.List.Items.Count == 61, 8000))
+            {
+                Log(33, "文件页检查：61 个视频的目录没有读出来");
+                return false;
+            }
+
+            // 1.30.0 起只做可见范围的帧：滚过整张表，让每个范围都有机会排到 60 帧上限。
+            for (var index = 0; index < 61; index += 5)
+            {
+                view.List.Items[index].EnsureVisible();
+                PumpMessages(800);
+                PumpUntil(
+                    () => view.PendingThumbnailCountForTest == 0 && !view.IsThumbnailBusyForTest,
+                    8000);
+            }
+
+            view.List.Items[60].EnsureVisible();
+            PumpMessages(450);
+
             if (!PumpUntil(
-                    () => !view.IsLoading && view.ThumbnailCountForTest >= 60 && view.PendingThumbnailCountForTest == 0,
+                    () => view.PendingThumbnailCountForTest == 0 && !view.IsThumbnailBusyForTest,
                     20000))
             {
-                Log(33, $"文件页检查：61 个视频的缩略图没有做完（{view.ThumbnailCountForTest} 张、"
+                Log(33, $"文件页检查：61 个视频的缩略图没有停稳（{view.ThumbnailCountForTest} 张、"
                         + $"排队 {view.PendingThumbnailCountForTest}）");
+                return false;
+            }
+
+            var manyThumbs = view.List.Items
+                .Cast<ListViewItem>()
+                .Count(item => item.ImageIndex >= view.TypeIconCountForTest);
+
+            if (manyThumbs > 60)
+            {
+                Log(33, $"文件页检查：61 个视频做出了 {manyThumbs} 张缩略图（上限 60）");
+                return false;
+            }
+
+            if (view.FrameChosenCountForTest != 60)
+            {
+                Log(33, $"文件页检查：截帧预算没有用满（已选 {view.FrameChosenCountForTest} 个，期望 60）");
                 return false;
             }
 
@@ -356,7 +396,7 @@ namespace SmokeTest
         /// <summary>假帧来源：永远返回 null（1.27 那一段只验封面，别去碰 libvlc）。</summary>
         private sealed class NullFrameSource : IVideoFrameSource
         {
-            public Bitmap? Grab(string path, int edge) => null;
+            public Bitmap? Grab(string path, int edge, Func<bool>? isCancelled = null) => null;
         }
 
         /// <summary>假帧来源：给一张纯色图，顺便数调用次数（不碰 libvlc，测试才确定）。</summary>
@@ -376,7 +416,7 @@ namespace SmokeTest
                     return _callsByFile.TryGetValue(fileName, out var count) ? count : 0;
             }
 
-            public Bitmap? Grab(string path, int edge)
+            public Bitmap? Grab(string path, int edge, Func<bool>? isCancelled = null)
             {
                 Calls++;
 

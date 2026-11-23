@@ -94,7 +94,7 @@ namespace 播放器
             var advance = new ToolStripMenuItem("歌词提前 0.5 秒")
             {
                 Tag = LyricsOffsetAdvanceTag,
-                ShortcutKeyDisplayString = "Ctrl+]",
+                ShortcutKeyDisplayString = PlayerCommandCatalog.Get(PlayerCommandId.LyricsOffsetEarlier).MenuDisplay,
                 ToolTipText = "歌词比声音慢（总是慢半拍才出来）时点这个"
             };
             advance.Click += (s, e) => AdjustLyricsOffset(+1);
@@ -102,7 +102,7 @@ namespace 播放器
             var delay = new ToolStripMenuItem("歌词延后 0.5 秒")
             {
                 Tag = LyricsOffsetDelayTag,
-                ShortcutKeyDisplayString = "Ctrl+[",
+                ShortcutKeyDisplayString = PlayerCommandCatalog.Get(PlayerCommandId.LyricsOffsetLater).MenuDisplay,
                 ToolTipText = "歌词比声音快（还没唱到就先出来了）时点这个"
             };
             delay.Click += (s, e) => AdjustLyricsOffset(-1);
@@ -138,7 +138,17 @@ namespace 播放器
                     break;
 
                 case LyricsOffsetAdvanceTag:
+                    menuItem.ShortcutKeyDisplayString =
+                        PlayerCommandCatalog.Get(PlayerCommandId.LyricsOffsetEarlier).MenuDisplay;
+                    menuItem.Enabled = HasSynchronizedLyrics();
+                    break;
+
                 case LyricsOffsetDelayTag:
+                    menuItem.ShortcutKeyDisplayString =
+                        PlayerCommandCatalog.Get(PlayerCommandId.LyricsOffsetLater).MenuDisplay;
+                    menuItem.Enabled = HasSynchronizedLyrics();
+                    break;
+
                 case LyricsOffsetResetTag:
                 case LyricsOffsetEditTag:
                     // 没有时间轴（纯文本歌词、或者干脆没在放歌）时偏移没有意义，如实禁用

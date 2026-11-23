@@ -17,8 +17,11 @@ namespace 播放器.Ui
     /// </summary>
     internal interface IVideoFrameSource
     {
-        /// <summary>取一帧画面；取不到返回 <c>null</c>（调用方按"没有缩略图"处理）。</summary>
-        Bitmap? Grab(string path, int edge);
+        /// <summary>
+        /// 取一帧画面；取不到返回 <c>null</c>（调用方按"没有缩略图"处理）。
+        /// <paramref name="isCancelled"/> 为真时尽快放弃（视口变了 / 换了目录）。
+        /// </summary>
+        Bitmap? Grab(string path, int edge, Func<bool>? isCancelled = null);
     }
 
     /// <summary>
@@ -162,16 +165,20 @@ namespace 播放器.Ui
             }
         }
 
-        public Bitmap? Grab(string path, int edge)
+        public Bitmap? Grab(string path, int edge, Func<bool>? isCancelled = null)
         {
             if (_disposed || _disabled || string.IsNullOrWhiteSpace(path)) return null;
 
             if (!EnsurePlayer()) return null;
 
-            var bitmap = TryGrab(path, FirstTryStartSeconds, FirstTryTimeoutMs, edge);
+            var bitmap = TryGrab(path, FirstTryStartSeconds, FirstTryTimeoutMs, edge, isCancelled, out var cancelled);
 
             // 2 秒处取不到（短片 / 起播失败 / 片头就结束）：退回第 0 帧再来一次。
-            bitmap ??= TryGrab(path, 0, TimeoutMs - FirstTryTimeoutMs, edge);
+            // 被取消就不要再试第二次：调用方已经不要这一张了。
+            if (bitmap == null && !cancelled)
+                bitmap = TryGrab(path, 0, TimeoutMs - FirstTryTimeoutMs, edge, isCancelled, out cancelled);
+
+            if (cancelled) return null;
 
             lock (_frameGate)
             {
@@ -194,12 +201,22 @@ namespace 播放器.Ui
             return bitmap;
         }
 
-        private Bitmap? TryGrab(string path, int startSeconds, int timeoutMs, int edge)
+        private Bitmap? TryGrab(
+            string path, int startSeconds, int timeoutMs, int edge,
+            Func<bool>? isCancelled, out bool cancelled)
         {
+            cancelled = false;
+
             lock (_frameGate)
             {
                 _captured = false;
                 _frameReady.Reset();
+            }
+
+            if (isCancelled?.Invoke() == true)
+            {
+                cancelled = true;
+                return null;
             }
 
             if (!SetMedia(path, startSeconds)) return null;
@@ -229,10 +246,24 @@ namespace 播放器.Ui
             }
 
             var wait = Math.Min(timeoutMs, GoodFrameWaitMs);
+            var deadline = Environment.TickCount64 + wait;
 
             try
             {
-                _frameReady.Wait(wait);
+                // 切成 100 ms 一片：视口一变/换目录时不用等满 2.5 秒才让出队列。
+                while (!_frameReady.IsSet)
+                {
+                    if (isCancelled?.Invoke() == true)
+                    {
+                        cancelled = true;
+                        break;
+                    }
+
+                    var remaining = deadline - Environment.TickCount64;
+                    if (remaining <= 0) break;
+
+                    _frameReady.Wait((int)Math.Min(100, remaining));
+                }
             }
             catch (ObjectDisposedException)
             {
@@ -240,6 +271,8 @@ namespace 播放器.Ui
             }
 
             Pause();
+
+            if (cancelled) return null;
 
             byte[] frame;
             int width, height, pitch;

@@ -9,12 +9,13 @@ namespace 播放器.Ui
     /// <summary>后台队列交回来的一张缩略图；<see cref="Bitmap"/> 为 <c>null</c> 表示"这个文件没有可用的封面"。</summary>
     internal readonly struct ThumbnailResult
     {
-        internal ThumbnailResult(string key, string path, int version, Bitmap? bitmap)
+        internal ThumbnailResult(string key, string path, int version, Bitmap? bitmap, bool aborted = false)
         {
             Key = key;
             Path = path;
             Version = version;
             Bitmap = bitmap;
+            Aborted = aborted;
         }
 
         /// <summary>缓存键（路径 + 大小 + 修改时间）；失败结果也用同一个键记负缓存。</summary>
@@ -26,6 +27,12 @@ namespace 播放器.Ui
         internal int Version { get; }
 
         internal Bitmap? Bitmap { get; }
+
+        /// <summary>
+        /// 这一次是"被取消"而不是"没有封面"：视图要移除排队标记、保留预算，
+        /// <b>不能</b>把它记进负缓存（否则滚回来也不会重试）。
+        /// </summary>
+        internal bool Aborted { get; }
     }
 
     /// <summary>
@@ -92,6 +99,12 @@ namespace 播放器.Ui
         private bool _disposed;
         private bool _busy;
 
+        /// <summary>
+        /// 帧代际：每次取消 / 整批取消都 +1。正在跑的截帧按这个判断"还要不要"，
+        /// 免得一次 2.5 秒的等待把后面新目录的封面全堵住。
+        /// </summary>
+        private int _frameEpoch;
+
         internal ThumbnailQueue(CoverArtLoader loader, ThumbnailCache? cache = null, IVideoFrameSource? frames = null)
         {
             _loader = loader ?? throw new ArgumentNullException(nameof(loader));
@@ -122,20 +135,34 @@ namespace 播放器.Ui
             get { lock (_gate) return _busy; }
         }
 
-        /// <summary>排一张缩略图；队列满了就丢掉这次请求（不抛、不阻塞）。</summary>
-        internal void Request(
+        /// <summary>排一张缩略图；队列满了就丢掉这次请求并返回 <c>false</c>（不抛、不阻塞）。</summary>
+        internal bool Request(
             string key, string path, long size, long modifiedTicks, int edge, int version, bool isVideo)
         {
             lock (_gate)
             {
-                if (_disposed) return;
-                if (_coverQueue.Count + _frameQueue.Count >= MaxPending) return;
+                if (_disposed) return false;
+                if (_coverQueue.Count + _frameQueue.Count >= MaxPending) return false;
 
                 (isVideo ? _frameQueue : _coverQueue)
                     .Enqueue(new Job(key, path, size, modifiedTicks, edge, version, isVideo));
-            }
 
-            _wake.Set();
+                _wake.Set();
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 丢掉还没开始的帧请求，并让正在跑的那一次尽快放弃。
+        /// 视口一变就调：封面优先，帧可以晚点再做。
+        /// </summary>
+        internal void CancelFrames()
+        {
+            lock (_gate)
+            {
+                _frameEpoch++;
+                _frameQueue.Clear();
+            }
         }
 
         /// <summary>丢掉还没开始的请求；正在做的那一张会照常交回来（取件方按代际号丢弃）。</summary>
@@ -143,6 +170,7 @@ namespace 播放器.Ui
         {
             lock (_gate)
             {
+                _frameEpoch++;
                 _coverQueue.Clear();
                 _frameQueue.Clear();
             }
@@ -155,6 +183,7 @@ namespace 播放器.Ui
                 if (_disposed) return;
 
                 _disposed = true;
+                _frameEpoch++;
                 _coverQueue.Clear();
                 _frameQueue.Clear();
             }
@@ -171,13 +200,21 @@ namespace 播放器.Ui
             while (true)
             {
                 Job? request;
+                var frameEpoch = 0;
 
                 lock (_gate)
                 {
                     request = null;
 
-                    if (_coverQueue.Count > 0) request = _coverQueue.Dequeue();
-                    else if (_frameQueue.Count > 0) request = _frameQueue.Dequeue();
+                    if (_coverQueue.Count > 0)
+                    {
+                        request = _coverQueue.Dequeue();
+                    }
+                    else if (_frameQueue.Count > 0)
+                    {
+                        request = _frameQueue.Dequeue();
+                        frameEpoch = _frameEpoch;
+                    }
 
                     _busy = request != null;
                 }
@@ -195,6 +232,7 @@ namespace 播放器.Ui
                 }
 
                 Bitmap? bitmap = null;
+                var aborted = false;
 
                 try
                 {
@@ -208,7 +246,15 @@ namespace 播放器.Ui
                         bitmap = CoverThumbnails.Decode(art, request.Edge);
 
                         if (bitmap == null && request.IsVideo && _frameSource != null)
-                            bitmap = _frameSource.Grab(request.Path, request.Edge);
+                        {
+                            bool Cancelled()
+                            {
+                                lock (_gate) return _disposed || _frameEpoch != frameEpoch;
+                            }
+
+                            bitmap = _frameSource.Grab(request.Path, request.Edge, Cancelled);
+                            aborted = bitmap == null && Cancelled();
+                        }
 
                         if (bitmap != null) _cache?.Save(cacheKey, bitmap);
                     }
@@ -240,7 +286,7 @@ namespace 播放器.Ui
 
                 try
                 {
-                    handler(new ThumbnailResult(request.Key, request.Path, request.Version, bitmap));
+                    handler(new ThumbnailResult(request.Key, request.Path, request.Version, bitmap, aborted));
                 }
                 catch (Exception ex)
                 {

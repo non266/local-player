@@ -96,6 +96,25 @@ function Assert-Absent([string]$relative, [string[]]$lines, [string]$needle, [st
     }
 }
 
+# 两句话的先后顺序：用来挡"提示块插进表格中间"这类 Markdown 结构错误。
+# 只查首次出现的位置；顺序不成立 / 有一句找不到都算红。
+function Assert-Order([string]$relative, [string[]]$lines, [string]$firstNeedle, [string]$secondNeedle, [string]$why)
+{
+    $first = Find-Line $lines $firstNeedle
+    $second = Find-Line $lines $secondNeedle
+
+    if ($first -eq 0 -or $second -eq 0 -or $first -ge $second)
+    {
+        $message = $relative + " 里「" + $firstNeedle + "」（第 " + $first + " 行）应该排在「" + $secondNeedle + "」（第 " + $second + " 行）之前：" + $why
+        $failures.Add($message)
+        Write-Host ("  ✗ " + $message) -ForegroundColor Red
+    }
+    else
+    {
+        Write-Host ("  ✓ " + $relative + ":" + $first + "「" + $firstNeedle + "」在「" + $secondNeedle + "」之前") -ForegroundColor Green
+    }
+}
+
 # ---------------------------------------------------------------- 事实
 
 Write-Host ""
@@ -194,6 +213,7 @@ Write-Host "=== 检查「当前状态」文档（README.md / docs/介绍.md / do
 $readme = Read-Lines "README.md"
 $intro = Read-Lines "docs\介绍.md"
 $architecture = Read-Lines "docs\ARCHITECTURE.md"
+$reference = Read-Lines "docs\参考手册.md"
 
 Assert-Contains "README.md" $readme (".NET " + $sdkMajor + " SDK") ("环境要求里的 SDK 要跟 global.json 一致（现在是 " + $sdk + "）")
 Assert-Contains "README.md" $readme $sdk "环境要求里要写出 global.json 钉住的那个版本号"
@@ -251,6 +271,15 @@ Assert-Absent "docs\介绍.md" $intro "一共 20 项检查" "1.13.0 已统一为
 Assert-Absent "README.md" $readme 'IsOpenable` 仍是同步的' "1.14.0 起网络位置不在界面线程查存在性，这句是 1.13.0 之前的旧说法"
 Assert-Absent "README.md" $readme "网络目录的拖入暂不支持" "1.14.0 已支持网络目录（判目录 / 枚举都在后台）"
 Assert-Absent "README.md" $readme "第 25 步" "筛跑示例里写的是检查编号，要写「第 25 项检查」（或「第 21 个运行步骤」）"
+
+# 1.30.0 把逐帧 / 延迟 / 歌词偏移收进命令目录之后，下面的旧说法必须消失；
+# README 的快捷键表也不能再被提示块从中间截断（否则后 4 行渲染成第二张表）。
+Assert-Absent "docs\参考手册.md" $reference '逐帧 `E` / 延迟' "1.30.0 起逐帧 / 延迟 / 歌词偏移都可以改，这句是旧口径"
+Assert-Contains "docs\参考手册.md" $reference "实测（1.30.0）装出来" "安装体积那一行要写当前版本（1.30.0 实测）"
+Assert-Absent "docs\介绍.md" $intro "按名称排序约 4 秒" "1.18.0 实测 50,000 条按名称排序是 1,566 ms，旧数字是 1.15.0 之前的"
+Assert-Contains "docs\介绍.md" $intro "按名称排序约 1.6 秒" "排序数字要跟 1.18.0 的实测一致"
+Assert-Contains "docs\介绍.md" $intro "1.30.0 实测" "程序体积那一行要写当前版本（1.30.0 实测）"
+Assert-Order "README.md" $readme '| `Ctrl+]` / `Ctrl+[` |' "> 1.30.0 起可以改" "快捷键表的所有行必须在提示块之前，否则 Markdown 会断成两张表"
 
 # ---------------------------------------------------------------- 摘要
 

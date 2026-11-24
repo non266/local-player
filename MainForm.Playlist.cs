@@ -948,6 +948,10 @@ namespace 播放器
                 UpdateWindowTitle();
             }
 
+            // 先清选中再改模型：RemoveMany 会触发整体重建，而重建会按"旧索引"还原选中项；
+            // 不清的话，删掉第 2、4 项之后会选中原本第 3、5 项——看起来像随机跳选。
+            listViewPlaylist.SelectedIndices.Clear();
+
             _playlist.RemoveMany(selected);
             SetStatus($"已从播放列表移除 {selected.Count} 项");
         }
@@ -1005,15 +1009,24 @@ namespace 播放器
 
         private void OnPlaylistDoubleClick(object? sender, EventArgs e)
         {
-            var selected = GetSelectedPlaylistIndices();
-            if (selected.Count == 0) return;
+            // 双击哪一行就播哪一行：多选时不要因为"第一项"是别的行而播错。
+            var focusedRow = listViewPlaylist.FocusedItem;
+            var focused = focusedRow == null ? -1 : GetRowPlaylistIndex(focusedRow);
+            if (focused < 0) focused = GetSelectedPlaylistIndices().FirstOrDefault(-1);
+            if (focused < 0) return;
 
-            PlayIndex(selected[0]);
+            PlayIndex(focused);
         }
 
         private void OnPlaylistKeyDown(object? sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Enter)
+            if (e.Control && e.KeyCode == Keys.A)
+            {
+                SelectAllVisiblePlaylistRows();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.KeyCode == Keys.Enter)
             {
                 PlaySelectedItem();
                 e.Handled = true;
@@ -1022,6 +1035,29 @@ namespace 播放器
             {
                 RemoveSelectedPlaylistItems();
                 e.Handled = true;
+            }
+        }
+
+        /// <summary>
+        /// 全选**当前看得见的行**（1.31.0）。筛选状态下不把被筛掉的行偷偷带进来：
+        /// 批量删除要删的永远是用户眼前这批。
+        /// </summary>
+        private void SelectAllVisiblePlaylistRows()
+        {
+            if (listViewPlaylist.Items.Count == 0) return;
+
+            listViewPlaylist.BeginUpdate();
+
+            try
+            {
+                listViewPlaylist.SelectedIndices.Clear();
+
+                foreach (ListViewItem row in listViewPlaylist.Items)
+                    row.Selected = true;
+            }
+            finally
+            {
+                listViewPlaylist.EndUpdate();
             }
         }
 
@@ -1055,6 +1091,10 @@ namespace 播放器
             try
             {
                 Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+
+                // 资源管理器一次只能选中一个；多选时不要把"只定位了第一项"藏起来。
+                if (selected.Count > 1)
+                    SetStatus($"已在资源管理器中定位第一项（共选中 {selected.Count} 项，一次只能定位一项）");
             }
             catch (Exception ex)
             {
@@ -1062,12 +1102,16 @@ namespace 播放器
             }
         }
 
+        /// <summary>把选中项的完整路径拼成多行文本（复制到剪贴板与测试共用）。</summary>
+        private string BuildSelectedPathsText(IReadOnlyList<int> selected) =>
+            string.Join(Environment.NewLine, selected.Select(i => _playlist.Items[i].FilePath));
+
         private void CopySelectedPaths()
         {
             var selected = GetSelectedPlaylistIndices();
             if (selected.Count == 0) return;
 
-            var text = string.Join(Environment.NewLine, selected.Select(i => _playlist.Items[i].FilePath));
+            var text = BuildSelectedPathsText(selected);
 
             try
             {
@@ -1084,6 +1128,41 @@ namespace 播放器
         private void OnSurfaceMouseWheel(object? sender, MouseEventArgs e)
         {
             AdjustVolume(e.Delta > 0 ? 5 : -5);
+        }
+
+        // ---- 多选（1.31.0） ----------------------------------------------------
+
+        /// <summary>
+        /// 右键菜单按当前选中项数刷新：批量动作写明数量，上移 / 下移只对一项开放。
+        /// 挂在这个菜单的 <c>Opening</c> 上，不额外维护一张"选中数"状态。
+        /// </summary>
+        private void UpdatePlaylistSelectionMenu()
+        {
+            var count = GetSelectedPlaylistIndices().Count;
+
+            cmsRemove.Text = count > 1 ? $"从列表移除 {count} 项(&R)" : "从列表移除(&R)";
+            cmsCopyPath.Text = count > 1 ? $"复制这 {count} 条的完整路径(&C)" : "复制完整路径(&C)";
+            cmsPlayNext.Text = count > 1 ? $"下一首播放（选中 {count} 项）(&Q)" : "下一首播放(&Q)";
+            cmsReveal.Text = count > 1 ? "在资源管理器中显示第一项(&S)" : "在资源管理器中显示(&S)";
+
+            // 移动的插入位置只对一项有确定含义；多选时不做"整批上移"。
+            cmsMoveUp.Enabled = count == 1;
+            cmsMoveDown.Enabled = count == 1;
+        }
+
+        internal IReadOnlyList<int> SelectedPlaylistIndicesForTest => GetSelectedPlaylistIndices();
+
+        internal string SelectedPathsTextForTest() => BuildSelectedPathsText(GetSelectedPlaylistIndices());
+
+        internal void UpdatePlaylistSelectionMenuForTest() => UpdatePlaylistSelectionMenu();
+
+        /// <summary>
+        /// 测试用：走真实键盘处理函数，验 Ctrl+A / Delete 这些分支，而不是另写一份逻辑。
+        /// </summary>
+        internal void HandlePlaylistKeyForTest(Keys keyCode, bool control)
+        {
+            var data = keyCode | (control ? Keys.Control : Keys.None);
+            OnPlaylistKeyDown(listViewPlaylist, new KeyEventArgs(data));
         }
 
         // =====================================================================

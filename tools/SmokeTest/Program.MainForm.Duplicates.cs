@@ -58,6 +58,12 @@ namespace SmokeTest
                         return false;
                     }
 
+                    if (!list.MultiSelect)
+                    {
+                        Log(6, "找出重复项：列表没开多选，程序化选中两项之后用户也看不见 / 点不动另一项");
+                        return false;
+                    }
+
                     var currentBefore = PlaylistOf(form).CurrentIndex;
 
                     item.PerformClick();
@@ -88,6 +94,37 @@ namespace SmokeTest
                     {
                         Log(6, "找出重复项：状态栏没说清找到几项（现在「" + form.StatusText + "」）");
                         return false;
+                    }
+
+                    // 多选真正可用之后，程序化选中的重复项用户也能看见 / 一起删。
+                    form.HandlePlaylistKeyForTest(Keys.Delete, control: false);
+                    PumpMessages(300);
+
+                    if (list.Items.Count != 3)
+                    {
+                        Log(6, $"找出重复项：按 Delete 之后列表剩 {list.Items.Count} 项，期望 3");
+                        return false;
+                    }
+
+                    // 删完不能残留"旧索引对应的选中"；如果当前有在播项，界面把它高亮选中是允许的。
+                    if (list.SelectedIndices.Count > 1)
+                    {
+                        Log(6, $"找出重复项：按 Delete 之后还选中了 {list.SelectedIndices.Count} 项（期望 0 或只有在播那一项）");
+                        return false;
+                    }
+
+                    if (list.SelectedIndices.Count == 1)
+                    {
+                        var selectedIndex = list.SelectedIndices[0];
+                        var selectedTag = list.Items[selectedIndex].Tag as int?;
+                        var current = PlaylistOf(form).CurrentIndex;
+
+                        if (selectedTag == null || selectedTag != current)
+                        {
+                            Log(6, $"找出重复项：按 Delete 之后选中了第 {selectedIndex} 行（模型索引 "
+                                    + $"{selectedTag?.ToString() ?? "null"}），既不是在播项 {current} 也不是空");
+                            return false;
+                        }
                     }
 
                     // 筛选状态下与拖动同口径：先清筛选再找
@@ -153,7 +190,7 @@ namespace SmokeTest
                 }
 
                 Log(6, "找出重复项正常：保留第一次出现的那一项、其余只选中不删（大小写不同的写法也认成同一个文件），"
-                        + "筛选时提示先清空，没有重复就如实说");
+                        + "多选下按 Delete 一次删掉两条，筛选时提示先清空，没有重复就如实说");
                 return true;
             }
             catch (Exception ex)

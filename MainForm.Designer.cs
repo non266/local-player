@@ -990,6 +990,9 @@ namespace 播放器
             this.listViewPlaylist.ContextMenuStrip = this.contextMenuPlaylist;
             this.listViewPlaylist.Dock = System.Windows.Forms.DockStyle.Fill;
             this.listViewPlaylist.FullRowSelect = true;
+            // 1.31.0：批量移除 / 下一首 / 复制路径 / 找出重复项都要能一次选中多项。
+            // 以前这里没开，等于把这几个已经按多项写好的动作藏在了用户够不到的地方。
+            this.listViewPlaylist.MultiSelect = true;
             // 表头可点：点一下按它排、再点一下反向、第三下回到原始顺序（见 MainForm.Search.cs）。
             // 以前这里是 Nonclickable，排序只藏在右键菜单里。
             this.listViewPlaylist.HeaderStyle = System.Windows.Forms.ColumnHeaderStyle.Clickable;

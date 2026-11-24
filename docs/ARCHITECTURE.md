@@ -11,17 +11,22 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 54,392 行 / **215 个文件** |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 54,483 行 / **215 个文件** |
 | `Core/` | 18,701 行 / 95 个文件 |
 | `Ui/` | 20,201 行 / 76 个文件 |
 | `MainForm*` 这一族 partial | 15,413 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 34,095 行 / 98 个文件 |
+| `tools/SmokeTest/` | 34,385 行 / 99 个文件 |
 
-> 数字最后一次量是在 **2026-11-23（1.30.0：文件页缩略图性能 + 快捷键扩到 33 条）**。
-> 1.30.0 没有新增产品文件（仍是 215），只改 `Ui/ThumbnailQueue` / `VideoFrameGrabber` /
+> 数字最后一次量是在 **2026-11-24（1.31.0：主播放列表多选 + 文档真值）**。
+> 1.31.0 没有新增产品文件（仍是 215），只改 `MainForm.Playlist` / `MainForm.Search` /
+> `MainForm.Startup` / `MainForm.Designer`；冒烟新增 `Program.MainForm.PlaylistMultiSelect`
+> （98 → 99 个文件），**34 个运行步骤 / 39 项检查**（新步骤「播放列表多选」= 第 39 项），
+> 详情见 §45。
+>
+> 1.30.0 那一版的记录（2026-11-23：文件页缩略图性能 + 快捷键扩到 33 条）：
+> 没有新增产品文件（仍是 215），只改 `Ui/ThumbnailQueue` / `VideoFrameGrabber` /
 > `FileBrowserView*` 与 `PlayerCommand` / `MainForm.*`；冒烟新增 `Program.FileBrowser.ThumbnailPerf`
-> （97 → 98 个文件），**33 个运行步骤 / 38 项检查**（新步骤「文件页缩略图性能」= 第 38 项），
-> 详情见 §43~§44。
+> （97 → 98 个文件），当时是 33 个运行步骤 / 38 项检查，详情见 §43~§44。
 >
 > 1.29.0 那一版的记录（2026-11-22：关窗挂死收口 / 快捷键自定义 / 便携模式）：
 >
@@ -771,11 +776,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 33 个运行步骤 / 38 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 34 个运行步骤 / 39 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（33 个运行步骤 / 38 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（34 个运行步骤 / 39 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -2058,3 +2063,22 @@ ThumbnailQueue（专用线程）
   Ctrl+Alt+D / 多媒体键仍固定，`ShortcutDialog` 与 F1 帮助同步。
 - **验证**：第 31 个运行步骤 / 第 36 项检查新增默认映射、保留表、真窗体改键 / 菜单键串 /
   旧键不执行；B 部分 6 条变异。
+
+## 45. 主播放列表多选（1.31.0）
+
+- **数据流不变**：`ListViewItem.Tag` 仍是播放列表**模型索引**；批量动作统一走
+  `GetSelectedPlaylistIndices()`（升序、去重），筛选只影响哪些行被画出来，不影响索引含义。
+- **入口**：`listViewPlaylist.MultiSelect = true`；Ctrl / Shift 用 WinForms 原生多选，
+  `Ctrl+A` 由 `OnPlaylistKeyDown` 处理——只选当前 `listViewPlaylist.Items` 里看得见的行，
+  避免筛选状态下把被筛掉的条目悄悄带进批量删除。
+- **批量动作**：移除走已有的 `Playlist.RemoveMany`（整批只触发一次 `Changed`）；
+  「下一首播放」/ 复制路径早已按多项实现；「找出重复项」本来就一次选中所有重复项，
+  多选打开之后用户才真的能看见并一起删除。
+- **选中清理**：`RemoveMany` 会触发 `RefreshPlaylistView`，重建前会读一次当前选中并在重建后
+  按**模型索引**恢复。删除会移位，所以 `RemoveSelectedPlaylistItems` 必须在改模型前
+  `SelectedIndices.Clear()`；否则恢复出来的是"本来没选"的行。
+- **边界**：上移 / 下移与拖动换位仍只对一项生效（整批移动的插入语义没有定义）；
+  资源管理器 `/select,` 一次只能定位第一项；`Ctrl+A` 在 50,000 行时的耗时没有量过。
+- **验证**：第 34 个运行步骤 / 第 39 项检查（`MultiSelect`、Ctrl+A 全量与筛选后、
+  菜单数量文本、批量移除 6 → 4 且选中清空、批量入队 2 条、复制 2 行、单项上移 / 移除）；
+  7 条变异见 [1.31.0计划.md](1.31.0计划.md)。

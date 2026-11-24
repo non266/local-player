@@ -175,6 +175,12 @@ namespace 播放器
                 return;
             }
 
+            if (listViewPlaylist.SelectedItems.Count > 1)
+            {
+                SetStatus("多选时不能拖动排序，请只选一项");
+                return;
+            }
+
             if (listViewPlaylist.SelectedItems.Count != 1) return;
             if (e.Item is not ListViewItem row) return;
 

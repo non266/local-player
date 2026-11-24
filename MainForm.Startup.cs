@@ -136,6 +136,9 @@ namespace 播放器
             // 1.7.0 F4：「找出重复项」是运行时插进右键菜单的（不改 Designer）
             ConfigureFindDuplicatesMenu();
 
+            // 1.31.0：右键菜单按选中项数刷新批量文本 / 上移下移可用性。
+            contextMenuPlaylist.Opening += (s, e) => UpdatePlaylistSelectionMenu();
+
             // 列宽随面板宽度自适应（侧栏显示时这块面板会窄很多）
             listViewPlaylist.Resize += (s, e) => AdjustPlaylistColumns();
 

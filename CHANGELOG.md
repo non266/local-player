@@ -65,11 +65,17 @@
 
 ### 发行（2026-11-27）
 
-- 标签与 GitHub Release 编号在发行记录提交里补齐；实现提交 `74b790f`。
+- 标签 `v1.32.0`（tag 对象 `8d5631cb0cd52e4d458c192d0627e24e47e330d9`）→ 提交
+  `9ce297bee58eda44f2d1bd7f2461fc4562fc772c`（实现提交 `74b790f`）。
+- Release <https://github.com/non266/local-player/releases/tag/v1.32.0> id `460556633`，
+  **Latest**、非 draft / 非 prerelease，2 个资产；`published_at` `2026-11-27T12:10:54Z`；
+  标题「1.32.0：主播放列表整批移动 + 撤销最近一次移除 + 文档真值」。
 - 资产：`local-player-1.32.0-setup.exe` **62,229,394 B** SHA256
   `40BBBF6EEBBC49C3F15F426ADC7C1D06272A1D0831DAD5C61A162E72ADCDB788`；
   `local-player-1.32.0-portable.zip` **100,150,977 B** SHA256
   `32C3C46C1E4E2B33777BFA3DC9EFD2DE652D4E9DC12FB2FFBE1CA5DD3B740E6C`。
+  服务端 `digest` 与本地一致；匿名 `Range` 两个都 **206**（2048 字节），
+  `Content-Range` 总大小 62,229,394 / 100,150,977。
 - 便携载荷 **647 文件 / 252,776,063 B（241.1 MB）**，`7z t` 通过；解压目录全量冒烟
   **35/40（310.824 秒）** 全绿；跑完清掉测试文件、重新解压回 647 / 252,776,063。
 - 覆盖安装（1.31.0 → 1.32.0）：**649 文件 / 257,855,171 B（245.9 MB）**，与载荷

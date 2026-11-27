@@ -242,6 +242,118 @@ namespace 播放器.Core
         }
 
         /// <summary>
+        /// 整批移动（1.32.0）：把 <paramref name="indexes"/> 选中的条目当成一个块，
+        /// 按它们原来的相对顺序插到 <paramref name="insertBefore"/> 之前。
+        /// <para>
+        /// <paramref name="insertBefore"/> 用的是<b>移动前</b>的索引坐标：例如 6 项里选
+        /// <c>[1,3]</c>、插到 5 之前，等价于"删掉这两项之后插到剩下 4 项的索引 3"。
+        /// 整批只触发一次 <see cref="ContentChanged"/>。
+        /// </para>
+        /// <para>
+        /// 返回值是移动之后这些条目的新索引（升序）；全选时没有可移动的东西，返回空表。
+        /// 当前项按对象引用重算，正在播的那一条不会因为换位而指到别人身上。
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<int> MoveMany(IEnumerable<int> indexes, int insertBefore)
+        {
+            var targets = indexes.Distinct().Where(i => i >= 0 && i < _items.Count).ToList();
+            if (targets.Count == 0) return Array.Empty<int>();
+
+            // 全选时"移动"没有意义；直接返回，免得白重建一次界面。
+            if (targets.Count == _items.Count) return Array.Empty<int>();
+
+            targets.Sort();
+            insertBefore = Math.Clamp(insertBefore, 0, _items.Count);
+
+            var current = Current;
+            var block = targets.Select(i => _items[i]).ToList();
+
+            // 删掉之后，插入点前面少了几个被选中的条目，要把这部分补回来。
+            var removedBefore = targets.Count(i => i < insertBefore);
+
+            for (var i = targets.Count - 1; i >= 0; i--)
+                _items.RemoveAt(targets[i]);
+
+            var at = Math.Clamp(insertBefore - removedBefore, 0, _items.Count);
+            _items.InsertRange(at, block);
+
+            CurrentIndex = current == null ? -1 : _items.IndexOf(current);
+            RebuildIndex();
+            OnContentChanged();
+
+            var moved = new List<int>(block.Count);
+            for (var i = 0; i < block.Count; i++) moved.Add(at + i);
+            return moved;
+        }
+
+        /// <summary>
+        /// 把一批条目按<b>最终位置</b>还原回列表（1.32.0 的"撤销移除"用）。
+        /// <para>
+        /// <paramref name="indexes"/> 是这些条目在还原之后的索引。实现是"先按索引把还原项填进
+        /// 一个定长数组，再按顺序把原来的项填进剩下的空位"，所以是一次 O(n)，不会在 50,000 条时
+        /// 变成逐条 <see cref="Insert"/> 的 O(n²)。
+        /// </para>
+        /// <para>
+        /// 条目对象原样保留（<see cref="PlaylistItem.AddedOrder"/>、时长、错误标记都不丢）；
+        /// 整批只触发一次 <see cref="ContentChanged"/>。当前项按对象引用重算：它若没被删，
+        /// 索引跟着移位；它若本来就不在列表里（被删掉了），保持 -1，**不假装恢复播放**。
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<int> InsertRestored(
+            IReadOnlyList<PlaylistItem> items, IReadOnlyList<int> indexes)
+        {
+            if (items == null) throw new ArgumentNullException(nameof(items));
+            if (indexes == null) throw new ArgumentNullException(nameof(indexes));
+            if (items.Count != indexes.Count)
+                throw new ArgumentException("还原项与索引的数量必须一致", nameof(indexes));
+            if (items.Count == 0) return Array.Empty<int>();
+
+            var total = _items.Count + items.Count;
+            var slots = new PlaylistItem?[total];
+            var restored = new List<(int Index, PlaylistItem Item)>(items.Count);
+
+            for (var i = 0; i < items.Count; i++)
+            {
+                var index = indexes[i];
+
+                if (index < 0 || index >= total)
+                    throw new ArgumentOutOfRangeException(nameof(indexes), index, "还原索引越界");
+
+                if (slots[index] != null)
+                    throw new ArgumentException("还原索引不能重复", nameof(indexes));
+
+                slots[index] = items[i];
+                restored.Add((index, items[i]));
+            }
+
+            var current = Current;
+
+            var oldIndex = 0;
+            for (var i = 0; i < total; i++)
+            {
+                if (slots[i] != null) continue;
+
+                if (oldIndex >= _items.Count)
+                    throw new ArgumentException("还原索引与现有条目数量对不上", nameof(indexes));
+
+                slots[i] = _items[oldIndex++];
+            }
+
+            if (oldIndex != _items.Count)
+                throw new ArgumentException("还原索引与现有条目数量对不上", nameof(indexes));
+
+            _items.Clear();
+            foreach (var item in slots) _items.Add(item!);
+
+            CurrentIndex = current == null ? -1 : _items.IndexOf(current);
+            RebuildIndex();
+            OnContentChanged();
+
+            restored.Sort((a, b) => a.Index.CompareTo(b.Index));
+            return restored.Select(pair => pair.Index).ToList();
+        }
+
+        /// <summary>
         /// 按指定依据重排列表。当前播放项会跟着走，不会因为排序而错位。
         /// </summary>
         public void Sort(PlaylistSortField field, bool descending)

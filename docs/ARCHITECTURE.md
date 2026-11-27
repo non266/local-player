@@ -11,14 +11,20 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 54,483 行 / **215 个文件** |
-| `Core/` | 18,701 行 / 95 个文件 |
-| `Ui/` | 20,201 行 / 76 个文件 |
-| `MainForm*` 这一族 partial | 15,413 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 34,385 行 / 99 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 54,826 行 / **215 个文件** |
+| `Core/` | 18,813 行 / 95 个文件 |
+| `Ui/` | 20,202 行 / 76 个文件 |
+| `MainForm*` 这一族 partial | 15,734 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 34,833 行 / 100 个文件 |
 
-> 数字最后一次量是在 **2026-11-24（1.31.0：主播放列表多选 + 文档真值）**。
-> 1.31.0 没有新增产品文件（仍是 215），只改 `MainForm.Playlist` / `MainForm.Search` /
+> 数字最后一次量是在 **2026-11-27（1.32.0：主播放列表整批移动 + 撤销移除）**。
+> 1.32.0 没有新增产品文件（仍是 215），只改 `Core/Playlist` / `MainForm.Playlist` /
+> `MainForm.Search` / `MainForm.Startup` / `MainForm.Shell` / `Ui/ShortcutBinding`；
+> 冒烟新增 `Program.MainForm.PlaylistEditing`（99 → 100 个文件），
+> **35 个运行步骤 / 40 项检查**（新步骤「播放列表整批移动与撤销」= 第 40 项），详情见 §46。
+>
+> 1.31.0 那一版（2026-11-24：主播放列表多选 + 文档真值）的记录：
+> 没有新增产品文件（仍是 215），只改 `MainForm.Playlist` / `MainForm.Search` /
 > `MainForm.Startup` / `MainForm.Designer`；冒烟新增 `Program.MainForm.PlaylistMultiSelect`
 > （98 → 99 个文件），**34 个运行步骤 / 39 项检查**（新步骤「播放列表多选」= 第 39 项），
 > 详情见 §45。
@@ -776,11 +782,11 @@ SMOKE TEST FAILED：有 1 处反射调用没找到目标方法（那些断言等
 
 ## 15. 每个改动的验收方式（本项目一直在用的做法）
 
-> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 34 个运行步骤 / 39 项检查 + 摘要）。
+> 这一节现在有了一条命令的版本：`tools\release-check.ps1`（Debug + Release 构建 + 全量 35 个运行步骤 / 40 项检查 + 摘要）。
 > 维护期的规矩、已知问题的分诊与发版纪律见 [docs/维护手册.md](维护手册.md)。
 
 1. **全量冒烟测试**：`dotnet build 播放器.csproj -c Debug` → `dotnet build tools\SmokeTest\SmokeTest.csproj -c Debug`
-   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（34 个运行步骤 / 39 项检查，跑完会清掉临时数据目录）。
+   → `cd bin\Debug\net10.0-windows10.0.19041.0 && dotnet SmokeTest.dll`（35 个运行步骤 / 40 项检查，跑完会清掉临时数据目录）。
 2. **Debug / Release 都要 0 警告 0 错误**（离线时 RESTORE 会带一条缓存下来的 NU1900，见第 11 节末尾的环境说明）。
 3. **变异验证**：新加的检查必须"改坏了就会红"。做法是把被测行为临时改错，
    确认测试以一句具体的错误失败，然后改回来。例：
@@ -2077,8 +2083,35 @@ ThumbnailQueue（专用线程）
 - **选中清理**：`RemoveMany` 会触发 `RefreshPlaylistView`，重建前会读一次当前选中并在重建后
   按**模型索引**恢复。删除会移位，所以 `RemoveSelectedPlaylistItems` 必须在改模型前
   `SelectedIndices.Clear()`；否则恢复出来的是"本来没选"的行。
-- **边界**：上移 / 下移与拖动换位仍只对一项生效（整批移动的插入语义没有定义）；
+- **边界**：上移 / 下移与拖动换位当时只对一项生效（整批移动的插入语义没有定义）；
   资源管理器 `/select,` 一次只能定位第一项；`Ctrl+A` 在 50,000 行时的耗时没有量过。
+  **1.32.0 已把整批移动与撤销补上，见 §46。**
 - **验证**：第 34 个运行步骤 / 第 39 项检查（`MultiSelect`、Ctrl+A 全量与筛选后、
   菜单数量文本、批量移除 6 → 4 且选中清空、批量入队 2 条、复制 2 行、单项上移 / 移除）；
   7 条变异见 [1.31.0计划.md](1.31.0计划.md)。
+
+---
+
+## 46. 主播放列表整批移动与撤销移除（1.32.0）
+
+- **块语义**：`Playlist.MoveMany(indexes, insertBefore)` 先把选中的条目按原相对顺序收集成一个块，
+  从列表里删掉，再把插入点按"插入点前面被删了几个"修正，最后 `InsertRange` 回去。
+  所以非连续选中会跨过中间未选中的项，块内相对顺序不变；整批只触发一次 `ContentChanged`。
+- **当前项按对象引用重算**：`MoveMany` / `InsertRestored` 在改列表前抓住 `Current` 对象，
+  改完用 `IndexOf` 找回它的新下标。正在播的那一项不会因为换位 / 撤销而指到别人身上。
+- **撤销快照**：`RemoveSelectedPlaylistItems` 在改模型前保存"条目对象 + 原索引"；`Ctrl+Z`
+  （列表上的固定键）或右键「撤销移除 N 项」走 `InsertRestored`。还原用"按最终位置填数组、
+  再按顺序填剩余旧项"的 O(n) 做法，避免 50,000 条逐条 `Insert` 的 O(n²)。
+  只保留一级，不落盘，不恢复播放；`Clear` 仍走确认框，不纳入撤销。
+- **失效**：`ContentChanged` 清快照（排序 / 移动 / 载入 / 清空）；`Changed` 再按条数补一道
+  （`AddRange` 只发 `Changed`，批量添加没有 `ContentChanged`）。切换当前项不清。
+- **选中**：改模型前先 `SelectedIndices.Clear()`，重建后显式选中移动后的块 / 还原
+  的条目；否则 `RefreshPlaylistView` 会按旧索引把"本来没选"的行选回来。
+- **拖动**：`CanReorderPlaylist` 只拦筛选与空选择；多选允许。`ReorderSelectedTo` 在落点
+  位于选中块范围内（含首尾边界）时不动，拖到块之前 / 之后才重排。
+- **测试**：第 35 个运行步骤 / 第 40 项检查（块上移 / 下移、拖动到末尾、边界置灰、
+  筛选禁用、撤销原位置 / 选中 / 一级、排序与添加后失效、模型当前项在块内 / 块外、
+  `InsertRestored` 当前项）；11 条变异见 [1.32.0计划.md](1.32.0计划.md)。
+- **边界**：50,000 条的移动 / 撤销仍各整建一次界面（约 1.5 秒，未专门再量）；
+  真实 `DoDragDrop` 的多选路径无法在冒烟里合成鼠标，覆盖的是 `CanReorderPlaylist` +
+  `ReorderSelectedTo`；不恢复播放，不跨重启。

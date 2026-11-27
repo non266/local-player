@@ -133,6 +133,7 @@ namespace 播放器
             "    播放 → 光盘        标题 / 回到菜单 / 直接播放主标题\n\n" +
             "列表与帮助\n" +
             "    Delete           从列表移除选中项\n" +
+            "    Ctrl+Z           撤销最近一次移除（只在播放列表里）\n" +
             "    F1               显示本帮助";
 
         private void ShowShortcuts()

@@ -181,6 +181,18 @@ namespace SmokeTest
                 return false;
             }
 
+            // 1.32.0：Ctrl+Z 归播放列表里的「撤销移除」，不能再让命令占用。
+            var undoReserved = new Dictionary<PlayerCommandId, Keys[]>
+            {
+                [PlayerCommandId.Stop] = new[] { Keys.Control | Keys.Z }
+            };
+
+            if (ShortcutBinding.Validate(undoReserved).Count == 0)
+            {
+                Log(36, "快捷键校验：把「停止」绑到 Ctrl+Z 却放过了（播放列表的撤销会被抢掉）");
+                return false;
+            }
+
             // 1.30.0：逐帧 / 延迟 / 歌词偏移不再是"保留键"。
             foreach (var key in new[]
                      {

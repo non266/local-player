@@ -281,6 +281,15 @@ Assert-Contains "docs\介绍.md" $intro "按名称排序约 1.6 秒" "排序数�
 Assert-Contains "docs\介绍.md" $intro "1.31.0 实测" "程序体积那一行要写当前版本（1.31.0 实测）"
 Assert-Order "README.md" $readme '| `Ctrl+]` / `Ctrl+[` |' "> 1.30.0 起可以改" "快捷键表的所有行必须在提示块之前，否则 Markdown 会断成两张表"
 
+# 1.32.0：播放列表整批移动 / 撤销移除；缩略图早已落盘，不能再写"只在内存缓存"。
+Assert-Absent "docs\介绍.md" $intro "只在内存缓存" "1.28.0 起缩略图有 128 MB 落盘缓存，这句是旧口径"
+Assert-Contains "docs\介绍.md" $intro "落盘缓存 128 MB" "缩略图那一行要写落盘缓存与上限"
+Assert-Contains "README.md" $readme "整批上移下移与拖动" "播放列表多选要写清整批移动"
+Assert-Contains "README.md" $readme "Ctrl+Z" "撤销移除的固定键要写出来"
+Assert-Absent "README.md" $readme "拖动换位仍只对一项" "1.32.0 起多选可以整批上移 / 下移 / 拖动"
+Assert-Absent "docs\参考手册.md" $reference "上移、下移与拖动换位仍只对" "1.32.0 起多选可以整批移动，旧限制句不能留着"
+Assert-Contains "docs\参考手册.md" $reference "撤销最近一次移除" "参考手册要写 `Ctrl+Z` 撤销的口径"
+
 # ---------------------------------------------------------------- 摘要
 
 Write-Host ""

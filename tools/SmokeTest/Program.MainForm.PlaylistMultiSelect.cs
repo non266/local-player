@@ -83,9 +83,10 @@ namespace SmokeTest
                     return false;
                 }
 
-                if (moveUp.Enabled)
+                if (!moveUp.Enabled || !moveUp.Text.Contains("2 项", StringComparison.Ordinal))
                 {
-                    Log(39, "播放列表多选：多选时「上移」不该可点（插入位置只对一项有确定含义）");
+                    Log(39, "播放列表多选：选中 2 项时「上移」该可点并写明 2 项（现在「"
+                            + moveUp.Text + "」，可点=" + moveUp.Enabled + "）");
                     return false;
                 }
 
@@ -190,7 +191,18 @@ namespace SmokeTest
                 }
 
                 // 单选路径不变：一项时上移可用，移除 1 项也只报 1 项。
+                // 先验边界：第一项不能再上移（1.32.0 起菜单按"块能不能动"置灰）。
                 SelectRows(list, 0);
+                PumpMessages(120);
+                form.UpdatePlaylistSelectionMenuForTest();
+
+                if (moveUp.Enabled)
+                {
+                    Log(39, "播放列表多选：第一项时「上移」不该可点");
+                    return false;
+                }
+
+                SelectRows(list, 1);
                 PumpMessages(120);
                 form.UpdatePlaylistSelectionMenuForTest();
 

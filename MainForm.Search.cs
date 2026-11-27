@@ -168,20 +168,12 @@ namespace 播放器
         {
             if (e.Button != MouseButtons.Left) return;
 
-            // 筛选状态下界面行与模型索引不是连续对应的，拖动容易产生歧义，直接禁用。
-            if (_workspace.Filter.Length > 0)
+            if (!CanReorderPlaylist(out var reason))
             {
-                SetStatus("筛选状态下不能拖动排序，请先清空搜索框");
+                if (!string.IsNullOrEmpty(reason)) SetStatus(reason);
                 return;
             }
 
-            if (listViewPlaylist.SelectedItems.Count > 1)
-            {
-                SetStatus("多选时不能拖动排序，请只选一项");
-                return;
-            }
-
-            if (listViewPlaylist.SelectedItems.Count != 1) return;
             if (e.Item is not ListViewItem row) return;
 
             _draggingRow = true;
@@ -195,6 +187,64 @@ namespace 播放器
                 listViewPlaylist.InsertionMark.Index = -1;
             }
         }
+
+        /// <summary>
+        /// 现在能不能开始拖动换位（1.32.0）。筛选时禁用；多选是<b>允许</b>的，整批按块移动。
+        /// <para>测试直接调这个入口，避免为了验"多选能拖"去合成一整次真实拖放。</para>
+        /// </summary>
+        private bool CanReorderPlaylist(out string? reason)
+        {
+            // 筛选状态下界面行与模型索引不是连续对应的，拖动容易产生歧义，直接禁用。
+            if (_workspace.Filter.Length > 0)
+            {
+                reason = "筛选状态下不能拖动排序，请先清空搜索框";
+                return false;
+            }
+
+            if (listViewPlaylist.SelectedItems.Count == 0)
+            {
+                reason = "请先选中要移动的项目";
+                return false;
+            }
+
+            reason = null;
+            return true;
+        }
+
+        /// <summary>
+        /// 把当前选中的块拖到 <paramref name="insertAt"/> 之前（原坐标边界）。
+        /// <para>
+        /// 落点在选中块的范围之内（含首尾边界）时不移动：块已经在那儿了，再"重排"只会
+        /// 把非连续选中的空隙压掉，反而产生一次用户没要求的位移。
+        /// </para>
+        /// </summary>
+        private void ReorderSelectedTo(int insertAt)
+        {
+            if (_workspace.Filter.Length > 0) return;
+
+            var selected = GetSelectedPlaylistIndices();
+            if (selected.Count == 0) return;
+            if (insertAt < 0 || insertAt > _playlist.Count) return;
+            if (insertAt >= selected[0] && insertAt <= selected[^1] + 1) return;
+
+            listViewPlaylist.SelectedIndices.Clear();
+            var moved = _playlist.MoveMany(selected, insertAt);
+
+            if (moved.Count == 0)
+            {
+                SelectPlaylistIndices(selected);
+                return;
+            }
+
+            ResetSortToAddedOrder();
+            SelectPlaylistIndices(moved);
+            SetStatus(moved.Count > 1 ? $"已调整顺序（{moved.Count} 项）" : "已调整顺序");
+        }
+
+        internal bool CanReorderPlaylistForTest(out string? reason) =>
+            CanReorderPlaylist(out reason);
+
+        internal void ReorderPlaylistForTest(int insertAt) => ReorderSelectedTo(insertAt);
 
         private void OnPlaylistDragOver(object? sender, DragEventArgs e)
         {
@@ -226,22 +276,8 @@ namespace 播放器
 
             if (after) insertAt++;
 
-            var selected = GetSelectedPlaylistIndices();
-            if (selected.Count != 1) return;
-
-            var from = selected[0];
-            var to = insertAt > from ? insertAt - 1 : insertAt;
-            to = Math.Clamp(to, 0, _playlist.Count - 1);
-
-            if (to == from) return;
-
-            // 拖动换位之后"原始顺序"已经不存在，标记一下让排序菜单不误导。
-            ResetSortToAddedOrder();
-
-            _playlist.Move(from, to);
-            SelectPlaylistIndex(to);
-
-            SetStatus("已调整顺序");
+            // 多选也走同一条路：ReorderSelectedTo 会把整块移过去（1.32.0）。
+            ReorderSelectedTo(insertAt);
         }
     }
 }

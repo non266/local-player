@@ -63,6 +63,22 @@ namespace 播放器
         private bool _playlistSummaryDirty;
 
         /// <summary>
+        /// 最近一次"从列表移除"的快照（1.32.0）。只留一级：列表内容再变一次就作废。
+        /// </summary>
+        private PlaylistRemovalUndo? _lastPlaylistRemoval;
+
+        /// <summary>移除 / 撤销自己触发的 <see cref="Playlist.ContentChanged"/> 不能把刚存下的快照清掉。</summary>
+        private bool _suppressUndoInvalidation;
+
+        /// <summary>右键菜单里的「撤销移除」，运行时插进去（与「找出重复项」同一做法）。</summary>
+        private ToolStripMenuItem? _cmsUndo;
+
+        private sealed record PlaylistRemovalUndo(
+            IReadOnlyList<PlaylistItem> Items,
+            IReadOnlyList<int> Indexes,
+            int ExpectedCount);
+
+        /// <summary>
         /// 整建了几次（1.18.0，冒烟测试用）。
         /// <para>
         /// 一次用户动作（排序 / 筛选 / 换主题）应该只整建一次；模型事件与显式调用各刷一遍
@@ -948,40 +964,162 @@ namespace 播放器
                 UpdateWindowTitle();
             }
 
+            // 快照必须在改模型之前取：条目对象要原样放回去，索引也要记"原来在哪"。
+            var snapshot = new PlaylistRemovalUndo(
+                selected.Select(index => _playlist.Items[index]).ToList(),
+                selected.ToList(),
+                _playlist.Count - selected.Count);
+
             // 先清选中再改模型：RemoveMany 会触发整体重建，而重建会按"旧索引"还原选中项；
             // 不清的话，删掉第 2、4 项之后会选中原本第 3、5 项——看起来像随机跳选。
             listViewPlaylist.SelectedIndices.Clear();
 
-            _playlist.RemoveMany(selected);
+            // 这次 ContentChanged 是我们自己发的，不能把刚存下的快照清掉。
+            _lastPlaylistRemoval = null;
+            _suppressUndoInvalidation = true;
+            try
+            {
+                _playlist.RemoveMany(selected);
+            }
+            finally
+            {
+                _suppressUndoInvalidation = false;
+            }
+
+            _lastPlaylistRemoval = snapshot;
             SetStatus($"已从播放列表移除 {selected.Count} 项");
         }
 
+        /// <summary>
+        /// 整批移动（1.32.0）：上移 / 下移把选中的条目当成一个块。
+        /// <para>
+        /// 块内相对顺序不变；块在边界时只提示、不改模型。非连续选中会跨过中间未选中的项，
+        /// 这是本轮明确定义的块语义（不是逐项换位）。
+        /// </para>
+        /// </summary>
         private void MoveSelected(int delta)
         {
             var selected = GetSelectedPlaylistIndices();
-            if (selected.Count != 1)
+            if (selected.Count == 0)
             {
-                SetStatus("请先选中一项再移动");
+                SetStatus("请先选中要移动的项目");
                 return;
             }
 
-            var from = selected[0];
-            var to = from + delta;
-            if (to < 0 || to >= _playlist.Count) return;
+            if (delta != -1 && delta != 1) return;
 
-            _playlist.Move(from, to);
-            SelectPlaylistIndex(to);
-        }
+            // 筛选时界面行和模型索引不连续，整批移动的落点说不清；单选保持原行为。
+            if (selected.Count > 1 && _workspace.Filter.Length > 0)
+            {
+                SetStatus("筛选状态下不能整批移动，请先清空搜索框");
+                return;
+            }
 
-        /// <summary>按模型索引选中并滚动到可见位置。</summary>
-        private void SelectPlaylistIndex(int playlistIndex)
-        {
-            var row = FindRow(playlistIndex);
-            if (row == null) return;
+            var first = selected[0];
+            var last = selected[^1];
+            int insertBefore;
+
+            if (delta < 0)
+            {
+                if (first == 0)
+                {
+                    SetStatus("选中的项目已经在最上面");
+                    return;
+                }
+
+                insertBefore = first - 1;
+            }
+            else
+            {
+                if (last == _playlist.Count - 1)
+                {
+                    SetStatus("选中的项目已经在最下面");
+                    return;
+                }
+
+                insertBefore = last + 2;
+            }
 
             listViewPlaylist.SelectedIndices.Clear();
-            row.Selected = true;
-            row.EnsureVisible();
+            var moved = _playlist.MoveMany(selected, insertBefore);
+
+            if (moved.Count == 0)
+            {
+                SelectPlaylistIndices(selected);
+                return;
+            }
+
+            // 手工换位之后"原始顺序"已经变了，排序菜单不能再指着旧的字段。
+            ResetSortToAddedOrder();
+            SelectPlaylistIndices(moved);
+            SetStatus(moved.Count > 1 ? $"已移动 {moved.Count} 项" : "已调整顺序");
+        }
+
+        /// <summary>按一组模型索引选中并滚动到最后一个可见行（1.32.0 的整批移动 / 撤销共用）。</summary>
+        private void SelectPlaylistIndices(IReadOnlyList<int> indexes)
+        {
+            listViewPlaylist.SelectedIndices.Clear();
+
+            ListViewItem? lastRow = null;
+
+            foreach (var index in indexes)
+            {
+                var row = FindRow(index);
+                if (row == null) continue;
+
+                row.Selected = true;
+                row.Focused = true;
+                lastRow = row;
+            }
+
+            lastRow?.EnsureVisible();
+        }
+
+        /// <summary>把最近一次移除的条目放回原位置（只保留一级，不恢复播放）。</summary>
+        private void UndoLastPlaylistRemoval()
+        {
+            var snapshot = _lastPlaylistRemoval;
+            if (snapshot == null || snapshot.Items.Count == 0)
+            {
+                SetStatus("没有可撤销的移除");
+                return;
+            }
+
+            listViewPlaylist.SelectedIndices.Clear();
+
+            IReadOnlyList<int> restored;
+
+            _suppressUndoInvalidation = true;
+            try
+            {
+                restored = _playlist.InsertRestored(snapshot.Items, snapshot.Indexes);
+            }
+            finally
+            {
+                _suppressUndoInvalidation = false;
+            }
+
+            _lastPlaylistRemoval = null;
+            SelectPlaylistIndices(restored);
+            SetStatus($"已撤销移除：恢复 {restored.Count} 项（不恢复播放）");
+        }
+
+        /// <summary>列表内容变了（不是我们自己的移除 / 撤销）→ 上一次移除不能再撤销。</summary>
+        private void OnPlaylistContentChangedForUndo(object? sender, EventArgs e)
+        {
+            if (_suppressUndoInvalidation) return;
+            _lastPlaylistRemoval = null;
+        }
+
+        /// <summary>
+        /// `AddRange` 只发 <see cref="Playlist.Changed"/>、不发 `ContentChanged`（批量添加的既有行为），
+        /// 所以这里再按"条数有没有变"补一道：加了文件，上一次移除就不能再撤销。
+        /// </summary>
+        private void OnPlaylistChangedForUndo(object? sender, EventArgs e)
+        {
+            if (_suppressUndoInvalidation) return;
+            if (_lastPlaylistRemoval == null) return;
+            if (_playlist.Count != _lastPlaylistRemoval.ExpectedCount) _lastPlaylistRemoval = null;
         }
 
         private void ClearPlaylist()
@@ -1023,6 +1161,12 @@ namespace 播放器
             if (e.Control && e.KeyCode == Keys.A)
             {
                 SelectAllVisiblePlaylistRows();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.Control && !e.Shift && e.KeyCode == Keys.Z)
+            {
+                UndoLastPlaylistRemoval();
                 e.Handled = true;
                 e.SuppressKeyPress = true;
             }
@@ -1133,21 +1277,36 @@ namespace 播放器
         // ---- 多选（1.31.0） ----------------------------------------------------
 
         /// <summary>
-        /// 右键菜单按当前选中项数刷新：批量动作写明数量，上移 / 下移只对一项开放。
+        /// 右键菜单按当前选中项数刷新：批量动作写明数量；上移 / 下移按"块能不能动"置灰。
         /// 挂在这个菜单的 <c>Opening</c> 上，不额外维护一张"选中数"状态。
         /// </summary>
         private void UpdatePlaylistSelectionMenu()
         {
-            var count = GetSelectedPlaylistIndices().Count;
+            var selected = GetSelectedPlaylistIndices();
+            var count = selected.Count;
+
+            // 筛选时界面行与模型索引不连续，整批移动的落点说不清；单选保持原行为。
+            var batchBlockedByFilter = count > 1 && _workspace.Filter.Length > 0;
 
             cmsRemove.Text = count > 1 ? $"从列表移除 {count} 项(&R)" : "从列表移除(&R)";
             cmsCopyPath.Text = count > 1 ? $"复制这 {count} 条的完整路径(&C)" : "复制完整路径(&C)";
             cmsPlayNext.Text = count > 1 ? $"下一首播放（选中 {count} 项）(&Q)" : "下一首播放(&Q)";
             cmsReveal.Text = count > 1 ? "在资源管理器中显示第一项(&S)" : "在资源管理器中显示(&S)";
 
-            // 移动的插入位置只对一项有确定含义；多选时不做"整批上移"。
-            cmsMoveUp.Enabled = count == 1;
-            cmsMoveDown.Enabled = count == 1;
+            cmsMoveUp.Text = count > 1 ? $"上移 {count} 项(&U)" : "上移(&U)";
+            cmsMoveDown.Text = count > 1 ? $"下移 {count} 项(&D)" : "下移(&D)";
+
+            cmsMoveUp.Enabled = count > 0 && !batchBlockedByFilter && selected[0] > 0;
+            cmsMoveDown.Enabled = count > 0 && !batchBlockedByFilter
+                && selected[^1] < _playlist.Count - 1;
+
+            if (_cmsUndo != null)
+            {
+                _cmsUndo.Enabled = _lastPlaylistRemoval != null;
+                _cmsUndo.Text = _lastPlaylistRemoval == null
+                    ? "撤销移除(&Z)"
+                    : $"撤销移除 {_lastPlaylistRemoval.Items.Count} 项(&Z)";
+            }
         }
 
         internal IReadOnlyList<int> SelectedPlaylistIndicesForTest => GetSelectedPlaylistIndices();
@@ -1155,6 +1314,10 @@ namespace 播放器
         internal string SelectedPathsTextForTest() => BuildSelectedPathsText(GetSelectedPlaylistIndices());
 
         internal void UpdatePlaylistSelectionMenuForTest() => UpdatePlaylistSelectionMenu();
+
+        internal bool CanUndoPlaylistRemovalForTest => _lastPlaylistRemoval != null;
+
+        internal void MovePlaylistSelectionForTest(int delta) => MoveSelected(delta);
 
         /// <summary>
         /// 测试用：走真实键盘处理函数，验 Ctrl+A / Delete 这些分支，而不是另写一份逻辑。
@@ -1197,6 +1360,29 @@ namespace 播放器
 
             if (index < 0) contextMenuPlaylist.Items.Add(_cmsFindDuplicates);
             else contextMenuPlaylist.Items.Insert(index + 1, _cmsFindDuplicates);
+        }
+
+        /// <summary>
+        /// 在右键菜单里加「撤销移除」（1.32.0）。与「找出重复项」同一做法：运行时插在
+        /// 「从列表移除」后面，不改 Designer 生成的代码。
+        /// </summary>
+        private void ConfigurePlaylistUndoMenu()
+        {
+            if (_cmsUndo != null) return;
+
+            _cmsUndo = new ToolStripMenuItem("撤销移除(&Z)")
+            {
+                Name = "cmsUndo",
+                ShortcutKeyDisplayString = "Ctrl+Z",
+                ToolTipText = "把最近一次从列表移除的条目放回原位置（只保留一次，不恢复播放）"
+            };
+
+            _cmsUndo.Click += (s, e) => UndoLastPlaylistRemoval();
+
+            var index = contextMenuPlaylist.Items.IndexOf(cmsRemove);
+
+            if (index < 0) contextMenuPlaylist.Items.Add(_cmsUndo);
+            else contextMenuPlaylist.Items.Insert(index + 1, _cmsUndo);
         }
 
         /// <summary>

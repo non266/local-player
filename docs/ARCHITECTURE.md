@@ -11,17 +11,17 @@
 
 | 位置 | 规模 |
 | --- | --- |
-| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 54,826 行 / **215 个文件** |
-| `Core/` | 18,813 行 / 95 个文件 |
-| `Ui/` | 20,202 行 / 76 个文件 |
-| `MainForm*` 这一族 partial | 15,734 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
-| `tools/SmokeTest/` | 34,833 行 / 100 个文件 |
+| 主程序（`播放器.csproj` 编译的全部 `.cs`） | 55,057 行 / **215 个文件** |
+| `Core/` | 18,901 行 / 95 个文件 |
+| `Ui/` | 20,291 行 / 76 个文件 |
+| `MainForm*` 这一族 partial | 15,788 行 / **43 个文件**（字段数不再逐个数：1.12.0 把窗口状态、播放序列、历史、排序 / 筛选都搬出了 MainForm） |
+| `tools/SmokeTest/` | 35,250 行 / 100 个文件 |
 
-> 数字最后一次量是在 **2026-11-27（1.32.0：主播放列表整批移动 + 撤销移除）**。
-> 1.32.0 没有新增产品文件（仍是 215），只改 `Core/Playlist` / `MainForm.Playlist` /
-> `MainForm.Search` / `MainForm.Startup` / `MainForm.Shell` / `Ui/ShortcutBinding`；
-> 冒烟新增 `Program.MainForm.PlaylistEditing`（99 → 100 个文件），
-> **35 个运行步骤 / 40 项检查**（新步骤「播放列表整批移动与撤销」= 第 40 项），详情见 §46。
+> 数字最后一次量是在 **2026-11-28（1.33.0：批量添加真值 + 清空撤销 + 歌单库整批拖动）**。
+> 1.33.0 没有新增产品文件（仍是 215），只改 `Core/Playlist` / `Core/PlaylistLibrary.Order` /
+> `MainForm.Playlist` / `MainForm.Startup` / `MainForm.Shell` /
+> `Ui/PlaylistLibraryDialog.*` / `Ui/ShortcutBinding`；冒烟仍是 100 个文件，
+> **35 个运行步骤 / 40 项检查**（断言挂在第 10 / 17 / 35 项里），详情见 §47~§48。
 >
 > 1.31.0 那一版（2026-11-24：主播放列表多选 + 文档真值）的记录：
 > 没有新增产品文件（仍是 215），只改 `MainForm.Playlist` / `MainForm.Search` /
@@ -2115,3 +2115,37 @@ ThumbnailQueue（专用线程）
 - **边界**：50,000 条的移动 / 撤销仍各整建一次界面（约 1.5 秒，未专门再量）；
   真实 `DoDragDrop` 的多选路径无法在冒烟里合成鼠标，覆盖的是 `CanReorderPlaylist` +
   `ReorderSelectedTo`；不恢复播放，不跨重启。
+  **1.33.0 已把清空纳入同一级撤销，并修掉 `AddRange` 只发 `Changed` 的根因，见 §47。**
+
+## 47. 事件契约与清空撤销（1.33.0）
+
+- **根因**：`Playlist.AddRange` 是批量添加的既有快路径，只调 `OnChanged()`，不调
+  `OnContentChanged()`；而「当前歌单有没有改动」与撤销失效都只订阅 `ContentChanged`。
+  批量拖入 / 文件夹 / m3u 追加不会把歌单标成「未保存」，替换载入时因此不会给「先保存」的机会。
+  1.32.0 只能靠 `Changed` 后比条数兜底。
+- **修法**：`AddRange` 非空时改走 `OnContentChanged()`（`ContentChanged` → `Changed` 各一次；
+  空输入 / 全部重复不发）；`AddRangeDistinct` 走同一个出口。删掉 `Changed` 条数兜底与
+  `ExpectedCount` 字段，撤销失效只留 `ContentChanged` 一道。
+- **保持干净**：启动恢复会话、载入歌单替换、新建空歌单清空仍用 `SuppressModified` 包住；
+  启动命令行 / 拖入 / m3u 追加 / 光盘 / 历史加入按用户动作标脏。
+- **清空撤销**：`PlaylistUndoSnapshot` 增加 `Kind`（Removal / Clear），清空保存全部条目与
+  `0..n-1` 索引，复用 `InsertRestored` 的 O(n) 还原；同一个一级槽位。确认框保留。
+  撤销清空不选中行、不恢复播放、`CurrentIndex` 保持 -1、不恢复筛选；状态栏与右键菜单区分
+  「撤销移除 N 项」/「撤销清空（恢复 N 项）」。
+- **测试**：第 10 项事件计数、第 17 项批量添加标脏 + 重开仍干净、第 35 项清空撤销；
+  不新增步骤 / 编号（仍 35 / 40）。变异见 [1.33.0计划.md](1.33.0计划.md) §5.5。
+
+## 48. 歌单库多选整批拖动（1.33.0）
+
+- **缺口**：歌单窗口的 `MultiSelect` 一直用于批量删除 / 批量重命名，但 `OnRowDrag` /
+  `OnRowsDragDrop` 都要求 `SelectedItems.Count == 1`，多选时只能一份份拖。
+- **Core**：新增 `PlaylistLibrary.MoveMany(names, insertBefore, out moved, out error)`。
+  `insertBefore` 用移动前坐标；按列表顺序收集块、删掉、修正插入点、`InsertRange` 回去；
+  块内相对顺序不变，非连续选中跨过未选中项；落点在块范围内 / 全选 → no-op；
+  任何名字不在库里 → 整批失败；成功只写一次 `歌单顺序.txt`，不碰 m3u8 内容。
+- **窗口**：多选允许 `DoDragDrop`；落点换算成 `insertBefore` 后调 `MoveSelectedBlockTo`；
+  成功后 `Reload()`、按名字重选移动后的块并滚动到末项。单选仍走 1.3.0 的
+  `TargetIndex` + `MoveSelectedTo`（最终下标语义），行为不变。
+- **测试**：第 17 项新增四份歌单的非连续块前移 / 后移、全选 no-op、块内 no-op、
+  `List()` / 顺序文件 / 窗口显示三处一致、内容不变、名字失效整批失败；
+  真实 OLE 拖动仍未合成，覆盖 `MoveSelectedBlockTo` + `MoveMany`。

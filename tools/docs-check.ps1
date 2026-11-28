@@ -290,6 +290,16 @@ Assert-Absent "README.md" $readme "拖动换位仍只对一项" "1.32.0 起多�
 Assert-Absent "docs\参考手册.md" $reference "上移、下移与拖动换位仍只对" "1.32.0 起多选可以整批移动，旧限制句不能留着"
 Assert-Contains "docs\参考手册.md" $reference "撤销最近一次移除" "参考手册要写 `Ctrl+Z` 撤销的口径"
 
+# 1.33.0：清空也纳入撤销；歌单库多选整批拖动；批量添加会标「未保存」。
+Assert-Contains "README.md" $readme "撤销清空" "README 要写 `Ctrl+Z` 也能撤销清空"
+Assert-Contains "README.md" $readme "多选按块拖动排序" "README 的歌单库要写多选整批拖动"
+Assert-Contains "docs\介绍.md" $intro "撤销最近一次移除或清空" "介绍要写清空撤销的口径"
+Assert-Contains "docs\介绍.md" $intro "歌单窗口多选整批拖动" "介绍要写歌单库整批拖动"
+Assert-Contains "docs\参考手册.md" $reference "撤销清空（恢复 N 项）" "参考手册要写清空撤销的菜单文案"
+Assert-Contains "docs\参考手册.md" $reference "歌单窗口里的拖拽换位支持多选按块移动" "参考手册要写歌单库整批拖动"
+Assert-Absent "docs\参考手册.md" $reference "清空播放列表」仍走确认框，不提供撤销" "1.33.0 起清空可以撤销，旧限制句不能留着"
+Assert-Absent "docs\参考手册.md" $reference "拖拽换位只认" "1.33.0 起歌单库多选可以整批拖动，旧限制句不能留着"
+
 # ---------------------------------------------------------------- 摘要
 
 Write-Host ""

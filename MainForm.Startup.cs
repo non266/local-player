@@ -136,7 +136,7 @@ namespace 播放器
             // 1.7.0 F4：「找出重复项」是运行时插进右键菜单的（不改 Designer）
             ConfigureFindDuplicatesMenu();
 
-            // 1.32.0：撤销移除也是运行时插进右键菜单的。
+            // 1.32.0 / 1.33.0：撤销移除 / 清空也是运行时插进右键菜单的。
             ConfigurePlaylistUndoMenu();
 
             // 1.31.0：右键菜单按选中项数刷新批量文本 / 上移下移可用性。
@@ -210,9 +210,9 @@ namespace 播放器
             _engine.TracksChanged += OnEngineTracksChanged;
             _playlist.Changed += OnPlaylistModelChanged;
 
-            // 1.32.0：列表内容再变一次（添加 / 排序 / 载入 / 移动 / 清空）就让撤销快照作废。
+            // 1.33.0：列表内容再变一次（添加 / 排序 / 载入 / 移动 / 清空）就让撤销快照作废。
+            // `AddRange` 现在也走 `ContentChanged`，不再需要按条数补一道 `Changed` 兜底。
             _playlist.ContentChanged += OnPlaylistContentChangedForUndo;
-            _playlist.Changed += OnPlaylistChangedForUndo;
 
             // 吸附在主窗口边上的悬浮窗要跟着主窗口一起走。
             // Move 与 Resize 都接：缩放主窗口时贴在外侧的窗口也得跟着让位。

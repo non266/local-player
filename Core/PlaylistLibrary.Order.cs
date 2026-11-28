@@ -124,6 +124,87 @@ namespace 播放器.Core
             return SetOrder(names, out error);
         }
 
+        /// <summary>
+        /// 把一组歌单当成一个块，按<b>移动前</b>的坐标插到 <paramref name="insertBefore"/> 之前
+        /// （1.33.0 的歌单窗口多选拖动）。
+        /// <para>
+        /// 语义与 `Playlist.MoveMany` 一致：块内相对顺序不变；非连续选中会跨过中间未选中的
+        /// 歌单；落点在选中块范围（含首尾）内时不动。整批只写一次顺序文件。
+        /// 任何一份名字已经不在库里就整批失败，不允许移动一半。
+        /// </para>
+        /// <para><paramref name="moved"/> 是移动后的新索引（升序）；no-op 时为空表。</para>
+        /// </summary>
+        public static bool MoveMany(
+            IReadOnlyList<string> names,
+            int insertBefore,
+            out IReadOnlyList<int> moved,
+            out string error)
+        {
+            if (names == null) throw new ArgumentNullException(nameof(names));
+
+            moved = Array.Empty<int>();
+            error = string.Empty;
+
+            var all = List().Select(playlist => playlist.Name).ToList();
+
+            var wanted = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+
+            foreach (var name in names)
+            {
+                if (!string.IsNullOrWhiteSpace(name)) wanted.Add(name);
+            }
+
+            if (wanted.Count == 0)
+            {
+                error = "没有选中要移动的歌单。";
+                return false;
+            }
+
+            var selected = new List<int>(wanted.Count);
+
+            foreach (var name in wanted)
+            {
+                var index = all.FindIndex(
+                    candidate => string.Equals(candidate, name, StringComparison.CurrentCultureIgnoreCase));
+
+                if (index < 0)
+                {
+                    error = $"歌单库里没有「{name}」。";
+                    return false;
+                }
+
+                selected.Add(index);
+            }
+
+            selected.Sort();
+
+            // 全选没有可移动的东西；和主列表一样直接 no-op。
+            if (selected.Count == all.Count) return true;
+
+            insertBefore = Math.Clamp(insertBefore, 0, all.Count);
+
+            // 落点在选中块范围内（含首尾边界）不动：块已经在那儿了。
+            if (insertBefore >= selected[0] && insertBefore <= selected[^1] + 1) return true;
+
+            var block = selected.Select(index => all[index]).ToList();
+            var selectedSet = new HashSet<int>(selected);
+            var rest = all.Where((name, index) => !selectedSet.Contains(index)).ToList();
+
+            var removedBefore = selected.Count(index => index < insertBefore);
+            var at = Math.Clamp(insertBefore - removedBefore, 0, rest.Count);
+
+            rest.InsertRange(at, block);
+
+            if (!SetOrder(rest, out error)) return false;
+
+            var result = new List<int>(block.Count);
+
+            for (var i = 0; i < block.Count; i++) result.Add(at + i);
+
+            moved = result;
+            return true;
+        }
+
         /// <summary>写顺序文件（原子写）；失败返回 false 并给出理由。</summary>
         private static bool WriteOrder(List<string> names, out string error)
         {

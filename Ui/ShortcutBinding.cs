@@ -42,7 +42,7 @@ namespace 播放器.Ui
         {
             new ReservedShortcut(Keys.F1, "「快捷键说明」"),
             new ReservedShortcut(Keys.Delete, "「从播放列表移除」/ 文件页里吞掉"),
-            new ReservedShortcut(Keys.Control | Keys.Z, "播放列表里「撤销移除」"),
+            new ReservedShortcut(Keys.Control | Keys.Z, "播放列表里「撤销移除 / 清空」"),
             new ReservedShortcut(Keys.Escape, "退出全屏 / 关对话框"),
             new ReservedShortcut(Keys.Enter, "打开选中项 / 退出全屏"),
             new ReservedShortcut(Keys.Tab, "对话框与列表切换焦点"),

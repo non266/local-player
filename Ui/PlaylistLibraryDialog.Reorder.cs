@@ -18,8 +18,8 @@ namespace 播放器.Ui
         {
             if (e.Button != MouseButtons.Left) return;
 
-            // 和主列表一样只拖"一行"：多选时拖哪一行都不明确（多选是给删除 / 批量重命名用的）
-            if (_list.SelectedItems.Count != 1) return;
+            // 1.33.0：多选也允许拖，按一个块移动（块内相对顺序不变）。
+            if (_list.SelectedItems.Count == 0) return;
             if (e.Item is not ListViewItem row) return;
 
             _draggingRow = true;
@@ -61,9 +61,16 @@ namespace 播放器.Ui
             var after = _list.InsertionMark.AppearsAfterItem;
             _list.InsertionMark.Index = -1;
 
-            if (insertAt < 0 || _list.SelectedIndices.Count != 1) return;
+            if (insertAt < 0 || _list.SelectedItems.Count == 0) return;
 
-            MoveSelectedTo(TargetIndex(_list.SelectedIndices[0], insertAt, after));
+            if (_list.SelectedItems.Count == 1)
+            {
+                // 单选仍走 1.3.0 的"最终下标"那条路，行为不变。
+                MoveSelectedTo(TargetIndex(_list.SelectedIndices[0], insertAt, after));
+                return;
+            }
+
+            MoveSelectedBlockTo(insertAt, after, interactive: true);
         }
 
         /// <summary>
@@ -113,6 +120,61 @@ namespace 播放器.Ui
 
             _note = $"已把「{selected.Name}」挪到第 {targetIndex + 1} 位"
                     + $"（顺序记在 {PlaylistLibrary.OrderFileName} 里，删掉它就回到按名字排）。";
+
+            UpdateDetail();
+            return true;
+        }
+
+        /// <summary>
+        /// 把选中的 1 份或几份歌单当成一个块，插到窗口里第 <paramref name="insertAt"/> 行之前
+        /// （<paramref name="after"/> 为真时插到它后面）。1.33.0 的多选拖动走这里。
+        /// <para>
+        /// 落点用"移动前"的坐标交给 <see cref="PlaylistLibrary.MoveMany"/>；块内顺序、no-op
+        /// 判定都在 Core 里。成功后重新载入列表并选中移动后的块，顺序文件已经落盘。
+        /// </para>
+        /// </summary>
+        internal bool MoveSelectedBlockTo(int insertAt, bool after, bool interactive)
+        {
+            if (insertAt < 0 || insertAt > _list.Items.Count) return false;
+
+            var selected = SelectedPlaylists();
+            if (selected.Count == 0) return false;
+
+            var names = selected.Select(playlist => playlist.Name).ToList();
+            var insertBefore = after ? insertAt + 1 : insertAt;
+
+            if (!PlaylistLibrary.MoveMany(names, insertBefore, out var moved, out var error))
+            {
+                if (interactive)
+                    MessageBox.Show(this, error, "调整歌单顺序失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                _note = error;
+                UpdateDetail();
+                return false;
+            }
+
+            if (moved.Count == 0)
+            {
+                _note = "选中的歌单已经在这个位置（没有移动）。";
+                UpdateDetail();
+                return true;
+            }
+
+            var all = PlaylistLibrary.List();
+            var movedNames = moved
+                .Where(index => index >= 0 && index < all.Count)
+                .Select(index => all[index].Name)
+                .ToList();
+
+            _result.Changed = true;
+            Reload();
+            SelectPlaylistRows(movedNames);
+
+            _note = movedNames.Count == 1
+                ? $"已把「{movedNames[0]}」挪到第 {moved[0] + 1} 位"
+                  + $"（顺序记在 {PlaylistLibrary.OrderFileName} 里，删掉它就回到按名字排）。"
+                : $"已把 {movedNames.Count} 份歌单挪到第 {moved[0] + 1}～{moved[^1] + 1} 位"
+                  + $"（顺序记在 {PlaylistLibrary.OrderFileName} 里，删掉它就回到按名字排）。";
 
             UpdateDetail();
             return true;

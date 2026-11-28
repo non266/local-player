@@ -57,6 +57,39 @@ namespace SmokeTest
                 if (!string.IsNullOrEmpty(AppSettings.LoadFrom(target).LoadWarning))
                     problems.Add("正常设置被误判为损坏");
 
+                // ---- 2b. 批量添加也要发 ContentChanged（1.33.0） ----
+                var batchPlaylist = new Playlist();
+                batchPlaylist.AddRange(new[] { @"C:\媒体\batch-a.mp3" });
+
+                var batchContentNotifications = 0;
+                var batchChangedNotifications = 0;
+
+                batchPlaylist.ContentChanged += (s, e) => batchContentNotifications++;
+                batchPlaylist.Changed += (s, e) => batchChangedNotifications++;
+
+                batchPlaylist.AddRange(new[]
+                {
+                    @"C:\媒体\batch-b.mp3",
+                    @"C:\媒体\batch-c.mp3"
+                });
+
+                if (batchContentNotifications != 1 || batchChangedNotifications != 1)
+                {
+                    problems.Add($"AddRange 触发了 {batchContentNotifications} 次 ContentChanged / "
+                                 + $"{batchChangedNotifications} 次 Changed（应各 1 次）");
+                }
+
+                // 空输入 / 全部重复都不该再发事件。
+                batchPlaylist.AddRange(Array.Empty<string>());
+                batchPlaylist.AddRangeDistinct(new[] { @"C:\媒体\batch-a.mp3" });
+
+                if (batchContentNotifications != 1 || batchChangedNotifications != 1)
+                {
+                    problems.Add("空的 / 全部重复的 AddRange 不该触发事件（现在 "
+                                 + $"{batchContentNotifications} 次 ContentChanged / "
+                                 + $"{batchChangedNotifications} 次 Changed）");
+                }
+
                 // ---- 3. 批量删除只触发一次 Changed ----
                 var playlist = new Playlist();
                 playlist.AddRange(Enumerable.Range(0, 10).Select(i => $@"C:\媒体\track-{i:00}.mp3"));

@@ -490,5 +490,237 @@ namespace SmokeTest
                 PlaylistLibrary.Invalidate();
             }
         }
+
+        /// <summary>
+        /// 1.33.0：歌单窗口多选整批拖动。顺序文件、`List()`、窗口显示三者必须一致，
+        /// 块内相对顺序不变，块内落点 / 全选不动，歌单内容一条不碰，名字失效时整批失败。
+        /// </summary>
+        private static bool CheckPlaylistBatchOrder(List<string> media)
+        {
+            var names = new[] { "批量A", "批量B", "批量C", "批量D" };
+
+            TryDelete(PlaylistLibrary.OrderFilePath);
+
+            try
+            {
+                foreach (var name in names)
+                {
+                    PlaylistLibrary.Delete(name, out _);
+                    PlaylistLibrary.Save(name, media.Take(2).Select(path => new PlaylistItem(path)).ToList());
+                }
+
+                PlaylistLibrary.Invalidate();
+
+                // ---- 名字已经不在库里：整批失败，一个名字都不动 ----
+                var beforeMissing = PlaylistLibrary.List().Select(playlist => playlist.Name).ToList();
+
+                if (PlaylistLibrary.MoveMany(new[] { "不存在的歌单" }, 0, out _, out var missingError)
+                    || string.IsNullOrEmpty(missingError)
+                    || !PlaylistLibrary.List().Select(playlist => playlist.Name).SequenceEqual(beforeMissing))
+                {
+                    Log(17, "歌单整批拖动：名字不在库里时没有整批失败（错误「"
+                            + missingError + "」）");
+                    return false;
+                }
+
+                var dialog = OpenLibraryDialog();
+
+                try
+                {
+                    var list = dialog.Controls.OfType<ListView>().First();
+
+                    var before = PlaylistLibrary.List().Select(playlist => playlist.Name).ToList();
+                    var positions = names.Select(name => before.IndexOf(name)).ToList();
+
+                    if (positions.Any(index => index < 0) ||
+                        positions[0] >= positions[1] || positions[1] >= positions[2] || positions[2] >= positions[3])
+                    {
+                        Log(17, "歌单整批拖动：刚建好的四份歌单没有按名字自然排（"
+                                + string.Join(" / ", positions) + "）");
+                        return false;
+                    }
+
+                    // ---- 非连续选 [A,C] 拖到末尾：块内顺序 A,C 不变，B/D 留在原处 ----
+                    SelectPlaylistRows(list, "批量A", "批量C");
+
+                    if (!dialog.MoveSelectedBlockTo(list.Items.Count, after: false, interactive: false))
+                    {
+                        Log(17, "歌单整批拖动：把 [批量A, 批量C] 拖到末尾失败");
+                        return false;
+                    }
+
+                    PumpMessages(150);
+
+                    var expected = before
+                        .Where(name => name != "批量A" && name != "批量C")
+                        .Concat(new[] { "批量A", "批量C" })
+                        .ToList();
+
+                    if (!CheckBatchOrderState(list, expected, "拖到末尾"))
+                        return false;
+
+                    var selected = SelectedPlaylistNames(list);
+
+                    if (!selected.SequenceEqual(new[] { "批量A", "批量C" }))
+                    {
+                        Log(17, "歌单整批拖动：移动后没有重新选中块（现在 ["
+                                + string.Join(",", selected) + "]）");
+                        return false;
+                    }
+
+                    // ---- 再选 [D,C] 拖到最前：块内顺序 D,C 不变 ----
+                    SelectPlaylistRows(list, "批量D", "批量C");
+
+                    if (!dialog.MoveSelectedBlockTo(0, after: false, interactive: false))
+                    {
+                        Log(17, "歌单整批拖动：把 [批量D, 批量C] 拖到最前失败");
+                        return false;
+                    }
+
+                    PumpMessages(150);
+
+                    expected = new[] { "批量D", "批量C" }
+                        .Concat(expected.Where(name => name != "批量D" && name != "批量C"))
+                        .ToList();
+
+                    if (!CheckBatchOrderState(list, expected, "拖到最前"))
+                        return false;
+
+                    // ---- 全选拖到末尾：no-op，顺序文件与顺序都不动 ----
+                    var orderBeforeNoop = PlaylistLibrary.List().Select(playlist => playlist.Name).ToList();
+                    var orderFileBeforeNoop = ReadOrderFile();
+
+                    SelectPlaylistRows(list, orderBeforeNoop.ToArray());
+
+                    if (!dialog.MoveSelectedBlockTo(list.Items.Count, after: false, interactive: false))
+                    {
+                        Log(17, "歌单整批拖动：全选拖到末尾被判成失败");
+                        return false;
+                    }
+
+                    PumpMessages(120);
+
+                    if (!PlaylistLibrary.List().Select(playlist => playlist.Name).SequenceEqual(orderBeforeNoop) ||
+                        !ReadOrderFile().SequenceEqual(orderFileBeforeNoop))
+                    {
+                        Log(17, "歌单整批拖动：全选拖到末尾竟然改了顺序");
+                        return false;
+                    }
+
+                    // ---- 拖到选中块范围内：no-op ----
+                    var bIndex = orderBeforeNoop.IndexOf("批量B");
+                    var aIndex = orderBeforeNoop.IndexOf("批量A");
+
+                    SelectPlaylistRows(list, "批量B", "批量A");
+                    PumpMessages(120);
+
+                    if (!dialog.MoveSelectedBlockTo(aIndex, after: false, interactive: false))
+                    {
+                        Log(17, "歌单整批拖动：拖到选中块范围内被判成失败");
+                        return false;
+                    }
+
+                    PumpMessages(120);
+
+                    if (!PlaylistLibrary.List().Select(playlist => playlist.Name).SequenceEqual(orderBeforeNoop) ||
+                        !ReadOrderFile().SequenceEqual(orderFileBeforeNoop))
+                    {
+                        Log(17, "歌单整批拖动：拖到选中块范围内竟然改了顺序（B="
+                                + bIndex + "、A=" + aIndex + "）");
+                        return false;
+                    }
+
+                    // ---- 换位只换顺序：每份歌单仍是原来的两条 ----
+                    foreach (var name in names)
+                    {
+                        var path = PlaylistLibrary.ResolvePath(name);
+
+                        if (path == null)
+                        {
+                            Log(17, $"歌单整批拖动：换位之后「{name}」不见了");
+                            return false;
+                        }
+
+                        var entries = PlaylistFile.ReadPaths(path);
+
+                        if (entries.Count != 2 || !entries.SequenceEqual(media.Take(2)))
+                        {
+                            Log(17, $"歌单整批拖动：换位把「{name}」里的条目弄动了（现在 {entries.Count} 条）");
+                            return false;
+                        }
+                    }
+                }
+                finally
+                {
+                    CloseLibraryDialog(dialog);
+                }
+
+                Log(17, "歌单整批拖动正常：非连续选中按块移动、块内顺序不变、块内落点 / 全选 no-op、"
+                        + "顺序文件与 List() / 窗口显示一致、歌单内容一条没动、名字失效时整批失败");
+                return true;
+            }
+            finally
+            {
+                foreach (var name in names) PlaylistLibrary.Delete(name, out _);
+
+                TryDelete(PlaylistLibrary.OrderFilePath);
+                PlaylistLibrary.Invalidate();
+            }
+        }
+
+        /// <summary>按名字选中几行（找不到就当没选中，后面会以具体断言红）。</summary>
+        private static void SelectPlaylistRows(ListView list, params string[] names)
+        {
+            list.SelectedItems.Clear();
+
+            foreach (var name in names)
+            {
+                var row = FindRow(list, name);
+                if (row != null) row.Selected = true;
+            }
+
+            PumpMessages(120);
+        }
+
+        private static List<string> SelectedPlaylistNames(ListView list) =>
+            list.SelectedItems.Cast<ListViewItem>()
+                .Select(row => (row.Tag as SavedPlaylist)?.Name)
+                .Where(name => name != null)
+                .Select(name => name!)
+                .ToList();
+
+        /// <summary>一次核对三处真相：List() / 顺序文件 / 窗口显示。</summary>
+        private static bool CheckBatchOrderState(ListView list, List<string> expected, string action)
+        {
+            var actual = PlaylistLibrary.List().Select(playlist => playlist.Name).ToList();
+            var onDisk = ReadOrderFile();
+            var shown = list.Items.Cast<ListViewItem>()
+                .Select(row => row.SubItems[0].Text.Replace("● ", string.Empty))
+                .ToList();
+
+            if (!actual.SequenceEqual(expected))
+            {
+                Log(17, $"歌单整批拖动：{action}之后 List() 的顺序不对（期望 "
+                        + string.Join(" / ", expected.Take(8)) + "，实际 "
+                        + string.Join(" / ", actual.Take(8)) + "）");
+                return false;
+            }
+
+            if (!onDisk.SequenceEqual(expected))
+            {
+                Log(17, $"歌单整批拖动：{action}之后顺序文件没写对（文件里是 "
+                        + string.Join(" / ", onDisk.Take(8)) + "）");
+                return false;
+            }
+
+            if (!shown.SequenceEqual(expected))
+            {
+                Log(17, $"歌单整批拖动：{action}之后窗口显示与库里的顺序不一致（"
+                        + string.Join(" / ", shown.Take(8)) + "）");
+                return false;
+            }
+
+            return true;
+        }
     }
 }

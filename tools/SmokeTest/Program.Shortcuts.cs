@@ -181,7 +181,7 @@ namespace SmokeTest
                 return false;
             }
 
-            // 1.32.0：Ctrl+Z 归播放列表里的「撤销移除」，不能再让命令占用。
+            // 1.32.0 / 1.33.0：Ctrl+Z 归播放列表里的「撤销移除 / 清空」，不能再让命令占用。
             var undoReserved = new Dictionary<PlayerCommandId, Keys[]>
             {
                 [PlayerCommandId.Stop] = new[] { Keys.Control | Keys.Z }

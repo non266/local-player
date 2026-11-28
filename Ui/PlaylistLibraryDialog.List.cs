@@ -92,6 +92,32 @@ namespace 播放器.Ui
             _result.CurrentName != null &&
             string.Equals(name, _result.CurrentName, StringComparison.CurrentCultureIgnoreCase);
 
+        /// <summary>
+        /// 按一组名字重新选中（1.33.0 的整批拖动之后要选中移动后的块）。
+        /// <para>窗口刷新后行对象会重建，所以按名字找，不缓存 ListViewItem。</para>
+        /// </summary>
+        private void SelectPlaylistRows(IReadOnlyList<string> names)
+        {
+            if (names.Count == 0) return;
+
+            var wanted = new HashSet<string>(names, StringComparer.CurrentCultureIgnoreCase);
+            ListViewItem? last = null;
+
+            _list.SelectedItems.Clear();
+
+            foreach (ListViewItem row in _list.Items)
+            {
+                if (row.Tag is not SavedPlaylist playlist) continue;
+                if (!wanted.Contains(playlist.Name)) continue;
+
+                row.Selected = true;
+                last = row;
+            }
+
+            last?.EnsureVisible();
+            OnSelectionChanged();
+        }
+
         private void OnSelectionChanged()
         {
             _note = null;

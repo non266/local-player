@@ -18,8 +18,9 @@ namespace 播放器.Core
     }
 
     /// <summary>
-    /// 有序的播放列表模型。所有变更都会触发 <see cref="Changed"/>，
-    /// 界面据此整体刷新（列表规模在本地播放场景下完全够用）。
+    /// 有序的播放列表模型。内容变更（增删改、换位、排序、清空）会先触发
+    /// <see cref="ContentChanged"/>、再触发 <see cref="Changed"/>；只切换当前项时只触发
+    /// <see cref="Changed"/>。界面据此整体刷新（列表规模在本地播放场景下完全够用）。
     /// </summary>
     public sealed class Playlist
     {
@@ -75,7 +76,13 @@ namespace 播放器.Core
         }
 
         /// <summary>
-        /// 批量添加，返回新增条目的索引列表。整批只触发一次 <see cref="Changed"/>。
+        /// 批量添加，返回新增条目的索引列表。整批只触发一次
+        /// <see cref="ContentChanged"/>（随后触发一次 <see cref="Changed"/>）。
+        /// <para>
+        /// 1.33.0 起和 <see cref="Add"/> 保持同一套事件契约：批量加入也要让
+        /// 「当前歌单有没有改动」与撤销快照失效逻辑看得到。以前这里只发
+        /// <see cref="Changed"/>，拖入多个文件 / m3u 追加不会把歌单标成「未保存」。
+        /// </para>
         /// </summary>
         public IReadOnlyList<int> AddRange(IEnumerable<string> filePaths)
         {
@@ -88,7 +95,7 @@ namespace 播放器.Core
                 RememberFirst(path, _items.Count - 1);
             }
 
-            if (added.Count > 0) OnChanged();
+            if (added.Count > 0) OnContentChanged();
             return added;
         }
 
@@ -287,7 +294,7 @@ namespace 播放器.Core
         }
 
         /// <summary>
-        /// 把一批条目按<b>最终位置</b>还原回列表（1.32.0 的"撤销移除"用）。
+        /// 把一批条目按<b>最终位置</b>还原回列表（1.32.0 的"撤销移除"与 1.33.0 的"撤销清空"用）。
         /// <para>
         /// <paramref name="indexes"/> 是这些条目在还原之后的索引。实现是"先按索引把还原项填进
         /// 一个定长数组，再按顺序把原来的项填进剩下的空位"，所以是一次 O(n)，不会在 50,000 条时

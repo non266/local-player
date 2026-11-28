@@ -63,20 +63,30 @@ namespace 播放器
         private bool _playlistSummaryDirty;
 
         /// <summary>
-        /// 最近一次"从列表移除"的快照（1.32.0）。只留一级：列表内容再变一次就作废。
+        /// 最近一次「移除 / 清空」的快照（1.32.0 只有移除，1.33.0 扩到清空）。
+        /// 只留一级：列表内容再变一次就作废。
         /// </summary>
-        private PlaylistRemovalUndo? _lastPlaylistRemoval;
+        private PlaylistUndoSnapshot? _lastPlaylistUndo;
 
-        /// <summary>移除 / 撤销自己触发的 <see cref="Playlist.ContentChanged"/> 不能把刚存下的快照清掉。</summary>
+        /// <summary>移除 / 清空 / 撤销自己触发的 <see cref="Playlist.ContentChanged"/> 不能把刚存下的快照清掉。</summary>
         private bool _suppressUndoInvalidation;
 
-        /// <summary>右键菜单里的「撤销移除」，运行时插进去（与「找出重复项」同一做法）。</summary>
+        /// <summary>右键菜单里的「撤销」，运行时插进去（与「找出重复项」同一做法）。</summary>
         private ToolStripMenuItem? _cmsUndo;
 
-        private sealed record PlaylistRemovalUndo(
+        private enum PlaylistUndoKind
+        {
+            /// <summary>从列表移除若干项。</summary>
+            Removal,
+
+            /// <summary>清空整个列表。</summary>
+            Clear
+        }
+
+        private sealed record PlaylistUndoSnapshot(
+            PlaylistUndoKind Kind,
             IReadOnlyList<PlaylistItem> Items,
-            IReadOnlyList<int> Indexes,
-            int ExpectedCount);
+            IReadOnlyList<int> Indexes);
 
         /// <summary>
         /// 整建了几次（1.18.0，冒烟测试用）。
@@ -965,17 +975,17 @@ namespace 播放器
             }
 
             // 快照必须在改模型之前取：条目对象要原样放回去，索引也要记"原来在哪"。
-            var snapshot = new PlaylistRemovalUndo(
+            var snapshot = new PlaylistUndoSnapshot(
+                PlaylistUndoKind.Removal,
                 selected.Select(index => _playlist.Items[index]).ToList(),
-                selected.ToList(),
-                _playlist.Count - selected.Count);
+                selected.ToList());
 
             // 先清选中再改模型：RemoveMany 会触发整体重建，而重建会按"旧索引"还原选中项；
             // 不清的话，删掉第 2、4 项之后会选中原本第 3、5 项——看起来像随机跳选。
             listViewPlaylist.SelectedIndices.Clear();
 
             // 这次 ContentChanged 是我们自己发的，不能把刚存下的快照清掉。
-            _lastPlaylistRemoval = null;
+            _lastPlaylistUndo = null;
             _suppressUndoInvalidation = true;
             try
             {
@@ -986,7 +996,7 @@ namespace 播放器
                 _suppressUndoInvalidation = false;
             }
 
-            _lastPlaylistRemoval = snapshot;
+            _lastPlaylistUndo = snapshot;
             SetStatus($"已从播放列表移除 {selected.Count} 项");
         }
 
@@ -1075,15 +1085,23 @@ namespace 播放器
             lastRow?.EnsureVisible();
         }
 
-        /// <summary>把最近一次移除的条目放回原位置（只保留一级，不恢复播放）。</summary>
-        private void UndoLastPlaylistRemoval()
+        /// <summary>
+        /// 把最近一次移除 / 清空的条目放回原位置（只保留一级，不恢复播放）。
+        /// <para>
+        /// 移除与清空共用同一个槽位；区别只在恢复后的选择：移除恢复选中的那几项，
+        /// 清空不选中任何行——用户清空时并没有在做"选中"这个动作。
+        /// </para>
+        /// </summary>
+        private void UndoLastPlaylistEdit()
         {
-            var snapshot = _lastPlaylistRemoval;
+            var snapshot = _lastPlaylistUndo;
             if (snapshot == null || snapshot.Items.Count == 0)
             {
                 SetStatus("没有可撤销的移除");
                 return;
             }
+
+            var wasClear = snapshot.Kind == PlaylistUndoKind.Clear;
 
             listViewPlaylist.SelectedIndices.Clear();
 
@@ -1099,50 +1117,80 @@ namespace 播放器
                 _suppressUndoInvalidation = false;
             }
 
-            _lastPlaylistRemoval = null;
+            _lastPlaylistUndo = null;
+
+            if (wasClear)
+            {
+                // 清空撤销不恢复选中；滚动回到第一项，让用户看见恢复出来的整张表。
+                listViewPlaylist.SelectedIndices.Clear();
+                if (listViewPlaylist.Items.Count > 0)
+                    listViewPlaylist.TopItem = listViewPlaylist.Items[0];
+
+                SetStatus($"已撤销清空：恢复 {restored.Count} 项（不恢复播放）");
+                return;
+            }
+
             SelectPlaylistIndices(restored);
             SetStatus($"已撤销移除：恢复 {restored.Count} 项（不恢复播放）");
         }
 
-        /// <summary>列表内容变了（不是我们自己的移除 / 撤销）→ 上一次移除不能再撤销。</summary>
+        /// <summary>列表内容变了（不是我们自己的移除 / 清空 / 撤销）→ 上一次撤销作废。</summary>
         private void OnPlaylistContentChangedForUndo(object? sender, EventArgs e)
         {
             if (_suppressUndoInvalidation) return;
-            _lastPlaylistRemoval = null;
+            _lastPlaylistUndo = null;
         }
+
+        private void ClearPlaylist() => ClearPlaylist(confirm: true);
 
         /// <summary>
-        /// `AddRange` 只发 <see cref="Playlist.Changed"/>、不发 `ContentChanged`（批量添加的既有行为），
-        /// 所以这里再按"条数有没有变"补一道：加了文件，上一次移除就不能再撤销。
+        /// 清空列表，并把"清空前"的整份内容存进同一级撤销槽位。
+        /// <para>
+        /// 确认框保留：撤销是确认误点之后的第二道安全网，不是取消确认。
+        /// 清空后不恢复播放、不恢复选中；测试用 <paramref name="confirm"/> = false 跳过模态框。
+        /// </para>
         /// </summary>
-        private void OnPlaylistChangedForUndo(object? sender, EventArgs e)
-        {
-            if (_suppressUndoInvalidation) return;
-            if (_lastPlaylistRemoval == null) return;
-            if (_playlist.Count != _lastPlaylistRemoval.ExpectedCount) _lastPlaylistRemoval = null;
-        }
-
-        private void ClearPlaylist()
+        private void ClearPlaylist(bool confirm)
         {
             if (_playlist.Count == 0) return;
 
-            var answer = MessageBox.Show(
-                this,
-                "确定要清空播放列表吗？当前正在播放的媒体也会停止。",
-                "清空播放列表",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
+            if (confirm)
+            {
+                var answer = MessageBox.Show(
+                    this,
+                    "确定要清空播放列表吗？当前正在播放的媒体也会停止。",
+                    "清空播放列表",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
 
-            if (answer != DialogResult.Yes) return;
+                if (answer != DialogResult.Yes) return;
+            }
+
+            var snapshot = new PlaylistUndoSnapshot(
+                PlaylistUndoKind.Clear,
+                _playlist.Items.ToList(),
+                Enumerable.Range(0, _playlist.Count).ToList());
 
             _engine.Stop();
             _scanner.ClearPending();
-            _playlist.Clear();
+
+            _lastPlaylistUndo = null;
+            _suppressUndoInvalidation = true;
+            try
+            {
+                _playlist.Clear();
+            }
+            finally
+            {
+                _suppressUndoInvalidation = false;
+            }
+
+            _lastPlaylistUndo = snapshot;
             ClearPlaylistFilter();
 
             UpdateWindowTitle();
             UpdateTransportState();
-            SetStatus("播放列表已清空");
+            SetStatus($"播放列表已清空（Ctrl+Z 可撤销，恢复 {snapshot.Items.Count} 项）");
         }
 
         private void OnPlaylistDoubleClick(object? sender, EventArgs e)
@@ -1166,7 +1214,7 @@ namespace 播放器
             }
             else if (e.Control && !e.Shift && e.KeyCode == Keys.Z)
             {
-                UndoLastPlaylistRemoval();
+                UndoLastPlaylistEdit();
                 e.Handled = true;
                 e.SuppressKeyPress = true;
             }
@@ -1302,10 +1350,14 @@ namespace 播放器
 
             if (_cmsUndo != null)
             {
-                _cmsUndo.Enabled = _lastPlaylistRemoval != null;
-                _cmsUndo.Text = _lastPlaylistRemoval == null
-                    ? "撤销移除(&Z)"
-                    : $"撤销移除 {_lastPlaylistRemoval.Items.Count} 项(&Z)";
+                var snapshot = _lastPlaylistUndo;
+
+                _cmsUndo.Enabled = snapshot != null;
+                _cmsUndo.Text = snapshot == null
+                    ? "撤销(&Z)"
+                    : snapshot.Kind == PlaylistUndoKind.Clear
+                        ? $"撤销清空（恢复 {snapshot.Items.Count} 项）(&Z)"
+                        : $"撤销移除 {snapshot.Items.Count} 项(&Z)";
             }
         }
 
@@ -1315,7 +1367,9 @@ namespace 播放器
 
         internal void UpdatePlaylistSelectionMenuForTest() => UpdatePlaylistSelectionMenu();
 
-        internal bool CanUndoPlaylistRemovalForTest => _lastPlaylistRemoval != null;
+        internal bool CanUndoPlaylistEditForTest => _lastPlaylistUndo != null;
+
+        internal void ClearPlaylistForTest() => ClearPlaylist(confirm: false);
 
         internal void MovePlaylistSelectionForTest(int delta) => MoveSelected(delta);
 
@@ -1363,21 +1417,21 @@ namespace 播放器
         }
 
         /// <summary>
-        /// 在右键菜单里加「撤销移除」（1.32.0）。与「找出重复项」同一做法：运行时插在
-        /// 「从列表移除」后面，不改 Designer 生成的代码。
+        /// 在右键菜单里加「撤销」（1.32.0）。与「找出重复项」同一做法：运行时插在
+        /// 「从列表移除」后面，不改 Designer 生成的代码。1.33.0 起同一个入口也负责撤销清空。
         /// </summary>
         private void ConfigurePlaylistUndoMenu()
         {
             if (_cmsUndo != null) return;
 
-            _cmsUndo = new ToolStripMenuItem("撤销移除(&Z)")
+            _cmsUndo = new ToolStripMenuItem("撤销(&Z)")
             {
                 Name = "cmsUndo",
                 ShortcutKeyDisplayString = "Ctrl+Z",
-                ToolTipText = "把最近一次从列表移除的条目放回原位置（只保留一次，不恢复播放）"
+                ToolTipText = "把最近一次移除或清空的条目放回原位置（只保留一次，不恢复播放）"
             };
 
-            _cmsUndo.Click += (s, e) => UndoLastPlaylistRemoval();
+            _cmsUndo.Click += (s, e) => UndoLastPlaylistEdit();
 
             var index = contextMenuPlaylist.Items.IndexOf(cmsRemove);
 

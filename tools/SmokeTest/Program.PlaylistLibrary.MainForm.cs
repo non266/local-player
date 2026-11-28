@@ -427,6 +427,32 @@ namespace SmokeTest
                 return false;
             }
 
+            // ---- 批量加入也要标「未保存」（1.33.0：AddRange 现在也发 ContentChanged）----
+            var batchA = Path.Combine(AppContext.BaseDirectory, "smoke-playlists", "batch-a.mp3");
+            var batchB = Path.Combine(AppContext.BaseDirectory, "smoke-playlists", "batch-b.mp3");
+            File.WriteAllBytes(batchA, new byte[] { 0x49, 0x44, 0x33, 7 });
+            File.WriteAllBytes(batchB, new byte[] { 0x49, 0x44, 0x33, 8 });
+
+            form.AddPathsForTest(new[] { batchA, batchB });
+            PumpMessages(400);
+
+            if (!PlaylistsOf(form).Modified ||
+                !header.Text.Contains("未保存", StringComparison.Ordinal))
+            {
+                Log(17, "歌单库检查：批量添加之后没有标「未保存」（「" + header.Text + "」）");
+                return false;
+            }
+
+            form.OverwriteCurrentPlaylist();
+            PumpMessages(150);
+
+            if (PlaylistsOf(form).Modified ||
+                header.Text.Contains("未保存", StringComparison.Ordinal))
+            {
+                Log(17, "歌单库检查：批量添加后覆盖保存，仍然挂着「未保存」");
+                return false;
+            }
+
             // ---- 关掉再开：当前歌单要跟着设置回来 ----
             // 这一条现在归「启动时恢复上次播放列表」管：那个开关默认是关的（打开就是空列表、
             // 也不挂歌单名），所以要显式打开它才验得到。验完还原，免得影响后面的步骤。
@@ -449,6 +475,14 @@ namespace SmokeTest
                     return false;
                 }
 
+                if (PlaylistsOf(reopened).Modified ||
+                    reopenedHeader.Text.Contains("未保存", StringComparison.Ordinal))
+                {
+                    Log(17, "歌单库检查：重新启动恢复会话之后被误标成「未保存」（「"
+                            + reopenedHeader.Text + "」）");
+                    return false;
+                }
+
                 reopened.Close();
                 PumpMessages(150);
             }
@@ -458,9 +492,9 @@ namespace SmokeTest
             afterRestart.Save();
 
             Log(17, "歌单库与主窗体联动正常：保存后标题带上歌单名、切歌不算改动、"
-                    + "加/删项才标「未保存」、覆盖保存写回磁盘、点菜单项会替换当前列表、"
+                    + "单条 / 批量加项都标「未保存」、覆盖保存写回磁盘、点菜单项会替换当前列表、"
                     + "新建空歌单会清空当前列表并切过去（新歌单能写进去），"
-                    + "重启后当前歌单还在（开着「启动时恢复上次播放列表」时）；"
+                    + "重启后当前歌单还在且仍是干净的（开着「启动时恢复上次播放列表」时）；"
                     + "「文件 → 播放列表」把歌单库和 m3u 收在一处（文件菜单下不再单挂那两项、"
                     + "追加与替换分列两项、快捷键提示与实际接的键一致、列表空时保存两项点不动），"
                     + "m3u 的另存为 / 追加 / 替换各按自己的语义生效");

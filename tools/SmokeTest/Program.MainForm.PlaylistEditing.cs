@@ -27,9 +27,11 @@ namespace SmokeTest
             {
                 if (!CheckBatchMovement(paths)) return false;
                 if (!CheckUndoRemoval(paths, extra)) return false;
+                if (!CheckUndoClear(paths, extra)) return false;
                 if (!CheckPlaylistModel()) return false;
 
-                Log(40, "播放列表整批移动与撤销正常：块移动 / 菜单数量 / 拖动 / 边界 / 撤销一级 / 内容变化失效");
+                Log(40, "播放列表整批移动与撤销正常：块移动 / 菜单数量 / 拖动 / 边界 / 撤销一级 / "
+                        + "清空撤销 / 内容变化失效");
                 return true;
             }
             catch (Exception ex)
@@ -283,7 +285,7 @@ namespace SmokeTest
                 return false;
             }
 
-            if (form.CanUndoPlaylistRemovalForTest)
+            if (form.CanUndoPlaylistEditForTest)
             {
                 Log(40, "播放列表撤销移除：撤销完之后快照还在（会让人以为还能再撤一次）");
                 return false;
@@ -301,7 +303,7 @@ namespace SmokeTest
             remove.PerformClick();
             PumpMessages(300);
 
-            if (!form.CanUndoPlaylistRemovalForTest)
+            if (!form.CanUndoPlaylistEditForTest)
             {
                 Log(40, "播放列表撤销移除：第二次移除之后反而没有快照了");
                 return false;
@@ -310,7 +312,7 @@ namespace SmokeTest
             form.ClickPlaylistColumn(1);
             PumpMessages(300);
 
-            if (form.CanUndoPlaylistRemovalForTest)
+            if (form.CanUndoPlaylistEditForTest)
             {
                 Log(40, "播放列表撤销移除：排序之后旧的撤销快照还在（内容顺序已经变了）");
                 return false;
@@ -322,7 +324,7 @@ namespace SmokeTest
             remove.PerformClick();
             PumpMessages(300);
 
-            if (!form.CanUndoPlaylistRemovalForTest)
+            if (!form.CanUndoPlaylistEditForTest)
             {
                 Log(40, "播放列表撤销移除：第三次移除之后反而没有快照了");
                 return false;
@@ -331,7 +333,7 @@ namespace SmokeTest
             form.AddPathsForTest(new[] { extra });
             PumpMessages(400);
 
-            if (form.CanUndoPlaylistRemovalForTest)
+            if (form.CanUndoPlaylistEditForTest)
             {
                 Log(40, "播放列表撤销移除：添加新文件之后旧的撤销快照还在（内容已经变了）");
                 return false;
@@ -345,6 +347,118 @@ namespace SmokeTest
                 || !form.StatusText.Contains("没有可撤销的移除", StringComparison.Ordinal))
             {
                 Log(40, "播放列表撤销移除：没有快照时 Ctrl+Z 改了列表或没说明（现在 "
+                        + list.Items.Count + " 项，状态「" + form.StatusText + "」）");
+                return false;
+            }
+
+            form.Close();
+            PumpMessages(200);
+            return true;
+        }
+
+        /// <summary>清空撤销：原顺序、不选中、当前项 -1、一级；清空后加文件让快照失效。</summary>
+        private static bool CheckUndoClear(string[] paths, string extra)
+        {
+            using var form = new 播放器.MainForm(paths);
+            form.Show();
+            PumpMessages(500);
+
+            var list = Find(form, "listViewPlaylist") as ListView;
+
+            if (list == null)
+            {
+                Log(40, "播放列表撤销清空：找不到 listViewPlaylist");
+                return false;
+            }
+
+            var menu = list.ContextMenuStrip;
+            var undo = MenuItem(menu, "cmsUndo");
+
+            if (undo == null)
+            {
+                Log(40, "播放列表撤销清空：右键菜单里缺 cmsUndo");
+                return false;
+            }
+
+            form.ClearPlaylistForTest();
+            PumpMessages(300);
+
+            if (PlaylistOf(form).Count != 0 || list.Items.Count != 0)
+            {
+                Log(40, "播放列表撤销清空：清空之后列表不是空的（模型 "
+                        + PlaylistOf(form).Count + " 项 / 界面 " + list.Items.Count + " 行）");
+                return false;
+            }
+
+            form.UpdatePlaylistSelectionMenuForTest();
+
+            if (!undo.Enabled || !undo.Text.Contains("撤销清空", StringComparison.Ordinal)
+                || !undo.Text.Contains("6 项", StringComparison.Ordinal))
+            {
+                Log(40, "播放列表撤销清空：清空之后菜单没有可撤销的 6 项（现在「"
+                        + undo.Text + "」，可点=" + undo.Enabled + "）");
+                return false;
+            }
+
+            form.HandlePlaylistKeyForTest(Keys.Z, control: true);
+            PumpMessages(400);
+
+            if (!PlaylistOf(form).GetPaths().SequenceEqual(paths))
+            {
+                Log(40, "播放列表撤销清空：Ctrl+Z 之后顺序不是原来的（现在 ["
+                        + string.Join(",", PlaylistOf(form).GetPaths().Select(Path.GetFileName)) + "]）");
+                return false;
+            }
+
+            if (form.SelectedPlaylistIndicesForTest.Count != 0)
+            {
+                Log(40, "播放列表撤销清空：撤销之后不该选中任何行（现在 ["
+                        + string.Join(",", form.SelectedPlaylistIndicesForTest) + "]）");
+                return false;
+            }
+
+            if (PlaylistOf(form).CurrentIndex != -1)
+            {
+                Log(40, "播放列表撤销清空：撤销之后当前项应为 -1（现在 "
+                        + PlaylistOf(form).CurrentIndex + "）");
+                return false;
+            }
+
+            if (form.CanUndoPlaylistEditForTest)
+            {
+                Log(40, "播放列表撤销清空：撤销完之后快照还在（会让人以为还能再撤一次）");
+                return false;
+            }
+
+            if (!form.StatusText.Contains("已撤销清空", StringComparison.Ordinal))
+            {
+                Log(40, "播放列表撤销清空：状态栏没有说清撤销结果（现在「"
+                        + form.StatusText + "」）");
+                return false;
+            }
+
+            // 清空后加文件：快照必须失效（AddRange 现在也发 ContentChanged）。
+            form.ClearPlaylistForTest();
+            PumpMessages(300);
+
+            form.AddPathsForTest(new[] { extra });
+            PumpMessages(400);
+            form.UpdatePlaylistSelectionMenuForTest();
+
+            if (undo.Enabled)
+            {
+                Log(40, "播放列表撤销清空：清空后加文件，旧的撤销快照还在");
+                return false;
+            }
+
+            var countBefore = list.Items.Count;
+            form.HandlePlaylistKeyForTest(Keys.Z, control: true);
+            PumpMessages(200);
+
+            if (list.Items.Count != countBefore
+                || !form.StatusText.Contains("没有可撤销的移除", StringComparison.Ordinal))
+            {
+                Log(40, "播放列表撤销清空：没有快照时 Ctrl+Z 改了列表或没说明（现在 "
                         + list.Items.Count + " 项，状态「" + form.StatusText + "」）");
                 return false;
             }

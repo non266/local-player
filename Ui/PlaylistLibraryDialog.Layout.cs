@@ -20,8 +20,9 @@ namespace 播放器.Ui
             _hint.Text = "歌单存在数据目录的「播放列表」文件夹里，一个歌单一个 m3u8 文件。"
                          + "双击一行就能载入；按住 Ctrl / Shift 可以多选，多选之后「删除」会一次删掉这几个、"
                          + "「批量重命名…」会按这里的顺序把它们改成「基名 1」「基名 2」…。"
-                         + "拖动一行可以调整歌单顺序（顺序记在同一个文件夹的「" + PlaylistLibrary.OrderFileName
-                         + "」里，删掉它就回到按名字排）。"
+                         + "拖动选中的一行或几行可以调整歌单顺序；多选时按一个块移动，块内相对顺序不变。"
+                         + "顺序记在同一个文件夹的「" + PlaylistLibrary.OrderFileName
+                         + "」里，删掉它就回到按名字排。"
                          + "外面的 m3u / m3u8 也可以直接拖进来收进歌单库。";
             _list.View = View.Details;
             _list.FullRowSelect = true;

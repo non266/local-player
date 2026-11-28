@@ -275,10 +275,10 @@ Assert-Absent "README.md" $readme "第 25 步" "筛跑示例里写的是检查�
 # 1.30.0 把逐帧 / 延迟 / 歌词偏移收进命令目录之后，下面的旧说法必须消失；
 # README 的快捷键表也不能再被提示块从中间截断（否则后 4 行渲染成第二张表）。
 Assert-Absent "docs\参考手册.md" $reference '逐帧 `E` / 延迟' "1.30.0 起逐帧 / 延迟 / 歌词偏移都可以改，这句是旧口径"
-Assert-Contains "docs\参考手册.md" $reference "实测（1.32.0）装出来" "安装体积那一行要写当前版本（1.32.0 实测）"
+Assert-Contains "docs\参考手册.md" $reference "实测（1.33.0）装出来" "安装体积那一行要写当前版本（1.33.0 实测）"
 Assert-Absent "docs\介绍.md" $intro "按名称排序约 4 秒" "1.18.0 实测 50,000 条按名称排序是 1,566 ms，旧数字是 1.15.0 之前的"
 Assert-Contains "docs\介绍.md" $intro "按名称排序约 1.6 秒" "排序数字要跟 1.18.0 的实测一致"
-Assert-Contains "docs\介绍.md" $intro "1.32.0 实测" "程序体积那一行要写当前版本（1.32.0 实测）"
+Assert-Contains "docs\介绍.md" $intro "1.33.0 实测" "程序体积那一行要写当前版本（1.33.0 实测）"
 Assert-Order "README.md" $readme '| `Ctrl+]` / `Ctrl+[` |' "> 1.30.0 起可以改" "快捷键表的所有行必须在提示块之前，否则 Markdown 会断成两张表"
 
 # 1.32.0：播放列表整批移动 / 撤销移除；缩略图早已落盘，不能再写"只在内存缓存"。
